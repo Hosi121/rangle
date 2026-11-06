@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -77,8 +78,8 @@ func TestNewHandlerAcceptsOptionalInitAndUppercaseChecksum(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response := request(handler, http.MethodGet, removed, nil); response.Code != http.StatusNotFound {
-		t.Fatalf("removed init status = %d, want 404", response.Code)
+	if response := request(t, handler, http.MethodGet, removed, nil); response.StatusCode != http.StatusNotFound {
+		t.Fatalf("removed init status = %d, want 404", response.StatusCode)
 	}
 }
 
@@ -100,25 +101,26 @@ func TestGetAndHeadResources(t *testing.T) {
 	for _, test := range tests {
 		for _, method := range []string{http.MethodGet, http.MethodHead} {
 			t.Run(test.name+" "+method, func(t *testing.T) {
-				response := request(handler, method, test.url, nil)
-				if response.Code != http.StatusOK {
-					t.Fatalf("status = %d, want 200", response.Code)
+				response := request(t, handler, method, test.url, nil)
+				if response.StatusCode != http.StatusOK {
+					t.Fatalf("status = %d, want 200", response.StatusCode)
 				}
-				if got := response.Header().Get("Content-Type"); got != test.contentType {
+				if got := response.Header.Get("Content-Type"); got != test.contentType {
 					t.Errorf("Content-Type = %q, want %q", got, test.contentType)
 				}
-				if got := response.Header().Get("Content-Length"); got != strconv.Itoa(len(test.data)) {
+				if got := response.Header.Get("Content-Length"); got != strconv.Itoa(len(test.data)) {
 					t.Errorf("Content-Length = %q, want %d", got, len(test.data))
 				}
-				if got := response.Header().Get("Accept-Ranges"); got != "bytes" {
+				if got := response.Header.Get("Accept-Ranges"); got != "bytes" {
 					t.Errorf("Accept-Ranges = %q, want bytes", got)
 				}
 				assertImmutable(t, response, test.data)
+				body := readBody(t, response)
 				if method == http.MethodHead {
-					if response.Body.Len() != 0 {
+					if len(body) != 0 {
 						t.Error("HEAD response contains a body")
 					}
-				} else if !bytes.Equal(response.Body.Bytes(), test.data) {
+				} else if !bytes.Equal(body, test.data) {
 					t.Error("GET response bytes differ from input")
 				}
 			})
@@ -131,7 +133,7 @@ func TestRangeAndConditionals(t *testing.T) {
 	handler := mustHandler(t, manifest, assets)
 	url := manifest.Representations[0].Segments[0].URL
 	data := assets[url]
-	etag := request(handler, http.MethodGet, url, nil).Header().Get("ETag")
+	etag := request(t, handler, http.MethodGet, url, nil).Header.Get("ETag")
 	tests := []struct {
 		name        string
 		method      string
@@ -155,14 +157,15 @@ func TestRangeAndConditionals(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response := request(handler, test.method, url, test.headers)
-			if response.Code != test.status {
-				t.Fatalf("status = %d, want %d; body %q", response.Code, test.status, response.Body)
+			response := request(t, handler, test.method, url, test.headers)
+			body := readBody(t, response)
+			if response.StatusCode != test.status {
+				t.Fatalf("status = %d, want %d; body %q", response.StatusCode, test.status, body)
 			}
-			if !bytes.Equal(response.Body.Bytes(), test.body) {
-				t.Errorf("body = %q, want %q", response.Body, test.body)
+			if !bytes.Equal(body, test.body) {
+				t.Errorf("body = %q, want %q", body, test.body)
 			}
-			if got := response.Header().Get("Content-Range"); got != test.rangeHeader {
+			if got := response.Header.Get("Content-Range"); got != test.rangeHeader {
 				t.Errorf("Content-Range = %q, want %q", got, test.rangeHeader)
 			}
 			assertImmutable(t, response, data)
@@ -174,13 +177,13 @@ func TestMultipartRange(t *testing.T) {
 	manifest, assets := delivery.DemoFixture()
 	handler := mustHandler(t, manifest, assets)
 	url := manifest.Representations[0].Segments[0].URL
-	response := request(handler, http.MethodGet, url, map[string]string{"Range": "bytes=0-1,5-7"})
-	if response.Code != http.StatusPartialContent {
-		t.Fatalf("multipart status = %d, want 206", response.Code)
+	response := request(t, handler, http.MethodGet, url, map[string]string{"Range": "bytes=0-1,5-7"})
+	if response.StatusCode != http.StatusPartialContent {
+		t.Fatalf("multipart status = %d, want 206", response.StatusCode)
 	}
-	mediaType, params, err := mime.ParseMediaType(response.Header().Get("Content-Type"))
+	mediaType, params, err := mime.ParseMediaType(response.Header.Get("Content-Type"))
 	if err != nil || mediaType != "multipart/byteranges" {
-		t.Fatalf("Content-Type = %q: %v", response.Header().Get("Content-Type"), err)
+		t.Fatalf("Content-Type = %q: %v", response.Header.Get("Content-Type"), err)
 	}
 	reader := multipart.NewReader(response.Body, params["boundary"])
 	for index, span := range [][2]int{{0, 1}, {5, 7}} {
@@ -210,7 +213,7 @@ func TestErrorsDoNotAdvertiseImmutableCaching(t *testing.T) {
 	manifest, assets := delivery.DemoFixture()
 	handler := mustHandler(t, manifest, assets)
 	url := manifest.Representations[0].Segments[0].URL
-	etag := request(handler, http.MethodGet, url, nil).Header().Get("ETag")
+	etag := request(t, handler, http.MethodGet, url, nil).Header.Get("ETag")
 	tests := []struct {
 		name, method, url string
 		headers           map[string]string
@@ -234,20 +237,20 @@ func TestErrorsDoNotAdvertiseImmutableCaching(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			response := request(handler, test.method, test.url, test.headers)
-			if response.Code != test.status {
-				t.Fatalf("status = %d, want %d", response.Code, test.status)
+			response := request(t, handler, test.method, test.url, test.headers)
+			if response.StatusCode != test.status {
+				t.Fatalf("status = %d, want %d", response.StatusCode, test.status)
 			}
-			if got := response.Header().Get("Cache-Control"); got != "no-store" {
+			if got := response.Header.Get("Cache-Control"); got != "no-store" {
 				t.Errorf("error Cache-Control = %q, want no-store", got)
 			}
-			if got := response.Header().Get("ETag"); got != "" {
+			if got := response.Header.Get("ETag"); got != "" {
 				t.Errorf("error ETag = %q, want empty", got)
 			}
-			if test.status == http.StatusMethodNotAllowed && response.Header().Get("Allow") != "GET, HEAD" {
-				t.Errorf("405 Allow = %q", response.Header().Get("Allow"))
+			if test.status == http.StatusMethodNotAllowed && response.Header.Get("Allow") != "GET, HEAD" {
+				t.Errorf("405 Allow = %q", response.Header.Get("Allow"))
 			}
-			if test.method == http.MethodHead && response.Body.Len() != 0 {
+			if test.method == http.MethodHead && len(readBody(t, response)) != 0 {
 				t.Error("HEAD error response contains a body")
 			}
 		})
@@ -261,9 +264,14 @@ func TestHandlerSnapshotsMutableInput(t *testing.T) {
 	segmentURL := manifest.Representations[0].Segments[0].URL
 	initURL := manifest.Representations[0].InitURL
 	urls := []string{manifestURL, segmentURL, initURL}
-	before := make(map[string]*httptest.ResponseRecorder)
+	type snapshot struct {
+		response *http.Response
+		body     []byte
+	}
+	before := make(map[string]snapshot)
 	for _, url := range urls {
-		before[url] = request(handler, http.MethodGet, url, nil)
+		response := request(t, handler, http.MethodGet, url, nil)
+		before[url] = snapshot{response: response, body: readBody(t, response)}
 	}
 	manifest.ClipID = "changed"
 	manifest.Codec = "changed"
@@ -276,13 +284,42 @@ func TestHandlerSnapshotsMutableInput(t *testing.T) {
 	delete(assets, initURL)
 	assets["/changed.bin"] = []byte("added")
 	for _, url := range urls {
-		after := request(handler, http.MethodGet, url, nil)
-		if after.Code != before[url].Code || !bytes.Equal(after.Body.Bytes(), before[url].Body.Bytes()) || !reflect.DeepEqual(after.Header(), before[url].Header()) {
+		after := request(t, handler, http.MethodGet, url, nil)
+		if after.StatusCode != before[url].response.StatusCode || !bytes.Equal(readBody(t, after), before[url].body) || !reflect.DeepEqual(after.Header, before[url].response.Header) {
 			t.Errorf("resource %q changed after constructor input mutation", url)
 		}
 	}
-	if got := request(handler, http.MethodGet, "/changed.bin", nil).Code; got != http.StatusNotFound {
+	if got := request(t, handler, http.MethodGet, "/changed.bin", nil).StatusCode; got != http.StatusNotFound {
 		t.Errorf("mutated map added a route: status %d", got)
+	}
+}
+
+func TestRequestIgnoresHeaderChangesAfterWriteHeader(t *testing.T) {
+	tests := []struct {
+		name, header, committed, late string
+	}{
+		{"late cache directive", "Cache-Control", "", immutableCacheControl},
+		{"replaced cache directive", "Cache-Control", "no-store", immutableCacheControl},
+		{"removed validator", "ETag", `"committed"`, ""},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				if test.committed != "" {
+					w.Header().Set(test.header, test.committed)
+				}
+				w.WriteHeader(http.StatusOK)
+				if test.late == "" {
+					w.Header().Del(test.header)
+				} else {
+					w.Header().Set(test.header, test.late)
+				}
+			})
+			response := request(t, handler, http.MethodGet, "/", nil)
+			if got := response.Header.Get(test.header); got != test.committed {
+				t.Errorf("sent %s = %q, want committed value %q; late mutation was %q", test.header, got, test.committed, test.late)
+			}
+		})
 	}
 }
 
@@ -295,24 +332,42 @@ func mustHandler(t *testing.T, manifest stream.Manifest, assets map[string][]byt
 	return handler
 }
 
-func request(handler http.Handler, method, url string, headers map[string]string) *httptest.ResponseRecorder {
+func request(t *testing.T, handler http.Handler, method, url string, headers map[string]string) *http.Response {
+	t.Helper()
 	req := httptest.NewRequest(method, url, nil)
 	for name, value := range headers {
 		req.Header.Set(name, value)
 	}
-	response := httptest.NewRecorder()
-	handler.ServeHTTP(response, req)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, req)
+	// Result snapshots the headers sent by the completed handler. Header() is
+	// the handler's mutable map and can include changes made after WriteHeader.
+	response := recorder.Result()
+	t.Cleanup(func() {
+		if err := response.Body.Close(); err != nil {
+			t.Errorf("close response body: %v", err)
+		}
+	})
 	return response
 }
 
-func assertImmutable(t *testing.T, response *httptest.ResponseRecorder, resourceBytes []byte) {
+func readBody(t *testing.T, response *http.Response) []byte {
 	t.Helper()
-	if got := response.Header().Get("Cache-Control"); got != immutableCacheControl {
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return body
+}
+
+func assertImmutable(t *testing.T, response *http.Response, resourceBytes []byte) {
+	t.Helper()
+	if got := response.Header.Get("Cache-Control"); got != immutableCacheControl {
 		t.Errorf("Cache-Control = %q, want %q", got, immutableCacheControl)
 	}
 	sum := sha256.Sum256(resourceBytes)
 	wantETag := `"sha256-` + hex.EncodeToString(sum[:]) + `"`
-	if got := response.Header().Get("ETag"); got != wantETag {
+	if got := response.Header.Get("ETag"); got != wantETag {
 		t.Errorf("ETag = %q, want strong content hash %q", got, wantETag)
 	}
 }
