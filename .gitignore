@@ -32,3 +32,8 @@ Thumbs.db
 .vscode/*
 !.vscode/extensions.json
 *.log
+
+# 手元の作業メモと個人用の記録
+/.local/
+*.local.md
+*.private.md
