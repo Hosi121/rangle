@@ -15,6 +15,7 @@ GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを
 - [技術選定案](docs/technology-selection.md)
 - [ABRと配信最適化の調査](docs/streaming-research.md)
 - [配信部品の共通契約](docs/streaming-contract.md)
+- [ログ方針](docs/logging.md)
 - [DevFest提出用リポジトリの案内](docs/submission.md)
 
 ## 配信部品の動作確認
