@@ -42,6 +42,10 @@ curl -i -H 'Range: bytes=0-15' http://127.0.0.1:8080/assets/demo/synthetic-v1/lo
 
 デモの資産と帯域系列は合成データです。実際の4DGSの復号やHLS/DASH再生、実回線での高速化を実証するものではありません。GoのABR制御は、モバイル実装へ判断規則とテストケースを引き継ぐための基準です。
 
+## ログ
+
+Goコマンドのログは標準 `log/slog` を使い、INFO以上のJSONをstderrへ出力します。`service` でコマンドを識別し、コマンドの失敗には `error` を付けます。`rangle-dev` は起動・終了とHTTPサーバー内部エラーを記録し、起動時に `listen_addr`、`manifest_url`、`fixture="synthetic"` を示します。`abr-sim` の計算結果はstdout、ログはエラー時だけです。
+
 ## リポジトリ
 
 | 用途 | リポジトリ | リモート名 |

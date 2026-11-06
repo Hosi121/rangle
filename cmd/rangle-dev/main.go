@@ -6,8 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -21,14 +20,16 @@ import (
 func main() {
 	address := flag.String("listen", "127.0.0.1:8080", "loopback IP:port to listen on")
 	flag.Parse()
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "rangle-dev")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *address, os.Stdout); err != nil {
-		log.Fatal(err)
+	if err := run(ctx, *address, logger); err != nil {
+		logger.Error("server failed", "listen_addr", *address, "error", err)
+		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, address string, output io.Writer) error {
+func run(ctx context.Context, address string, logger *slog.Logger) error {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil || !net.ParseIP(host).IsLoopback() {
 		return fmt.Errorf("listen address must use a loopback IP and port: %q", address)
@@ -43,10 +44,14 @@ func run(ctx context.Context, address string, output io.Writer) error {
 		return err
 	}
 	defer listener.Close()
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second}
-	if _, err := fmt.Fprintf(output, "Synthetic transport fixture only: fake bytes and estimates, not actual 4DGS or playable media.\nManifest: http://%s%s\n", listener.Addr(), manifest.URL()); err != nil {
-		return err
+	logger = logger.With("listen_addr", listener.Addr().String())
+	server := &http.Server{
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
+	logger.Info("server started", "fixture", "synthetic",
+		"manifest_url", fmt.Sprintf("http://%s%s", listener.Addr(), manifest.URL()))
 	serveError := make(chan error, 1)
 	go func() { serveError <- server.Serve(listener) }()
 	select {
@@ -61,7 +66,10 @@ func run(ctx context.Context, address string, output io.Writer) error {
 	case err = <-serveError:
 	}
 	if errors.Is(err, http.ErrServerClosed) {
-		return nil
+		err = nil
+	}
+	if err == nil {
+		logger.Info("server stopped")
 	}
 	return err
 }
