@@ -9,7 +9,7 @@
 | データ | VRU Basketballの `gz` | 実写スポーツ、多視点、評価分割、関連実装の前処理情報がある |
 | 再構成 | LocalDyGS | VRU用の処理・学習手順を利用できる。まず20フレームの短区間で再現 |
 | ML実装 | Pythonと既存GPU実装 | 公開実装との対応を保ち、再現と品質評価を先に行う |
-| モバイル | Androidネイティブ | 一つのOS・実機に絞り、復号・GPU描画・メモリを計測する |
+| UI | Flutter（Dart） | Webでフィードと再生操作を先に確認する。Gaussian描画方式は別途選ぶ |
 | 描画 | C++とVulkanを候補 | 必要な動的Gaussian描画を実装する。既存の静的ビューアーへの読込だけでは完了としない |
 | バックエンド | GoとCloud Run | フィード、生成ジョブ受付、公開状態、マニフェストを管理 |
 | GPU実行 | Google CloudのCustomJob | CUDA等の依存を含む学習用コンテナを実行する |
@@ -103,11 +103,11 @@ ABR、品質ラダー、帯域推定、切り替え、バッファ制御、HTTP�
 
 ## モバイルの選定理由
 
-AndroidネイティブのUIと、分離した描画モジュールを第一候補にする。Kotlinは画面・操作・ライフサイクルを、C++とVulkanは復号後の属性更新や描画を担当する案とする。UIのフレームワークと、Gaussianを描くエンジンは別の選定事項である。
+UIにはFlutter（Dart）を採用し、最初の実装対象をWebとする。フィードと通常動画の再生を先に確認し、Gaussian描画は別の実装として接続する。モバイル向けのGPU描画方式は実機計測後に選ぶ。
 
 VulkanはAndroidで提供される低レベルGPU APIである。ADPFは熱状態や性能に合わせて処理量を調整するための情報を提供する。これらを利用し、単発の最高FPSと、連続利用時に持続できる性能を分けて評価する。[Vulkan](https://developer.android.com/games/develop/vulkan/overview)、[ADPF](https://developer.android.com/games/optimize/adpf)
 
-対応端末のブラウザでもWebGPUを利用できるため、ネイティブ化だけを高速化の根拠にはしない。今回はアプリのライフサイクル、GPUメモリ、復号との接続を管理する方針として選ぶ。対象実機が決まってから、必要なGPU機能、メモリ量、開発環境を確認する。[Chrome AndroidのWebGPU](https://developer.chrome.com/blog/new-in-webgpu-121)
+対応端末のブラウザでもWebGPUを利用できるため、ネイティブ化だけを高速化の根拠にはしない。対象実機が決まってから、必要なGPU機能、メモリ量、開発環境を確認する。[Chrome AndroidのWebGPU](https://developer.chrome.com/blog/new-in-webgpu-121)
 
 サーバー側で描画して映像を送る方式は比較候補として残す。端末負荷を減らす代わりに、操作の往復遅延、視聴者ごとのGPU処理、配信費用を評価する必要がある。方式を変更する場合は、技術テーマとデモの説明も更新する。
 

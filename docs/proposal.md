@@ -13,6 +13,7 @@ rangleは、replayとangleを組み合わせた造語。スポーツの決定的
 - スポーツのハイライトを、ショート動画のフィードのように楽しめること。
 - 実写を基にしたシーンで、視聴者自身が視点を操作できること。
 - モノレポで開発し、Goを使う予定であること。
+- UIにはFlutter（Dart）を使い、Webフロントから着手すること。
 - クラウドとMLを深く扱い、4DGSの圧縮・高速化・配信も技術テーマにすること。
 - 素材は既存のデータセットを利用し、自前のスポーツ撮影を前提にしないこと。
 - モバイル端末の計算資源を使うアプリを重視すること。
@@ -65,7 +66,7 @@ flowchart LR
 
 GoはフィードAPI、コンテンツ管理、生成ジョブの受付、配信マニフェストの提供を担当する。ML処理はPythonとGPU向け実装を使い、モバイルの描画処理には専用のGPU実装を用意する。Goを使う理由は、この非同期な生成処理とネットワーク処理を管理する役割にある。GoだけでMLやGPU描画まで統一する構成は採らない。
 
-Google技術は、GPU学習、資産保存、API運用、配信、Android上の描画で中核を担う。Google CloudのCustomJobはカスタムコンテナと計算資源を指定する学習ジョブを提供し、Cloud RunはGoのアプリケーションを実行できる。Cloud CDNにはCloud Storageをバックエンドにした構成がある。[CustomJob](https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job)、[Cloud Run](https://docs.cloud.google.com/run/docs/overview/what-is-cloud-run)、[Cloud CDN](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket)
+Google技術は、FlutterのUIとGoのバックエンドに加え、GPU学習・資産保存・配信基盤で使う構成を目指す。Google CloudのCustomJobはカスタムコンテナと計算資源を指定する学習ジョブを提供し、Cloud RunはGoのアプリケーションを実行できる。Cloud CDNにはCloud Storageをバックエンドにした構成がある。[CustomJob](https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job)、[Cloud Run](https://docs.cloud.google.com/run/docs/overview/what-is-cloud-run)、[Cloud CDN](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket)
 
 ## 技術的に挑戦すること
 
@@ -87,7 +88,7 @@ Google技術は、GPU学習、資産保存、API運用、配信、Android上の�
 
 ### モバイルでの復号と描画
 
-Androidネイティブアプリを最初の候補とし、UIと描画エンジンを分ける。GPU描画、復号、メモリ管理をまとめて計測し、端末に合わせて品質を選択する。
+Flutter（Dart）でWebのフィードから実装する。UIとGaussian描画は分け、モバイル向けの復号・GPU描画・メモリ管理は対象実機で計測して選ぶ。
 
 ブラウザでも対応端末ではWebGPUを利用できるため、ネイティブでなければGPUを使えないわけではない。ネイティブ採用の狙いは、GPU資源、メモリ転送、OSの性能情報を使った最適化を進めやすくすることに置く。AndroidにはVulkanと、熱・性能状態に対応するADPFがある。速度上の優位は採用前の実測で確認する。[AndroidのWebGPU対応](https://developer.chrome.com/blog/new-in-webgpu-121)、[Vulkan](https://developer.android.com/games/develop/vulkan/overview)、[ADPF](https://developer.android.com/games/optimize/adpf)
 
