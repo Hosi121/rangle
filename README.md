@@ -12,6 +12,8 @@ rangleは、実写から再構成したスポーツのハイライトを縦型�
 
 - [企画書 草案](docs/proposal.md)
 - [技術選定案](docs/technology-selection.md)
+- [ABRと配信最適化の調査](docs/streaming-research.md)
+- [配信部品の共通契約](docs/streaming-contract.md)
 - [DevFest提出用リポジトリの案内](docs/submission.md)
 
 ## リポジトリ
@@ -22,6 +24,10 @@ rangleは、実写から再構成したスポーツのハイライトを縦型�
 | DevFest Hackathon 2026の最終提出 | [Devfest-Hackathon-2026/df-2026-t002](https://github.com/Devfest-Hackathon-2026/df-2026-t002) | `submission` |
 
 通常の開発とpushは `origin` に対して行います。最終提出時に、必要なコードと資料を提出用リポジトリへ反映します。提出用の運用制約と期限は [提出案内](docs/submission.md) を参照してください。
+
+## 開発フロー
+
+常設ブランチは `stg` と `main` です。作業ブランチから `stg` へPRを出し、安定版の反映は `stg` から `main` へのPRで行います。[開発ルール](CONTRIBUTING.md) を参照してください。
 
 ## 開発用リポジトリの取得
 
