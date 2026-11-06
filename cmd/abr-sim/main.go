@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"strings"
@@ -14,8 +15,9 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "abr-sim")
 	if err := run(os.Stdout); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		logger.Error("simulation failed", "error", err)
 		os.Exit(1)
 	}
 }
@@ -27,10 +29,12 @@ func run(out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	fmt.Fprintln(out, "Synthetic ABR trace: invented segment sizes, decode costs, and network capacities.")
-	fmt.Fprintln(out, "This is a policy demonstration, not a 4DGS asset or a measured performance result.")
-	fmt.Fprintln(out, "wait_s includes initial acquisition and any later buffer exhaustion.")
-	fmt.Fprintln(out, "seg  capacity_Mbps estimate_Mbps quality bytes buffer_s wait_s reason")
+	if _, err := fmt.Fprintln(out, "Synthetic ABR trace: invented segment sizes, decode costs, and network capacities.\n"+
+		"This is a policy demonstration, not a 4DGS asset or a measured performance result.\n"+
+		"wait_s includes initial acquisition and any later buffer exhaustion.\n"+
+		"seg  capacity_Mbps estimate_Mbps quality bytes buffer_s wait_s reason"); err != nil {
+		return err
+	}
 	buffer, current := 0.0, ""
 	initCached := make(map[string]bool)
 	for index, capacity := range capacities {
@@ -49,7 +53,9 @@ func run(out io.Writer) error {
 		}
 		initCached[decision.RepresentationID] = true
 		current = decision.RepresentationID
-		fmt.Fprintf(out, "%3d %14.2f %13.2f %7s %5d %8.2f %7.2f %s\n", index, capacity/1e6, decision.EstimateBPS/1e6, current, decision.RequiredBytes, buffer, wait, decision.Reason)
+		if _, err := fmt.Fprintf(out, "%3d %14.2f %13.2f %7s %5d %8.2f %7.2f %s\n", index, capacity/1e6, decision.EstimateBPS/1e6, current, decision.RequiredBytes, buffer, wait, decision.Reason); err != nil {
+			return err
+		}
 	}
 	return nil
 }
