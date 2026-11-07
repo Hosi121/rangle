@@ -49,6 +49,19 @@ func TestCatalogCopiesManifests(t *testing.T) {
 	}
 }
 
+func TestLocalPreviewPathsAreIndependentAndExcludeExternalURLs(t *testing.T) {
+	data := strings.Replace(fixtureJSON(t, 2), `"preview_url":"/preview.webm"`, `"preview_url":"https://media.example.test/video.webm?signature=example"`, 1)
+	c := mustCatalog(t, data)
+	paths := c.LocalPreviewPaths()
+	if len(paths) != 1 || paths[0] != "/preview.webm" {
+		t.Fatalf("local preview paths = %v", paths)
+	}
+	paths[0] = "/changed.webm"
+	if c.LocalPreviewPaths()[0] != "/preview.webm" {
+		t.Fatal("mutable preview path escaped catalog snapshot")
+	}
+}
+
 func fixtureJSON(t *testing.T, count int) string {
 	t.Helper()
 	entries := make([]clip, count)

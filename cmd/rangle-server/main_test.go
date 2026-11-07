@@ -16,7 +16,7 @@ import (
 
 func TestRunServesWebAndSceneAndStops(t *testing.T) {
 	ui, scene := t.TempDir(), t.TempDir()
-	for name, data := range map[string]string{filepath.Join(ui, "index.html"): "local Web app", filepath.Join(scene, "scene.json"): `{"version":1,"frameRate":25,"frames":["frame.splat"]}`, filepath.Join(scene, "frame.splat"): "0123456789"} {
+	for name, data := range map[string]string{filepath.Join(ui, "landing.html"): "product entry", filepath.Join(ui, "index.html"): "local Web app", filepath.Join(scene, "scene.json"): `{"version":1,"frameRate":25,"frames":["frame.splat"]}`, filepath.Join(scene, "frame.splat"): "0123456789"} {
 		if err := os.WriteFile(name, []byte(data), 0600); err != nil {
 			t.Fatal(err)
 		}
@@ -73,7 +73,7 @@ func TestRunServesWebAndSceneAndStops(t *testing.T) {
 		t.Fatalf("startup log: %+v", started)
 	}
 	client := &http.Client{Timeout: time.Second}
-	for target, want := range map[string]string{"/": "local Web app", "/healthz": "ok\n", "/samples/basketball/frame.splat": "0123456789"} {
+	for target, want := range map[string]string{"/": "product entry", "/demo/": "local Web app", "/healthz": "ok\n", "/samples/basketball/frame.splat": "0123456789"} {
 		response, err := client.Get("http://" + started.Address + target)
 		if err != nil {
 			t.Fatal(err)

@@ -20,6 +20,8 @@ flutter --suppress-analytics pub get --enforce-lockfile
 flutter --suppress-analytics run -d web-server --web-hostname 127.0.0.1 --web-port 8080
 ```
 
+開発時のデモは `http://127.0.0.1:8080/demo/` を開きます。`web/index.html` のbase hrefは `/demo/` に固定しています。製品入口と配信APIを含めた確認には、以下のGoサーバーを使います。
+
 ### APIから動画・自由視点を開く
 
 ```bash
@@ -34,7 +36,7 @@ go run ./cmd/rangle-server -ui-root apps/web/build/web \
   -catalog .local/catalog.json -asset-root .local/published
 ```
 
-`http://127.0.0.1:4174`を開き、動画を再生 →「自由視点で見る」→ 再生ボタンで動きを流す → シーンをドラッグして視点を回す →「動画に戻る」の順に操作できます。scene URLはcatalogの`scene_url`から読み、モデルや各frameは版付きHTTP資産として配信します。上のAPI URLは同じoriginを使うため、`localhost`でも開けます。
+`http://127.0.0.1:4174/demo/`を開き、動画を再生 →「自由視点で見る」→ 再生ボタンで動きを流す → シーンをドラッグして視点を回す →「動画に戻る」の順に操作できます。scene URLはcatalogの`scene_url`から読み、モデルや各frameは版付きHTTP資産として配信します。上のAPI URLは同じoriginを使うため、`localhost`でも開けます。
 
 初期版は先頭の1ページだけを読みます（API既定10件、最大50件）。自動追加読込・ABR制御は未実装です。API失敗時は再読み込みを表示し、デモへ自動で切り替えません。外部APIを指定する場合は、そのAPIと資産にCORSが必要です。
 
@@ -47,7 +49,14 @@ flutter --suppress-analytics build web --no-web-resources-cdn \
   --dart-define=RANGLE_SCENE_URL=http://127.0.0.1:4174/samples/basketball/scene.json
 ```
 
-`build/web/`を通常のHTTPサーバーで配信します。ローカル検証では、利用が許可されたscene.jsonとframes/を`build/web/samples/basketball/`へ置き、同じoriginの4174番で配信できます。sceneや学習重みはGitへ追加しません。HTTPSのアプリではscene・frame・動画もHTTPSとし、別originの場合は配信元で必要なCORSを設定してください。URLに認証情報や秘密を含めないでください。サブパス配信では`--base-href`を設定します。
+通常のビルドは `build/web/index.html`（デモ）と `build/web/landing.html`（製品入口）を生成します。リポジトリのrootから、利用が許可されたsceneのディレクトリを指定して起動します。
+
+```bash
+go run ./cmd/rangle-server -ui-root apps/web/build/web \
+  -scene-dir /path/to/local/scene -scene-id basketball
+```
+
+`http://127.0.0.1:4174/` が入口、`http://127.0.0.1:4174/demo/` がデモです。scene・API・配信資産のURLは `/demo/` を付けず、従来どおり使います。sceneや学習重みはGitへ追加しません。HTTPSのアプリではscene・frame・動画もHTTPSとし、別originの場合は配信元で必要なCORSを設定してください。URLに認証情報や秘密を含めないでください。デモ用の静的ファイルは `/demo/` へmountし、`--base-href` の追加指定やビルド後のファイル移動は不要です。
 
 JS viewerは`@mkkellogg/gaussian-splats-3d@0.4.7`と`three@0.160.0`（ともにMIT）をローカルにbundleします。CDNへ依存しません。`npm run build`はviewer・フレーム準備Worker・時間モデルWorkerと配布用`THIRD_PARTY_LICENSES.txt`を生成します。いずれも生成物としてGitから除外しています。
 

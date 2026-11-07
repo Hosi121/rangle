@@ -24,9 +24,10 @@ const (
 )
 
 type Config struct {
-	UIRoot   string
-	SceneDir string // Optional; must be supplied together with SceneID.
-	SceneID  string
+	UIRoot       string
+	SceneDir     string // Optional; must be supplied together with SceneID.
+	SceneID      string
+	PreviewPaths []string // Catalog-declared local videos that retain their root URLs.
 }
 
 type asset struct {
@@ -56,7 +57,7 @@ func New(config Config) (*Handler, error) {
 		return nil, fmt.Errorf("scene directory and valid scene ID must be supplied together")
 	}
 	h := &Handler{assets: make(map[string]asset)}
-	if err := h.loadUI(config.UIRoot); err != nil {
+	if err := h.loadUI(config.UIRoot, config.PreviewPaths); err != nil {
 		h.Close()
 		return nil, fmt.Errorf("load UI: %w", err)
 	}
@@ -78,7 +79,7 @@ func (h *Handler) Close() error {
 	return h.closeError
 }
 
-func (h *Handler) loadUI(name string) error {
+func (h *Handler) loadUI(name string, previewPaths []string) error {
 	root, err := os.OpenRoot(name)
 	if err != nil {
 		return err
@@ -109,7 +110,11 @@ func (h *Handler) loadUI(name string) error {
 					return err
 				}
 			} else if entry.Type().IsRegular() {
-				if err := h.addFile(root, relative, "/"+relative); err != nil {
+				url := "/demo/" + relative
+				if relative == "landing.html" {
+					url = "/"
+				}
+				if err := h.addFile(root, relative, url); err != nil {
 					return err
 				}
 			}
@@ -124,11 +129,29 @@ func (h *Handler) loadUI(name string) error {
 	if err := walk(directory, ""); err != nil {
 		return err
 	}
-	index, ok := h.assets["/index.html"]
+	index, ok := h.assets["/demo/index.html"]
 	if !ok {
 		return fmt.Errorf("UI root must contain a regular index.html")
 	}
-	h.assets["/"] = index
+	if _, ok := h.assets["/"]; !ok {
+		return fmt.Errorf("UI root must contain a regular landing.html")
+	}
+	h.assets["/demo/"] = index
+	for _, target := range previewPaths {
+		relative := strings.TrimPrefix(target, "/")
+		if !strings.HasPrefix(target, "/") || !validRelative(relative) {
+			return fmt.Errorf("invalid local preview path")
+		}
+		if strings.HasPrefix(target, "/demo/") {
+			continue
+		}
+		switch strings.ToLower(path.Ext(relative)) {
+		case ".webm", ".mp4", ".m4v", ".ogv":
+			if item, ok := h.assets["/demo/"+relative]; ok {
+				h.assets[target] = item
+			}
+		}
+	}
 	return nil
 }
 
@@ -212,6 +235,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		w.Header().Set("Allow", "GET, HEAD")
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.URL.Path == "/demo" {
+		target := "/demo/"
+		if r.URL.RawQuery != "" || r.URL.ForceQuery {
+			target += "?" + r.URL.RawQuery
+		}
+		w.Header().Set("Cache-Control", "no-cache")
+		http.Redirect(w, r, target, http.StatusPermanentRedirect)
 		return
 	}
 	if r.URL.Path == "/healthz" {
