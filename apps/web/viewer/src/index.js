@@ -1,3 +1,4 @@
+import { attachReferenceSampling } from './reference-sampling.js';
 import { Viewer, SceneRevealMode, RenderMode } from '@mkkellogg/gaussian-splats-3d';
 import { CHANNEL, SceneSession } from './session.js';
 
@@ -23,6 +24,9 @@ window.addEventListener('message', async (event) => {
         });
         viewer.camera.fov = camera.fovYDegrees;
         viewer.camera.updateProjectionMatrix();
+        const releaseSampling = attachReferenceSampling(viewer, camera.referenceImageHeight);
+        const dispose = viewer.dispose.bind(viewer);
+        viewer.dispose = () => { releaseSampling(); return dispose(); };
         return viewer;
       },
     });

@@ -63,6 +63,16 @@ test('manifest frame count and fractional frame rate determine the seek range', 
   await session.dispose();
 });
 
+test('optional reference raster height is bounded and survives manifest parsing', () => {
+  const input = manifest();
+  input.camera.referenceImageHeight = 270;
+  assert.equal(parseManifest(input, source).camera.referenceImageHeight, 270);
+  for (const height of [null, '270', 0, 63, 2161, 270.5, Infinity]) {
+    input.camera.referenceImageHeight = height;
+    assert.throws(() => parseManifest(input, source), /Invalid scene manifest/);
+  }
+});
+
 test('seeks are serialized, skip queued intermediate frames, and preserve the orbit camera', async () => {
   const { session, viewer, messages } = harness();
   await session.load(source);
