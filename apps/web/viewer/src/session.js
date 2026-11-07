@@ -30,8 +30,9 @@ export function parseManifest(input, source) {
 
 /** One viewer and one serialized scene mutation; pending seeks retain only the latest index. */
 export class SceneSession {
-  constructor({ createViewer, fetchManifest = (...args) => globalThis.fetch(...args), notify }) {
+  constructor({ createViewer, frameLoader, fetchManifest = (...args) => globalThis.fetch(...args), notify }) {
     this.createViewer = createViewer;
+    this.frameLoader = frameLoader;
     this.fetchManifest = fetchManifest;
     this.notify = notify;
     this.abort = new AbortController();
@@ -64,8 +65,14 @@ export class SceneSession {
 
   seek(frame) {
     if (this.disposed || !this.viewer || !Number.isInteger(frame)) return Promise.resolve();
-    this.pending = Math.max(0, Math.min(this.manifest.frames.length - 1, frame));
-    if (this.processing) return this.processing;
+    const target = Math.max(0, Math.min(this.manifest.frames.length - 1, frame));
+    if (!this.processing && this.loadedFrame === target) return Promise.resolve();
+    if (this.processing && this.loadingFrame === target && this.pending === null) return this.processing;
+    this.pending = target;
+    if (this.processing) {
+      this.frameLoader.cancel();
+      return this.processing;
+    }
     this.processing = this.drain().finally(() => { this.processing = null; });
     return this.processing;
   }
@@ -75,15 +82,31 @@ export class SceneSession {
       while (this.pending !== null && !this.disposed) {
         const frame = this.pending;
         this.pending = null;
+        this.loadingFrame = frame;
         this.notify({ type: 'loading', frame });
+        let buffer;
+        try {
+          buffer = await this.frameLoader.load(this.manifest.frames[frame]);
+        } catch (error) {
+          if (!this.disposed && this.pending !== null && error.name === 'AbortError') continue;
+          throw error;
+        }
+        if (this.disposed) return;
+        if (this.pending !== null) continue;
+        // Keep the previous scene interactive while the worker prepares data.
+        // Capture the most recent camera only when replacing GPU resources.
         const camera = this.captureCamera();
         this.viewer.stop();
         if (this.hasScene) await this.viewer.removeSplatScene(0, false);
         if (this.disposed) return;
         this.hasScene = false;
-        await this.viewer.addSplatScene(this.manifest.frames[frame], { showLoadingUI: false, progressiveLoad: false });
+        // Use the public remove/add lifecycle. The pinned SDK's replace path
+        // retains old scene children and races its asynchronous tree build.
+        await this.viewer.addSplatBuffers([buffer], [{ splatAlphaRemovalThreshold: 1 }],
+          true, false, false);
         if (this.disposed) return;
         this.hasScene = true;
+        this.loadedFrame = frame;
         this.restoreCamera(camera);
         if (this.pending !== null) continue;
         if (!this.paused) this.viewer.start();
@@ -129,6 +152,7 @@ export class SceneSession {
     this.disposed = true;
     this.pending = null;
     this.abort.abort();
+    this.frameLoader.dispose();
     this.viewer?.stop();
     this.release = Promise.resolve().then(() => this.viewer?.dispose()).catch(() => {});
     return this.release;
