@@ -1,3 +1,5 @@
+import { validIntrinsics } from './camera-intrinsics.js';
+
 export const CHANNEL = 'rangle-scene-v1';
 
 function httpUrl(value, base) {
@@ -17,6 +19,7 @@ export function parseManifest(input, source) {
       !Number.isFinite(camera.fovYDegrees) || camera.fovYDegrees <= 0 || camera.fovYDegrees >= 180 ||
       (camera.referenceImageHeight !== undefined && (!Number.isInteger(camera.referenceImageHeight) ||
         camera.referenceImageHeight < 64 || camera.referenceImageHeight > 2160)) ||
+      (camera.intrinsics !== undefined && !validIntrinsics(camera.intrinsics)) ||
       !['label', 'source', 'license'].every((key) => typeof input.attribution?.[key] === 'string' && input.attribution[key].trim())) {
     throw new Error('Invalid scene manifest');
   }
