@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 enum ViewerStatus { loading, ready, error }
@@ -43,20 +44,30 @@ typedef ViewerFactory = ViewerAdapter Function(Uri source);
 class VideoPreviewAdapter extends ViewerAdapter {
   VideoPreviewAdapter(Uri source)
     : this.withController(
-        source.hasScheme
-            ? VideoPlayerController.networkUrl(source)
-            : VideoPlayerController.asset(source.toString()),
+        _newController(source),
+        retryController: () => _newController(source),
       );
 
+  static VideoPlayerController _newController(Uri source) => source.hasScheme
+      ? VideoPlayerController.networkUrl(source)
+      : VideoPlayerController.asset(source.toString());
+
   @visibleForTesting
-  VideoPreviewAdapter.withController(this._controller) {
+  VideoPreviewAdapter.withController(
+    this._controller, {
+    VideoPlayerController Function()? retryController,
+  }) : _manualControllerFactory = retryController {
     _controller.addListener(_update);
   }
 
-  final VideoPlayerController _controller;
+  VideoPlayerController _controller;
+  final VideoPlayerController Function()? _manualControllerFactory;
   ViewerValue _value = const ViewerValue();
   bool _disposed = false;
   bool _failed = false;
+  bool _visible = true;
+  bool _autoplayPending = false;
+  Future<void>? _autoplayRecovery;
   Future<void>? _releaseFuture;
 
   @override
@@ -66,7 +77,70 @@ class VideoPreviewAdapter extends ViewerAdapter {
   Future<void> initialize() async {
     try {
       await _controller.initialize().timeout(const Duration(seconds: 15));
-      if (!_disposed) _update();
+      if (_disposed || _failed) return;
+      _update();
+      await _configurePlayback(autoplay: true);
+    } on Object {
+      _fail();
+    }
+  }
+
+  Future<void> _configurePlayback({required bool autoplay}) async {
+    final controller = _controller;
+    try {
+      await controller.setVolume(0);
+      if (_disposed || _failed || controller.value.volume != 0) return;
+      await controller.setLooping(true);
+    } on Object {
+      // An unsupported mute/loop command leaves manual playback available.
+      return;
+    }
+    if (!autoplay || !_visible || _disposed || _failed) return;
+    _autoplayPending = true;
+    try {
+      await controller.play();
+    } on Object catch (error) {
+      if (!identical(controller, _controller)) return;
+      if (_isAutoplayPolicyError(error)) {
+        await _recoverAutoplay();
+      } else {
+        _fail();
+      }
+    }
+  }
+
+  bool _isAutoplayPolicyError(Object error) {
+    if (error is PlatformException && error.code == 'NotAllowedError') {
+      return true;
+    }
+    // The web plugin retains the DOMException message, but drops its code.
+    final text = error.toString().toLowerCase();
+    return text.contains('notallowederror') ||
+        text.contains("user didn't interact") ||
+        text.contains('play method is not allowed') ||
+        text.contains('request is not allowed by the user agent');
+  }
+
+  Future<void> _recoverAutoplay() => _autoplayRecovery ??= _restartManual();
+
+  Future<void> _restartManual() async {
+    if (_disposed || _failed || _manualControllerFactory == null) {
+      _fail();
+      return;
+    }
+    _autoplayPending = false;
+    final previous = _controller;
+    previous.removeListener(_update);
+    _controller = _manualControllerFactory();
+    _controller.addListener(_update);
+    _value = const ViewerValue(muted: true);
+    notifyListeners();
+    unawaited(_releaseController(previous));
+    try {
+      await _controller.initialize().timeout(const Duration(seconds: 15));
+      if (_disposed || _failed) return;
+      _update();
+      await _configurePlayback(autoplay: false);
     } on Object {
       _fail();
     }
@@ -76,9 +150,14 @@ class VideoPreviewAdapter extends ViewerAdapter {
     if (_disposed || _failed) return;
     final media = _controller.value;
     if (media.hasError) {
-      _fail();
+      if (_autoplayPending && _isAutoplayPolicyError(media.errorDescription!)) {
+        unawaited(_recoverAutoplay());
+      } else {
+        _fail();
+      }
       return;
     }
+    if (media.position > Duration.zero) _autoplayPending = false;
     _value = ViewerValue(
       status: media.isInitialized ? ViewerStatus.ready : ViewerStatus.loading,
       position: media.position,
@@ -110,6 +189,7 @@ class VideoPreviewAdapter extends ViewerAdapter {
 
   @override
   Future<void> togglePlayback() => _perform(() async {
+    _autoplayPending = false;
     if (value.playing) {
       await _controller.pause();
     } else {
@@ -129,7 +209,13 @@ class VideoPreviewAdapter extends ViewerAdapter {
       _perform(() => _controller.setVolume(value.muted ? 1 : 0));
 
   @override
-  Future<void> pause() => _perform(_controller.pause);
+  Future<void> pause() async {
+    _visible = false;
+    await _perform(_controller.pause);
+  }
+
+  @override
+  Future<void> resume() async => _visible = true;
 
   @override
   Widget buildView() => Center(
@@ -139,16 +225,16 @@ class VideoPreviewAdapter extends ViewerAdapter {
     ),
   );
 
-  Future<void> _release() => _releaseFuture ??= _releaseController();
+  Future<void> _release() => _releaseFuture ??= _releaseController(_controller);
 
-  Future<void> _releaseController() async {
+  Future<void> _releaseController(VideoPlayerController controller) async {
     try {
-      if (_controller.value.isInitialized) await _controller.pause();
+      if (controller.value.isInitialized) await controller.pause();
     } on Object {
       // A failed stream still needs its native player released.
     } finally {
       try {
-        await _controller.dispose();
+        await controller.dispose();
       } on Object {
         debugPrint('Unable to release video preview.');
       }

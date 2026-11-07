@@ -188,9 +188,9 @@ void main() {
     expect(tester.widget<Slider>(find.byType(Slider)).onChanged, isNull);
     final freeView = find.ancestor(
       of: find.text('自由視点は準備中'),
-      matching: find.byType(OutlinedButton),
+      matching: find.byType(FilledButton),
     );
-    expect(tester.widget<OutlinedButton>(freeView).onPressed, isNull);
+    expect(tester.widget<FilledButton>(freeView).onPressed, isNull);
   });
 
   testWidgets('buttons, swipe and keyboard navigate the finite feed', (
@@ -217,13 +217,95 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('desktop catalog selects a clip', (tester) async {
-    await pumpApp(tester, size: const Size(1440, 900));
-    await tester.tap(find.widgetWithText(ListTile, 'バスケットボール 03'));
-    await tester.pumpAndSettle();
-    expect(find.text('03 / 03'), findsOneWidget);
-    expect(tester.takeException(), isNull);
-  });
+  testWidgets(
+    'mobile media fills the viewport with controls over the surface',
+    (tester) async {
+      await pumpApp(
+        tester,
+        repository: const DemoClipRepository(),
+        viewerFactory: (_) => FakeViewer(),
+      );
+      final player = tester.getRect(find.byKey(const Key('feed-player')));
+      final media = tester.getRect(find.byKey(const Key('real-video-surface')));
+      expect(player.size, const Size(390, 844));
+      expect(media, player);
+      expect(player.contains(tester.getCenter(iconButton('再生'))), isTrue);
+      expect(
+        player.contains(tester.getCenter(find.text('VRU Basketball'))),
+        isTrue,
+      );
+      expect(find.textContaining('CC BY 4.0'), findsNothing);
+      await tester.tap(iconButton('出典・詳細'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('CC BY 4.0'), findsOneWidget);
+      final semantics = tester.ensureSemantics();
+      try {
+        await tester.pump();
+        expect(
+          tester
+              .getSemantics(find.byType(SelectableText))
+              .getSemanticsData()
+              .label,
+          contains('CC BY 4.0'),
+        );
+      } finally {
+        semantics.dispose();
+      }
+      await tester.tap(iconButton('閉じる'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('CC BY 4.0'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'GS overlay and full source details remain usable at text scale 2',
+    (tester) async {
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      final scene = FakeViewer(surfaceKey: 'real-scene-surface');
+      await pumpApp(
+        tester,
+        repository: const DemoClipRepository(
+          sceneUrl: 'https://example.invalid/scene.json',
+        ),
+        viewerFactory: (_) => FakeViewer(),
+        sceneFactory: (_) => scene,
+      );
+      await tester.tap(iconButton('自由視点で見る'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('real-scene-surface')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.tap(iconButton('出典・詳細'));
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.textContaining('CC BY 4.0'));
+      expect(find.textContaining('CC BY 4.0'), findsOneWidget);
+      await tester.tap(iconButton('閉じる'));
+      await tester.pumpAndSettle();
+      await tester.tap(iconButton('動画に戻る'));
+      await tester.pumpAndSettle();
+      expect(scene.paused, isTrue);
+      expect(scene.disposed, isFalse);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'desktop keeps one centered portrait player with overlay navigation',
+    (tester) async {
+      await pumpApp(tester, size: const Size(1440, 900));
+      final player = tester.getRect(find.byKey(const Key('feed-player')));
+      expect(player.height, 900);
+      expect(player.width, closeTo(900 * 9 / 16, .01));
+      expect(player.center.dx, 720);
+      expect(find.byType(ListTile), findsNothing);
+      await tester.tap(iconButton('次のハイライト'));
+      await tester.pumpAndSettle();
+      await tester.tap(iconButton('次のハイライト'));
+      await tester.pumpAndSettle();
+      expect(find.text('03 / 03'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('catalog load failures recover through reload', (tester) async {
     var calls = 0;
@@ -494,7 +576,7 @@ void main() {
       await tester.pumpAndSettle();
       scenes.single.fail();
       await tester.pumpAndSettle();
-      expect(find.text('自由視点を表示できませんでした'), findsOneWidget);
+      expect(find.textContaining('自由視点を表示できませんでした'), findsOneWidget);
       expect(find.byKey(const Key('real-video-surface')), findsOneWidget);
       await tester.tap(iconButton('自由視点を再試行'));
       await tester.pumpAndSettle();
@@ -637,7 +719,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(scenes.single.disposed, isTrue);
       expect(video.disposed, isFalse);
-      expect(find.text('自由視点を表示できませんでした'), findsOneWidget);
+      expect(find.textContaining('自由視点を表示できませんでした'), findsOneWidget);
       await tester.tap(iconButton('再生'));
       await tester.pump();
       expect(video.value.playing, isTrue);
