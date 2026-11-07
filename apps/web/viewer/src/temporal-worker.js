@@ -1,4 +1,5 @@
 import { MAX_TEMPORAL_BYTES, prepareTemporal } from './temporal-format.js';
+import { decodeTemporal } from './temporal-codec.js';
 import { TemporalSorter } from './temporal-sort.js';
 
 let sorter;
@@ -25,7 +26,7 @@ self.addEventListener('message', async ({ data }) => {
       let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       chunks.length = 0;
-      const { motion, ...model } = prepareTemporal(bytes.buffer);
+      const { motion, ...model } = prepareTemporal(await decodeTemporal(bytes.buffer));
       sorter = new TemporalSorter(motion);
       self.postMessage({ type: 'model', ...model }, [model.buffer, model.texture.buffer]);
     } else if (data.type === 'sort' && sorter) {
