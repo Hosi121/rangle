@@ -1,4 +1,5 @@
 import { validIntrinsics } from './camera-intrinsics.js';
+import { TemporalSession } from './temporal-session.js';
 
 export const CHANNEL = 'rangle-scene-v1';
 
@@ -11,8 +12,12 @@ function httpUrl(value, base) {
 export function parseManifest(input, source) {
   const vector = (value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
   const camera = input?.camera;
+  const temporal = input?.temporal;
+  const temporalValid = temporal && typeof temporal.url === 'string' &&
+    Number.isInteger(input.frameCount) && input.frameCount >= 2 && input.frameCount <= 15000 &&
+    input.frameRate <= 240;
   if (input?.version !== 1 || !Number.isFinite(input.frameRate) || input.frameRate <= 0 ||
-      !Array.isArray(input.frames) || input.frames.length === 0 ||
+      (temporal ? !temporalValid : !Array.isArray(input.frames) || input.frames.length === 0) ||
       !vector(camera?.position) || !vector(camera?.lookAt) || !vector(camera?.up) ||
       !camera.up.some((value) => value !== 0) ||
       camera.position.every((value, index) => value === camera.lookAt[index]) ||
@@ -24,6 +29,11 @@ export function parseManifest(input, source) {
     throw new Error('Invalid scene manifest');
   }
   httpUrl(input.attribution.source, source);
+  if (temporal) {
+    const url = httpUrl(temporal.url, source);
+    if (!url.pathname.endsWith('.rgs')) throw new Error('Invalid temporal format');
+    return { ...input, temporal: { url: url.href } };
+  }
   const frames = input.frames.map((value) => {
     if (typeof value !== 'string' || !value) throw new Error('Invalid frame');
     const url = httpUrl(value, source);
@@ -56,6 +66,12 @@ export class SceneSession {
       if (!response.ok) throw new Error('Manifest request failed');
       this.manifest = parseManifest(await response.json(), response.url || source);
       if (this.disposed) return;
+      if (this.manifest.temporal) {
+        this.temporal = new TemporalSession({ createViewer: this.createViewer, notify: this.notify });
+        this.temporal.pause(this.paused);
+        await this.temporal.load(this.manifest);
+        return;
+      }
       this.viewer = this.createViewer(this.manifest.camera);
       await this.seek(0);
     } catch (error) {
@@ -69,6 +85,7 @@ export class SceneSession {
   }
 
   seek(frame) {
+    if (this.temporal) return this.temporal.seek(frame);
     if (this.disposed || !this.viewer || !Number.isInteger(frame)) return Promise.resolve();
     const target = Math.max(0, Math.min(this.manifest.frames.length - 1, frame));
     if (!this.processing && this.loadedFrame === target) return Promise.resolve();
@@ -147,6 +164,7 @@ export class SceneSession {
   pause(paused) {
     if (this.disposed || this.paused === paused) return;
     this.paused = paused;
+    if (this.temporal) return this.temporal.pause(paused);
     if (!this.viewer) return;
     if (paused) this.viewer.stop();
     else if (this.hasScene && !this.processing) this.viewer.start();
@@ -159,7 +177,9 @@ export class SceneSession {
     this.abort.abort();
     this.frameLoader.dispose();
     this.viewer?.stop();
-    this.release = Promise.resolve().then(() => this.viewer?.dispose()).catch(() => {});
+    this.release = Promise.resolve().then(() => this.temporal ? this.temporal.dispose() : this.viewer?.dispose()).catch(() => {});
     return this.release;
   }
+
+  togglePlayback() { this.temporal?.togglePlayback(); }
 }
