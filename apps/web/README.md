@@ -4,9 +4,9 @@
 
 APIモードではGoの公開フィードからカードと動画・sceneのURLを読み込みます。APIを指定しない場合は内蔵の3件のデモを使います。デモ先頭の **VRU Basketball** は、実験で再構成した480×270・25fps・0.8秒の通常動画サンプルです。出典はAVS-VRU / Jiahao Wuほか（CC BY 4.0）。詳細は [assets/samples/ATTRIBUTION.md](assets/samples/ATTRIBUTION.md) に記載しています。動画は自動再生せず、再生・停止・シーク・ミュートに対応します。
 
-`RANGLE_SCENE_URL` を設定すると、同じカードを3D Gaussian Splatting表示へ切り替えられます。ドラッグで視点を回転し、スクロールで拡大縮小、スライダーで静止時刻を選びます。自由視点モードでは既存の前後ボタンで項目を切り替え、モードを切り替える際に前の再生資源を破棄します。
+`RANGLE_SCENE_URL` を設定すると、同じカードを3D Gaussian Splatting表示へ切り替えられます。ドラッグで視点を回転し、スクロールで拡大縮小、スライダーで時刻を選びます。時間モデルを含むシーンは、再生ボタン・ダブルクリック・ダブルタップでループ再生でき、再生中も視点を動かせます。
 
-現在の自由視点は時刻シークに対応します。連続3D再生とABR配信は未実装で、端末での描画性能は別途測定します。
+初回の自由視点準備中も通常動画を操作でき、最初のGPU描画が終わってから切り替えます。動画へ戻ると自由視点の描画を止め、同じ項目を表示している間は再利用します。準備のキャンセル・項目の移動・エラー時は資源を破棄します。既存の`.splat`フレーム列は時刻シークのみです。ABRとの接続とスマートフォン実機の評価は未実施です。
 
 ## 開発とビルド
 
@@ -34,9 +34,9 @@ go run ./cmd/rangle-server -ui-root apps/web/build/web \
   -catalog .local/catalog.json -asset-root .local/published
 ```
 
-`http://127.0.0.1:4174`を開き、動画を再生 →「自由視点で見る」→ 下のつまみをドラッグして時刻を選ぶ → シーンをドラッグして視点を回す →「動画に戻る」の順に操作できます。scene URLはcatalogの`scene_url`から読み、各frameは版付きHTTP資産として配信します。上のAPI URLは同じoriginを使うため、`localhost`でも開けます。
+`http://127.0.0.1:4174`を開き、動画を再生 →「自由視点で見る」→ 再生ボタンで動きを流す → シーンをドラッグして視点を回す →「動画に戻る」の順に操作できます。scene URLはcatalogの`scene_url`から読み、モデルや各frameは版付きHTTP資産として配信します。上のAPI URLは同じoriginを使うため、`localhost`でも開けます。
 
-初期版は先頭の1ページだけを読みます（API既定10件、最大50件）。自動追加読込・ABR制御・連続3D再生は未実装です。API失敗時は再読み込みを表示し、デモへ自動で切り替えません。外部APIを指定する場合は、そのAPIと資産にCORSが必要です。
+初期版は先頭の1ページだけを読みます（API既定10件、最大50件）。自動追加読込・ABR制御は未実装です。API失敗時は再読み込みを表示し、デモへ自動で切り替えません。外部APIを指定する場合は、そのAPIと資産にCORSが必要です。
 
 ### APIを使わないデモ
 
@@ -49,7 +49,7 @@ flutter --suppress-analytics build web --no-web-resources-cdn \
 
 `build/web/`を通常のHTTPサーバーで配信します。ローカル検証では、利用が許可されたscene.jsonとframes/を`build/web/samples/basketball/`へ置き、同じoriginの4174番で配信できます。sceneや学習重みはGitへ追加しません。HTTPSのアプリではscene・frame・動画もHTTPSとし、別originの場合は配信元で必要なCORSを設定してください。URLに認証情報や秘密を含めないでください。サブパス配信では`--base-href`を設定します。
 
-JS viewerは`@mkkellogg/gaussian-splats-3d@0.4.7`と`three@0.160.0`（ともにMIT）をローカルにbundleします。CDNへ依存しません。`npm run build`は`web/viewer/viewer.js`と配布用`THIRD_PARTY_LICENSES.txt`を生成します。どちらも生成物としてGitから除外しています。
+JS viewerは`@mkkellogg/gaussian-splats-3d@0.4.7`と`three@0.160.0`（ともにMIT）をローカルにbundleします。CDNへ依存しません。`npm run build`はviewer・フレーム準備Worker・時間モデルWorkerと配布用`THIRD_PARTY_LICENSES.txt`を生成します。いずれも生成物としてGitから除外しています。
 
 ## scene manifest
 
@@ -74,13 +74,15 @@ JS viewerは`@mkkellogg/gaussian-splats-3d@0.4.7`と`three@0.160.0`（ともにM
 
 `frames`は非空の`.splat` URL配列、`frameRate`は正の有限数です。frame数とrateはmanifestから読み、例の2frameやサンプルの20frameに固定しません。相対frame URLはmanifestの最終URLを基準に解決します。上の例では最後の時刻は0.04秒、20frame/25fpsでは0.76秒です。各ファイルはその時刻の実際の3D Gaussianを持つ必要があります。
 
+連続再生には`frames`の代わりに`"frameCount": 20, "temporal": { "url": "model.rgs" }`を指定します。RGS1は速度と時間方向の不透明度を持つモデルです。単一モデルを一度読み込み、GPU資源を保ったまま時間と視点を更新します。形式・対応する学習モデル・測定条件は[連続再生の設計](../../docs/temporal-playback.md)を参照してください。一般の4DGSチェックポイントを直接読める形式ではありません。
+
 学習時の描画スケールに依存する資産には、`camera.referenceImageHeight`を指定できます（64〜2160の整数pixel、例：480×270で学習した資産なら270）。指定時はdrawing bufferの高さをその値に保ち、幅は表示領域の縦横比に合わせます。CSSの表示サイズ・縦画角・視点操作は維持します。これは端末DPRから独立したモデルの描画条件であり、解像度を上げるほど高画質になるという指定ではありません。未指定時は従来どおり端末DPRを使います。[比較結果と制約](../../docs/gaussian-quality.md)を参照してください。
 
 校正済みのシーンでは、`camera.intrinsics`に`{ "width": 960, "height": 803, "fx": 915.1, "fy": 915.3, "cx": 476.4, "cy": 407.3 }`のようなpinhole内部パラメータを指定できます。画素座標の原点は左上で、`width`/`height`は校正画像の寸法です。指定時は`fy`から縦画角を求め、`fx/fy`の差と主点のずれも描画へ反映します。表示領域の縦横比が変わると縦画角を保ったまま左右の見える範囲が変わります。指定しないシーンは従来の`fovYDegrees`を使います。pinholeで表せる画像を入力とし、歪み補正やresizeを行った場合は対応するKを渡します。ビューア内ではレンズ歪みの補正を行いません。
 
-frame切替は1つずつ処理し、切替中の追加seekは最後の要求へ集約します。orbitのカメラ状態は時刻間で保持します。初回読み込みやseekの失敗にはカード内で再試行を示します。失敗後の遅い応答で表示が復活しないようにしています。
+時刻切替は1つずつ処理し、切替中の追加seekは最後の要求へ集約します。orbitのカメラ状態は時刻間で保持します。準備に失敗した場合は通常動画と再試行操作を残します。失敗後の遅い応答で表示が復活しないようにしています。
 
-フレームの取得・parse・分割・packingはWeb Workerで行い、準備したbufferをtransferします。Workerは1つを再利用し、取消・離脱時は終了します。入力は1フレーム32MiBまでです。GPU転送とmesh構築はメインスレッドに残ります。[資源管理・SDKの変更・測定の範囲](../../docs/client-processing.md)を参照してください。
+フレーム列の取得・parse・分割・packingはWeb Workerで行い、準備したbufferをtransferします。時間モデルでは同じWorkerが初回の取得・parseと、再生中の深度ソートを担当します。入力は1資産32MiBまでです。GPU転送と初回mesh構築はメインスレッドに残ります。[資源管理・SDKの変更・測定の範囲](../../docs/client-processing.md)を参照してください。
 
 viewerは同じoriginのiframe内でbody直下に生成します。Flutterとの小さなmessage APIはorigin・source・channelを確認します。これは上流viewerのDOM所有権に合わせ、離脱時に非同期disposeとiframe破棄を行うためです。非表示時は描画ループも止めます。SharedArrayBufferとGPU sortは有効にしていません。
 
