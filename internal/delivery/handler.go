@@ -1,4 +1,4 @@
-// Package delivery serves a validated, immutable in-memory clip revision.
+// Package delivery serves validated, immutable clip revisions from memory or disk.
 package delivery
 
 import (
@@ -119,8 +119,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // before ServeContent evaluates request preconditions.
 type cacheResponseWriter struct {
 	http.ResponseWriter
-	wroteHeader bool
-	head        bool
+	wroteHeader  bool
+	head         bool
+	cacheControl string
 }
 
 func (w *cacheResponseWriter) WriteHeader(status int) {
@@ -130,7 +131,11 @@ func (w *cacheResponseWriter) WriteHeader(status int) {
 	w.wroteHeader = true
 	switch status {
 	case http.StatusOK, http.StatusPartialContent, http.StatusNotModified:
-		w.Header().Set("Cache-Control", immutableCacheControl)
+		policy := w.cacheControl
+		if policy == "" {
+			policy = immutableCacheControl
+		}
+		w.Header().Set("Cache-Control", policy)
 	default:
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Del("ETag")
