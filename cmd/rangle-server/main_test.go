@@ -27,7 +27,7 @@ func TestRunServesWebAndSceneAndStops(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(output, nil)).With("service", "rangle-server")
 	done := make(chan error, 1)
 	go func() {
-		done <- run(ctx, "127.0.0.1:0", appserver.Config{UIRoot: ui, SceneDir: scene, SceneID: "basketball"}, logger)
+		done <- run(ctx, "127.0.0.1:0", config{Web: appserver.Config{UIRoot: ui, SceneDir: scene, SceneID: "basketball"}}, logger)
 	}()
 	var started event
 	select {
@@ -89,7 +89,7 @@ func TestRunServesWebAndSceneAndStops(t *testing.T) {
 func TestRunRejectsPublicAndMalformedAddresses(t *testing.T) {
 	logger := slog.New(slog.NewJSONHandler(io.Discard, nil))
 	for _, address := range []string{"0.0.0.0:4174", ":4174", "192.0.2.1:4174", "localhost:4174", "bad"} {
-		if err := run(context.Background(), address, appserver.Config{}, logger); err == nil {
+		if err := run(context.Background(), address, config{}, logger); err == nil {
 			t.Fatalf("accepted address %q", address)
 		}
 	}

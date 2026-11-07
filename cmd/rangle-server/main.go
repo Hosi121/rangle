@@ -1,4 +1,4 @@
-// rangle-server serves a local Web build and an allowlisted Gaussian scene.
+// rangle-server serves a clip API, a local Web build, and published media assets.
 package main
 
 import (
@@ -22,22 +22,29 @@ func main() {
 	uiRoot := flag.String("ui-root", "", "directory containing the compiled Web index.html")
 	sceneDir := flag.String("scene-dir", "", "optional directory containing scene.json and its frames")
 	sceneID := flag.String("scene-id", "", "URL ID for the optional scene")
+	catalogFile := flag.String("catalog", "", "version-1 clip catalog JSON")
+	assetRoot := flag.String("asset-root", "", "directory containing published assets at their URL paths")
+	assetOrigin := flag.String("asset-origin", "", "optional external HTTP(S) media origin advertised by the API")
 	flag.Parse()
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "rangle-server")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if err := run(ctx, *address, appserver.Config{UIRoot: *uiRoot, SceneDir: *sceneDir, SceneID: *sceneID}, logger); err != nil {
+	cfg := config{
+		Web:         appserver.Config{UIRoot: *uiRoot, SceneDir: *sceneDir, SceneID: *sceneID},
+		CatalogFile: *catalogFile, AssetRoot: *assetRoot, AssetOrigin: *assetOrigin,
+	}
+	if err := run(ctx, *address, cfg, logger); err != nil {
 		logger.Error("server failed", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, address string, config appserver.Config, logger *slog.Logger) (result error) {
+func run(ctx context.Context, address string, cfg config, logger *slog.Logger) (result error) {
 	host, _, err := net.SplitHostPort(address)
 	if err != nil || !net.ParseIP(host).IsLoopback() {
 		return fmt.Errorf("listen address must use a loopback IP and port")
 	}
-	handler, err := appserver.New(config)
+	handler, err := newApplication(cfg, logger)
 	if err != nil {
 		return err
 	}
@@ -49,7 +56,7 @@ func run(ctx context.Context, address string, config appserver.Config, logger *s
 	defer listener.Close()
 	logger = logger.With("listen_addr", listener.Addr().String())
 	server := &http.Server{Handler: handler, ReadHeaderTimeout: 5 * time.Second, ErrorLog: slog.NewLogLogger(logger.Handler(), slog.LevelError)}
-	logger.Info("server started", "scene_id", config.SceneID)
+	logger.Info("server started", "scene_id", cfg.Web.SceneID, "clip_count", handler.clipCount)
 	serveError := make(chan error, 1)
 	go func() { serveError <- server.Serve(listener) }()
 	select {

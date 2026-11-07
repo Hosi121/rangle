@@ -68,6 +68,12 @@ curl -i -H 'Range: bytes=0-15' http://127.0.0.1:4174/samples/basketball/frames/0
 
 この入口はループバックIPだけを受け付け、`PORT` 環境変数は読みません。実回線の性能や大規模配信を検証するものではなく、本番の大容量資産はCDN・object storageから直接配信する方針を維持します。
 
+## フィードAPIと版付き資産
+
+`rangle-server` に `-catalog` と `-asset-root` を指定すると、フィードAPIからmanifest・資産の取得まで確認できます。大容量ファイルは全量をRAMへ載せず配信し、版付き資産にETag・immutableキャッシュ・Rangeを適用します。`-asset-origin` を使う構成では、APIと大容量配信先を分離できます。
+
+catalogの形式・起動例・キャッシュ方針は [APIと版付き資産の配信](docs/api-delivery.md) を参照してください。
+
 ## ログ
 
 Goコマンドのログは標準 `log/slog` を使い、INFO以上のJSONをstderrへ出力します。`service` でコマンドを識別し、コマンドの失敗には `error` を付けます。`rangle-dev` と `rangle-server` は起動・終了とHTTPサーバー内部エラーを記録します。起動時の `listen_addr` に加え、`rangle-dev` は `manifest_url` と `fixture="synthetic"`、`rangle-server` は `scene_id` を示します。`abr-sim` の計算結果はstdout、ログはエラー時だけです。
