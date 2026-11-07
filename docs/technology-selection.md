@@ -10,7 +10,7 @@
 | 再構成 | LocalDyGS | VRU用の処理・学習手順を利用できる。まず20フレームの短区間で再現 |
 | ML実装 | Pythonと既存GPU実装 | 公開実装との対応を保ち、再現と品質評価を先に行う |
 | UI | Flutter（Dart） | Webでフィードと再生操作を先に確認する。Gaussian描画方式は別途選ぶ |
-| 描画 | C++とVulkanを候補 | 必要な動的Gaussian描画を実装する。既存の静的ビューアーへの読込だけでは完了としない |
+| 描画 | WebはGaussianSplats3D、モバイルは別途選定 | 時刻ごとのGaussianをWebGLで描画し、視点操作と時刻シークを先に確認する |
 | バックエンド | GoとCloud Run | フィード、生成ジョブ受付、公開状態、マニフェストを管理 |
 | GPU実行 | Google CloudのCustomJob | CUDA等の依存を含む学習用コンテナを実行する |
 | ジョブ進行 | Workflowsを候補 | 前処理、学習、評価、パッケージ化、公開の状態を管理する |

@@ -1,64 +1,73 @@
 # rangle Web
 
-スポーツのハイライトを上下に切り替える、Flutter / Dart の最小 Web フロントエンドです。日本語 UI と Material 3 を使います。
+スポーツのハイライトを切り替える、Flutter / DartのWebフロントエンドです。日本語UIとMaterial 3を使います。
 
-実装した範囲は、縦型フィード、前後ボタン、↑↓ / PageUp / PageDown キー、デスクトップのカタログ選択、通常動画の再生・一時停止・シーク・ミュートです。選択から外れた動画は停止し、プレイヤーを破棄します。非表示になったアプリも再生を停止します。自動再生はしません。
+先頭の **VRU Basketball** は、実験で再構成した480×270・25fps・0.8秒の通常動画サンプルです。出典はAVS-VRU / Jiahao Wuほか（CC BY 4.0）。詳細は [assets/samples/ATTRIBUTION.md](assets/samples/ATTRIBUTION.md) に記載しています。残り2項目は準備中です。動画は自動再生せず、再生・停止・シーク・ミュートに対応します。
 
-**初期表示は映像を含まないデモカタログです。** 3項目のタイトルや説明は画面・操作確認用で、実在する試合のメタデータではありません。写真・動画・モデル・学習データは同梱していません。自由視点の操作は準備中として無効にしており、固定視点の映像を回転したように見せる操作はありません。
+`RANGLE_SCENE_URL` を設定すると、同じカードを3D Gaussian Splatting表示へ切り替えられます。ドラッグで視点を回転し、スクロールで拡大縮小、スライダーで静止時刻を選びます。自由視点モードでは既存の前後ボタンで項目を切り替え、モードを切り替える際に前の再生資源を破棄します。
 
-## 実行環境
+現在の自由視点は時刻シークに対応します。連続3D再生とABR配信は未実装で、端末での描画性能は別途測定します。
 
-検証した版は **Flutter 3.47.9 stable / Dart 3.13.7** です。依存パッケージは `pubspec.lock` で固定しています。ランタイムの追加パッケージは Flutter 公式の `video_player` だけです（日本語ローカライズは SDK 付属）。
+## 開発とビルド
 
-Flutter SDK はリポジトリの外へ置いてください。以下の `flutter` は、利用する SDK の実行ファイルに置き換えることもできます。
-
-公式 SDK: [Flutter SDK archive](https://docs.flutter.dev/install/archive)。検証に使った Linux x64 のアーカイブは `https://storage.googleapis.com/flutter_infra_release/releases/stable/linux/flutter_linux_3.47.9-stable.tar.xz`、SHA256 は `25ed8c3c29d51a7353f2a944310b478af8214920639524b19c50a19e6c044c5a` です。
-
-リポジトリのルートから:
+検証環境はFlutter 3.47.9 stable / Dart 3.13.7、Node 24です。Dart依存は`pubspec.lock`、JS依存は`viewer/package-lock.json`で固定しています。SDKやグローバルpackageをリポジトリに追加する必要はありません。
 
 ```bash
 cd apps/web
+npm ci --prefix viewer
+npm run build --prefix viewer
 flutter --suppress-analytics pub get --enforce-lockfile
 flutter --suppress-analytics run -d web-server --web-hostname 127.0.0.1 --web-port 8080
 ```
 
-表示された `http://127.0.0.1:8080` をブラウザで開きます。SDK の起動設定やグローバル PATH を変更する必要はありません。ローカルサーバーは作業後に Ctrl+C で終了してください。
-
-## 実際のプレビュー映像をつなぐ
-
-利用が許可された、ブラウザで直接再生できる HTTP(S) の動画 URL をビルド時に指定します。MP4 の場合はブラウザが対応するコーデック（例: H.264）と正しい `Content-Type` を使い、シークする場合は配信側の Range 対応も確認してください。
+自由視点を有効にする場合は、HTTP(S)で取得できるscene manifestを指定します。外部動画で先頭サンプルを置き換える場合だけ`RANGLE_PREVIEW_URL`を追加します。外部overrideはHTTP(S)のみ受け付け、内蔵動画は`VideoPlayerController.asset`で再生します。
 
 ```bash
-flutter --suppress-analytics run -d web-server \
-  --web-hostname 127.0.0.1 --web-port 8080 \
-  --dart-define=RANGLE_PREVIEW_URL=https://your-media.example/preview.mp4
+flutter --suppress-analytics build web --no-web-resources-cdn \
+  --dart-define=RANGLE_SCENE_URL=http://127.0.0.1:4174/samples/basketball/scene.json
 ```
 
-設定した映像は先頭の項目にだけ表示され、「通常動画」と明示します。残りの項目は準備中です。設定が空なら外部メディアを取得しません。HTTP(S) 以外の URL はカタログの読み込みエラーになります。HTTPS のページでは動画も HTTPS にしてください。配信元で必要な CORS、MIME、キャッシュ方針を設定してください。URL は公開クライアントに含まれるため、認証情報や秘密を埋め込まないでください。
+`build/web/`を通常のHTTPサーバーで配信します。ローカル検証では、利用が許可されたscene.jsonとframes/を`build/web/samples/basketball/`へ置き、同じoriginの4174番で配信できます。sceneや学習重みはGitへ追加しません。HTTPSのアプリではscene・frame・動画もHTTPSとし、別originの場合は配信元で必要なCORSを設定してください。URLに認証情報や秘密を含めないでください。サブパス配信では`--base-href`を設定します。
 
-映像の準備中・読み込み中・再生エラーでは再生とシークを無効にします。読み込みが15秒以内に完了しない場合もエラーを表示し、再試行できます。カタログ全体にも読み込み・空・エラー・再読み込みの状態があります。
+JS viewerは`@mkkellogg/gaussian-splats-3d@0.4.7`と`three@0.160.0`（ともにMIT）をローカルにbundleします。CDNへ依存しません。`npm run build`は`web/viewer/viewer.js`と配布用`THIRD_PARTY_LICENSES.txt`を生成します。どちらも生成物としてGitから除外しています。
 
-## ビルドと検証
+## scene manifest
+
+```json
+{
+  "version": 1,
+  "frameRate": 25,
+  "camera": {
+    "position": [0, 1, 3],
+    "lookAt": [0, 0, 0],
+    "up": [0, 1, 0],
+    "fovYDegrees": 50
+  },
+  "frames": ["frames/000.splat", "frames/001.splat"],
+  "attribution": {
+    "label": "サンプルの出典",
+    "source": "https://example.com/source",
+    "license": "CC BY 4.0"
+  }
+}
+```
+
+`frames`は非空の`.splat` URL配列、`frameRate`は正の有限数です。frame数とrateはmanifestから読み、例の2frameやサンプルの20frameに固定しません。相対frame URLはmanifestの最終URLを基準に解決します。上の例では最後の時刻は0.04秒、20frame/25fpsでは0.76秒です。各ファイルはその時刻の実際の3D Gaussianを持つ必要があります。
+
+frame切替は1つずつ処理し、切替中の追加seekは最後の要求へ集約します。orbitのカメラ状態は時刻間で保持します。初回読み込みやseekの失敗にはカード内で再試行を示します。失敗後の遅い応答で表示が復活しないようにしています。
+
+viewerは同じoriginのiframe内でbody直下に生成します。Flutterとの小さなmessage APIはorigin・source・channelを確認します。これは上流viewerのDOM所有権に合わせ、離脱時に非同期disposeとiframe破棄を行うためです。非表示時は描画ループも止めます。SharedArrayBufferとGPU sortは有効にしていません。
+
+## 検証
 
 ```bash
+npm test --prefix viewer
+npm run build --prefix viewer
 flutter --suppress-analytics analyze
 flutter --suppress-analytics test
 flutter --suppress-analytics build web --no-web-resources-cdn
 ```
 
-通常動画を組み込むビルドでは、最後のコマンドに `--dart-define=RANGLE_PREVIEW_URL=...` を追加します。`build/web/` を静的 HTTP サーバーから配信してください。ローカルファイルの直接オープンには対応しません。サブパスで配信する場合は `--base-href=/your-path/` を指定します。SDK・キャッシュ・ビルド成果物は Git に追加しません。
+JSテストはmanifest、異なるframe数/rate、最新seekへの集約、カメラ保持、失敗・離脱中の破棄をGPUなしで検証します。Flutterテストは既存のフィードと動画操作に加え、asset参照、動画と自由視点の切替、seek、再試行、離脱時の破棄を検証します。実ブラウザのWebGL描画、orbit、コーデック、HTTP/CORS、worker解放は、実際の配信資産を使うブラウザ確認が必要です。
 
-ウィジェットテストはソフトウェア描画で実行されます。フィードの移動、モバイルと横持ちレイアウト、準備中の無効操作、カタログの読み込み・空・エラー復帰、メディアの再生操作とエラー再試行、選択から外れたプレイヤーの破棄を検証します。動画部分には fake adapter を使うため、実ブラウザのコーデック対応・Range/CORS・映像再生性能は別途、利用する映像とブラウザで確認してください。
-
-## 構成と次の接続点
-
-- `lib/models/clip.dart`: フィードのメタデータと通常動画の参照。
-- `lib/data/clip_repository.dart`: 小さなリポジトリ契約とローカルのデモカタログ。実 API をつなぐ場合は `ClipRepository.load()` を実装します。
-- `lib/viewer/viewer_adapter.dart`: 再生状態・時刻・再生制御・描画・破棄の接続点。現在は `VideoPreviewAdapter` が `video_player` に委譲します。
-- `lib/widgets/preview_viewer.dart`: 読み込み・エラー・再試行、メディア操作、アプリの表示状態の管理。
-- `lib/widgets/clip_card.dart`: クリップのカード表示と、映像準備中の操作表示。
-- `lib/app.dart`: フィードとレスポンシブなレイアウト。選択中の項目にだけプレイヤーを作成します。
-
-Go 配信プロトタイプの `/manifests/{clip_id}/{revision}.json` は、独立した区間・品質・チェックサム等の転送契約です。現状の合成 `.bin` は動画でも4DGSの可視化資産でもなく、`RANGLE_PREVIEW_URL` には指定できません。このアプリはそのマニフェストを取得・復号していません。
-
-実際の4DGSを接続する段階で、検証済みの復号・描画処理を `ViewerAdapter` の別実装として追加し、シーン参照とカメラ操作の契約を拡張します。通常動画のプレビューと自由視点の準備状態を区別したまま接続してください。カスタム転送、認証、課金、推薦、分析、クラウドの作成やデプロイは含まれていません。
+`ViewerAdapter`は従来の動画APIを保ち、`Clip.sceneUrl`で自由視点の参照を追加しています。`RANGLE_SCENE_URL`が空なら自由視点ボタンは無効です。Goプロトタイプの`/manifests/{clip_id}/{revision}.json`と合成`.bin`は別の転送契約であり、このscene manifestや通常動画には流用しません。
