@@ -14,19 +14,30 @@ function harness() {
   const viewer = {
     camera: { position: vector(1), quaternion: vector(2), up: vector(3), fov: 50, updateProjectionMatrix() {} },
     controls: { target: vector(4), update() {} }, calls: [], disposed: 0,
-    async addSplatScene(url) { this.calls.push(url); },
-    async removeSplatScene() { this.camera.position.value = 99; this.controls.target.value = 99; },
+    scenes: [], removed: 0,
+    async removeSplatScene(index) {
+      assert.equal(index, 0);
+      this.scenes.splice(index, 1);
+      this.removed++;
+    },
+    async addSplatBuffers([buffer], options, finalBuild, showLoading, showProgress, replaceExisting = false) {
+      assert.equal(replaceExisting, false, 'avoid the SDK replace path');
+      assert.equal(this.scenes.length, 0, 'release the previous scene before adding');
+      this.scenes.push(buffer);
+      this.calls.push(buffer.url);
+    },
     start() {}, stop() {}, async dispose() { this.disposed++; },
   };
-  const session = new SceneSession({ createViewer: () => viewer,
+  const frameLoader = { async load(url) { return { url }; }, cancel() {}, dispose() {} };
+  const session = new SceneSession({ createViewer: () => viewer, frameLoader,
     fetchManifest: async () => ({ ok: true, url: source, json: async () => manifest() }),
     notify: (message) => messages.push(message) });
-  return { session, viewer, messages };
+  return { session, viewer, messages, frameLoader };
 }
 
 test('default manifest fetch retains the global receiver required by browser fetch', async () => {
   const originalFetch = globalThis.fetch;
-  const { viewer, messages } = harness();
+  const { viewer, messages, frameLoader } = harness();
   let requestedUrl;
   globalThis.fetch = async function (url, { signal }) {
     assert.equal(this, globalThis, 'Illegal invocation: fetch requires its global receiver');
@@ -34,7 +45,7 @@ test('default manifest fetch retains the global receiver required by browser fet
     requestedUrl = url;
     return { ok: true, url: source, json: async () => manifest() };
   };
-  const session = new SceneSession({ createViewer: () => viewer, notify: (message) => messages.push(message) });
+  const session = new SceneSession({ createViewer: () => viewer, frameLoader, notify: (message) => messages.push(message) });
   try {
     await session.load(source);
     assert.equal(requestedUrl, source);
@@ -69,9 +80,14 @@ test('seeks are serialized, skip queued intermediate frames, and preserve the or
   viewer.camera.position.value = 42;
   viewer.controls.target.value = 17;
   const pending = deferred();
-  const add = viewer.addSplatScene.bind(viewer);
-  viewer.addSplatScene = async (url) => { await add(url); if (url.endsWith('/1.splat')) await pending.promise; };
+  const building = deferred();
+  const add = viewer.addSplatBuffers.bind(viewer);
+  viewer.addSplatBuffers = async (buffers) => {
+    await add(buffers);
+    if (buffers[0].url.endsWith('/1.splat')) { building.resolve(); await pending.promise; }
+  };
   const first = session.seek(1);
+  await building.promise;
   session.seek(2);
   session.seek(19);
   pending.resolve();
@@ -80,12 +96,14 @@ test('seeks are serialized, skip queued intermediate frames, and preserve the or
   assert.deepEqual(messages.filter((message) => message.type === 'ready').map((message) => message.frame), [0, 19]);
   assert.equal(viewer.camera.position.value, 42);
   assert.equal(viewer.controls.target.value, 17);
+  assert.equal(viewer.scenes.length, 1);
+  assert.equal(viewer.removed, 2);
   await session.dispose();
 });
 
 test('failed scene load releases the viewer and never reports ready', async () => {
-  const { session, viewer, messages } = harness();
-  viewer.addSplatScene = async () => { throw new Error('private failure detail'); };
+  const { session, viewer, messages, frameLoader } = harness();
+  frameLoader.load = async () => { throw new Error('private failure detail'); };
   await session.load(source);
   assert.equal(viewer.disposed, 1);
   assert.equal(messages.some((message) => message.type === 'ready'), false);
@@ -116,7 +134,7 @@ test('repeated lifecycle notifications keep a single render loop', async () => {
 test('leaving during an in-flight load aborts work, disposes once, and ignores late completion', async () => {
   const { session, viewer, messages } = harness();
   const pending = deferred();
-  viewer.addSplatScene = () => pending.promise;
+  viewer.addSplatBuffers = () => pending.promise;
   const loading = session.load(source);
   await new Promise((resolve) => setImmediate(resolve));
   await session.dispose();
@@ -126,4 +144,28 @@ test('leaving during an in-flight load aborts work, disposes once, and ignores l
   assert.equal(viewer.disposed, 1);
   assert.equal(session.abort.signal.aborted, true);
   assert.equal(messages.some((message) => message.type === 'ready'), false);
+});
+
+test('superseded preparation is canceled before building a mesh and keeps the latest camera', async () => {
+  const { session, viewer, messages, frameLoader } = harness();
+  await session.load(source);
+  const pending = deferred();
+  let canceled = 0;
+  const load = frameLoader.load;
+  frameLoader.load = (url) => url.endsWith('/1.splat') ? pending.promise : load(url);
+  frameLoader.cancel = () => { canceled++; pending.reject(new DOMException('superseded', 'AbortError')); };
+  const stopped = [];
+  viewer.stop = () => stopped.push(true);
+  const first = session.seek(1);
+  viewer.camera.position.value = 73;
+  assert.equal(stopped.length, 0, 'previous view remains interactive during preparation');
+  session.seek(19);
+  await first;
+  assert.equal(canceled, 1);
+  assert.deepEqual(viewer.calls.map((url) => url.split('/').at(-1)), ['0.splat', '19.splat']);
+  assert.equal(viewer.camera.position.value, 73);
+  assert.equal(messages.at(-1).frame, 19);
+  await session.seek(19);
+  assert.equal(viewer.calls.length, 2, 'already displayed frame is reused');
+  await session.dispose();
 });

@@ -1,5 +1,6 @@
 import { Viewer, SceneRevealMode, RenderMode } from '@mkkellogg/gaussian-splats-3d';
 import { CHANNEL, SceneSession } from './session.js';
+import { FrameLoader } from './frame-loader.js';
 
 let session;
 const send = (message) => window.parent.postMessage(JSON.stringify({ channel: CHANNEL, ...message }), location.origin);
@@ -13,6 +14,7 @@ window.addEventListener('message', async (event) => {
     send({ type: 'disposed' });
   } else if (message.type === 'load' && !session) {
     session = new SceneSession({
+      frameLoader: new FrameLoader(),
       notify: send,
       createViewer: (camera) => {
         const viewer = new Viewer({
