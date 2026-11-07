@@ -31,7 +31,7 @@ APIは起動時に読み込んだcatalogを公開する。永続的な視聴者�
 
 `limit` は既定10、上限50。cursorは不透明な値として扱い、加工しない。catalogや取得先originの更新でcursorが無効になったら400を返すため、先頭から取り直す。無効・重複・未定義のクエリも400にする。初期版は全利用者に同じ公開フィードを返し、`public, max-age=15, stale-while-revalidate=30` と応答内容由来のETagを付ける。エラーは `no-store` とする。
 
-クリップには `id`、`revision`、`title`、`sport`、`description`、`codec`、`manifest_url` を返す。通常動画の `preview_url` と描画用の `scene_url` は任意。`manifest_url` は配信契約のmanifestを指し、動画プレイヤーへ直接渡すURLではない。既存FlutterアプリのAPI読込・ABR制御への接続は次の段階とする。
+クリップには `id`、`revision`、`title`、`sport`、`description`、`codec`、`manifest_url` を返す。通常動画の `preview_url` と描画用の `scene_url` は任意。`manifest_url` は配信契約のmanifestを指し、動画プレイヤーへ直接渡すURLではない。Flutterは `RANGLE_API_URL=/api/v1/clips` で先頭ページとmedia URLを読み込み、動画・自由視点・時刻シークを行う。[Webの起動手順](../apps/web/README.md#apiから動画自由視点を開く)を参照。ABR制御への接続は次の段階とする。
 
 ## 公開するcatalog
 

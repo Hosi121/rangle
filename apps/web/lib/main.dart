@@ -2,16 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app.dart';
+import 'data/api_clip_repository.dart';
 import 'data/clip_repository.dart';
 import 'viewer/free_view_adapter.dart';
 
 void main() {
+  const apiUrl = String.fromEnvironment('RANGLE_API_URL');
   runApp(
     RangleApp(
-      repository: const DemoClipRepository(
-        previewUrl: String.fromEnvironment('RANGLE_PREVIEW_URL'),
-        sceneUrl: String.fromEnvironment('RANGLE_SCENE_URL'),
-      ),
+      repository: apiUrl.isEmpty
+          ? const DemoClipRepository(
+              previewUrl: String.fromEnvironment('RANGLE_PREVIEW_URL'),
+              sceneUrl: String.fromEnvironment('RANGLE_SCENE_URL'),
+            )
+          : ApiClipRepository(endpoint: apiUrl),
     ),
   );
 }
