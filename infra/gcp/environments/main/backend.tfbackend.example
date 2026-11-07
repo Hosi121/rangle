@@ -1,0 +1,4 @@
+# Fictional values. This bucket belongs only to main. Use CLI workspace default.
+bucket                      = "rangle-example-tfstate-main"
+prefix                      = "rangle/main"
+impersonate_service_account = "terraform-main@rangle-example-main.iam.gserviceaccount.com"

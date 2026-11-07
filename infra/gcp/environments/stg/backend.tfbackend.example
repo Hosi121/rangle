@@ -1,0 +1,4 @@
+# Fictional values. This bucket belongs only to stg. Use CLI workspace default.
+bucket                      = "rangle-example-tfstate-stg"
+prefix                      = "rangle/stg"
+impersonate_service_account = "terraform-stg@rangle-example-stg.iam.gserviceaccount.com"

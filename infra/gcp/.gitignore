@@ -1,0 +1,17 @@
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan*
+*.tfvars*
+*.tfbackend*
+*credentials*.json
+*service-account*.json
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+# Commit only fake examples and provider locks.
+!*.tfvars.example
+!*.tfbackend.example

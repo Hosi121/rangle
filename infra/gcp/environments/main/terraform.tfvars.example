@@ -1,0 +1,32 @@
+# Fictional identifiers and illustrative limits; no measured capacity or budget.
+terraform_service_account = "terraform-main@rangle-example-main.iam.gserviceaccount.com"
+config = {
+  project_id                = "rangle-example-main"
+  project_number            = "123456789012"
+  region                    = "us-central1"
+  name_prefix               = "rangle"
+  app_domain                = "main.app.example.com"
+  media_domain              = "main.media.example.com"
+  media_bucket_name         = "rangle-example-main-published"
+  catalog_bucket_name       = "rangle-example-main-catalog"
+  input_bucket_name         = "rangle-example-main-private-inputs"
+  publisher_service_account = "publisher-main@rangle-example-main.iam.gserviceaccount.com"
+  media_cache_ttl_seconds   = 86400
+}
+
+# First stage: creates storage and the media edge only; do not set app DNS yet.
+application = null
+
+# Second stage: replace null after verified publication. These fake digests
+# are intentionally unusable and demonstrate shape only.
+# application = {
+#   image_digest            = "us-central1-docker.pkg.dev/rangle-example-main/release/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+#   catalog_sha256          = "0000000000000000000000000000000000000000000000000000000000000000"
+#   ui_root                 = "/app/web"
+#   cpu                     = 1
+#   memory                  = "512Mi"
+#   concurrency             = 16
+#   min_instances           = 0
+#   max_instances           = 2
+#   request_timeout_seconds = 30
+# }
