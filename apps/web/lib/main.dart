@@ -3,22 +3,30 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app.dart';
 import 'data/clip_repository.dart';
+import 'viewer/free_view_adapter.dart';
 
 void main() {
   runApp(
     RangleApp(
       repository: const DemoClipRepository(
         previewUrl: String.fromEnvironment('RANGLE_PREVIEW_URL'),
+        sceneUrl: String.fromEnvironment('RANGLE_SCENE_URL'),
       ),
     ),
   );
 }
 
 class RangleApp extends StatelessWidget {
-  const RangleApp({required this.repository, super.key, this.viewerFactory});
+  const RangleApp({
+    required this.repository,
+    super.key,
+    this.viewerFactory,
+    this.sceneFactory,
+  });
 
   final ClipRepository repository;
   final ViewerFactory? viewerFactory;
+  final ViewerFactory? sceneFactory;
 
   @override
   Widget build(BuildContext context) {
@@ -56,6 +64,7 @@ class RangleApp extends StatelessWidget {
       home: ClipFeedScreen(
         repository: repository,
         viewerFactory: viewerFactory ?? VideoPreviewAdapter.new,
+        sceneFactory: sceneFactory ?? createFreeViewAdapter,
       ),
     );
   }

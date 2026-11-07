@@ -13,11 +13,13 @@ class ClipFeedScreen extends StatefulWidget {
   const ClipFeedScreen({
     required this.repository,
     required this.viewerFactory,
+    required this.sceneFactory,
     super.key,
   });
 
   final ClipRepository repository;
   final ViewerFactory viewerFactory;
+  final ViewerFactory sceneFactory;
 
   @override
   State<ClipFeedScreen> createState() => _ClipFeedScreenState();
@@ -119,6 +121,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                   key: ObjectKey(_clips),
                   clips: clips,
                   viewerFactory: widget.viewerFactory,
+                  sceneFactory: widget.sceneFactory,
                 );
               },
             ),
@@ -154,10 +157,12 @@ class _HighlightFeed extends StatefulWidget {
   const _HighlightFeed({
     required this.clips,
     required this.viewerFactory,
+    required this.sceneFactory,
     super.key,
   });
   final List<Clip> clips;
   final ViewerFactory viewerFactory;
+  final ViewerFactory sceneFactory;
 
   @override
   State<_HighlightFeed> createState() => _HighlightFeedState();
@@ -166,6 +171,7 @@ class _HighlightFeed extends StatefulWidget {
 class _HighlightFeedState extends State<_HighlightFeed> {
   final PageController _pages = PageController();
   int _selected = 0;
+  bool _freeView = false;
 
   void _select(int index) {
     if (index < 0 || index >= widget.clips.length || index == _selected) return;
@@ -215,7 +221,13 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                   if (wide) ...[
                     SizedBox(
                       width: 240,
-                      child: SingleChildScrollView(child: _Introduction()),
+                      child: SingleChildScrollView(
+                        child: _Introduction(
+                          hasFreeView: widget.clips.any(
+                            (clip) => clip.sceneUrl != null,
+                          ),
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 40),
                   ],
@@ -229,15 +241,23 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                               key: const Key('highlight-feed'),
                               controller: _pages,
                               scrollDirection: Axis.vertical,
+                              physics: _freeView
+                                  ? const NeverScrollableScrollPhysics()
+                                  : null,
                               itemCount: widget.clips.length,
-                              onPageChanged: (index) =>
-                                  setState(() => _selected = index),
+                              onPageChanged: (index) => setState(() {
+                                _selected = index;
+                                _freeView = false;
+                              }),
                               itemBuilder: (context, index) => ExcludeSemantics(
                                 excluding: index != _selected,
                                 child: ClipCard(
                                   clip: widget.clips[index],
                                   active: index == _selected,
                                   viewerFactory: widget.viewerFactory,
+                                  sceneFactory: widget.sceneFactory,
+                                  onFreeViewChanged: (value) =>
+                                      setState(() => _freeView = value),
                                   onNext: index < widget.clips.length - 1
                                       ? () => _select(index + 1)
                                       : null,
@@ -285,7 +305,9 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           Padding(
                             padding: const EdgeInsets.only(top: 4, bottom: 4),
                             child: Text(
-                              compact
+                              _freeView
+                                  ? 'ドラッグで視点を操作 / 前後ボタンで切り替え'
+                                  : compact
                                   ? '上下にスワイプして切り替え'
                                   : '上下にスクロール / ↑ ↓ キーで切り替え',
                               style: Theme.of(context).textTheme.labelSmall
@@ -322,6 +344,8 @@ class _HighlightFeedState extends State<_HighlightFeed> {
 }
 
 class _Introduction extends StatelessWidget {
+  const _Introduction({required this.hasFreeView});
+  final bool hasFreeView;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(top: 32),
@@ -351,7 +375,9 @@ class _Introduction extends StatelessWidget {
         const Divider(),
         const SizedBox(height: 16),
         Text(
-          '現在はデモカタログです。\n自由視点の再生は準備中です。',
+          hasFreeView
+              ? 'サンプルの時刻を選んで、\n視点を動かして見返せます。'
+              : '短い再構成サンプルを\n固定視点で確認できます。',
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             height: 1.8,
             color: Theme.of(context).colorScheme.onSurfaceVariant,

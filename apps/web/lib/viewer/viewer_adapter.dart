@@ -24,8 +24,7 @@ class ViewerValue {
   final bool buffering;
 }
 
-/// A future 4DGS renderer can implement its own adapter and view here.
-/// The current implementation plays ordinary video and offers no camera API.
+/// Shared lifecycle and time controls for ordinary video and free-view scenes.
 abstract class ViewerAdapter extends ChangeNotifier {
   ViewerValue get value;
   Future<void> initialize();
@@ -33,6 +32,7 @@ abstract class ViewerAdapter extends ChangeNotifier {
   Future<void> seek(Duration position);
   Future<void> toggleMute();
   Future<void> pause();
+  Future<void> resume() async {}
   Widget buildView();
 }
 
@@ -40,7 +40,11 @@ typedef ViewerFactory = ViewerAdapter Function(Uri source);
 
 class VideoPreviewAdapter extends ViewerAdapter {
   VideoPreviewAdapter(Uri source)
-    : this.withController(VideoPlayerController.networkUrl(source));
+    : this.withController(
+        source.hasScheme
+            ? VideoPlayerController.networkUrl(source)
+            : VideoPlayerController.asset(source.toString()),
+      );
 
   @visibleForTesting
   VideoPreviewAdapter.withController(this._controller) {

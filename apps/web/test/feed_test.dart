@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/cupertino.dart' show CupertinoSlider;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:rangle_web/data/clip_repository.dart';
 import 'package:rangle_web/main.dart';
 import 'package:rangle_web/models/clip.dart';
 import 'package:rangle_web/viewer/viewer_adapter.dart';
+import 'package:rangle_web/widgets/preview_viewer.dart';
 
 class TestRepository implements ClipRepository {
   TestRepository(this.loadClips);
@@ -17,15 +19,19 @@ class TestRepository implements ClipRepository {
 }
 
 class FakeViewer extends ViewerAdapter {
-  FakeViewer({ViewerStatus initialStatus = ViewerStatus.ready})
-    : _value = ViewerValue(
-        status: initialStatus,
-        duration: const Duration(seconds: 20),
-      );
+  FakeViewer({
+    ViewerStatus initialStatus = ViewerStatus.ready,
+    this.surfaceKey = 'real-video-surface',
+  }) : _value = ViewerValue(
+         status: initialStatus,
+         duration: const Duration(seconds: 20),
+       );
 
   ViewerValue _value;
+  final String surfaceKey;
   bool disposed = false;
   int pauseCount = 0;
+  int resumeCount = 0;
   Duration? lastSeek;
 
   @override
@@ -82,8 +88,12 @@ class FakeViewer extends ViewerAdapter {
   }
 
   @override
-  Widget buildView() =>
-      const ColoredBox(key: Key('real-video-surface'), color: Colors.black);
+  Future<void> resume() async {
+    resumeCount++;
+  }
+
+  @override
+  Widget buildView() => ColoredBox(key: Key(surfaceKey), color: Colors.black);
 
   @override
   void dispose() {
@@ -101,6 +111,7 @@ Future<void> pumpApp(
   WidgetTester tester, {
   ClipRepository? repository,
   ViewerFactory? viewerFactory,
+  ViewerFactory? sceneFactory,
   Size size = const Size(390, 844),
 }) async {
   tester.view.physicalSize = size;
@@ -109,8 +120,32 @@ Future<void> pumpApp(
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     RangleApp(
-      repository: repository ?? const DemoClipRepository(),
+      repository:
+          repository ??
+          TestRepository(
+            () async => const [
+              Clip(
+                id: 'pending1',
+                title: 'バスケットボール 01',
+                sport: 'バスケットボール',
+                description: '準備中',
+              ),
+              Clip(
+                id: 'pending2',
+                title: 'バスケットボール 02',
+                sport: 'バスケットボール',
+                description: '準備中',
+              ),
+              Clip(
+                id: 'pending3',
+                title: 'バスケットボール 03',
+                sport: 'バスケットボール',
+                description: '準備中',
+              ),
+            ],
+          ),
       viewerFactory: viewerFactory,
+      sceneFactory: sceneFactory,
     ),
   );
   await tester.pumpAndSettle();
@@ -185,7 +220,7 @@ void main() {
     expect(find.textContaining('private diagnostic'), findsNothing);
     await tester.tap(find.text('再読み込み'));
     await tester.pumpAndSettle();
-    expect(find.text('バスケットボール 01'), findsOneWidget);
+    expect(find.text('VRU Basketball'), findsOneWidget);
     expect(calls, 2);
   });
 
@@ -334,6 +369,140 @@ void main() {
             .load(),
         throwsFormatException,
       );
+    },
+  );
+
+  test(
+    'bundled sample is an asset and external scene overrides require HTTP',
+    () async {
+      final clips = await const DemoClipRepository().load();
+      expect(clips.first.title, 'VRU Basketball');
+      expect(
+        clips.first.previewUrl.toString(),
+        'assets/samples/basketball.webm',
+      );
+      expect(clips.first.previewUrl!.hasScheme, isFalse);
+      expect(clips.first.description, contains('CC BY 4.0'));
+      expect(clips.first.sceneUrl, isNull);
+      await expectLater(
+        const DemoClipRepository(sceneUrl: 'file:///scene.json').load(),
+        throwsFormatException,
+      );
+    },
+  );
+
+  testWidgets(
+    'free view replaces video, seeks without playback, and releases on return or navigation',
+    (tester) async {
+      final videos = <FakeViewer>[];
+      final scenes = <FakeViewer>[];
+      await pumpApp(
+        tester,
+        repository: const DemoClipRepository(
+          sceneUrl: 'https://example.invalid/scene.json',
+        ),
+        viewerFactory: (_) {
+          final viewer = FakeViewer();
+          videos.add(viewer);
+          return viewer;
+        },
+        sceneFactory: (_) {
+          final viewer = FakeViewer(surfaceKey: 'real-scene-surface');
+          scenes.add(viewer);
+          return viewer;
+        },
+      );
+      await tester.tap(find.text('自由視点で見る'));
+      await tester.pumpAndSettle();
+      expect(videos.single.disposed, isTrue);
+      expect(find.byKey(const Key('real-video-surface')), findsNothing);
+      expect(find.byKey(const Key('real-scene-surface')), findsOneWidget);
+      expect(iconButton('再生'), findsNothing);
+      expect(
+        tester
+            .widget<PageView>(find.byKey(const Key('highlight-feed')))
+            .physics,
+        isA<NeverScrollableScrollPhysics>(),
+      );
+      final scrubber = tester.getRect(find.byKey(const Key('media-scrubber')));
+      await tester.dragFrom(
+        Offset(scrubber.left + 18, scrubber.center.dy),
+        Offset(scrubber.width / 2, 0),
+      );
+      await tester.pump();
+      expect(scenes.single.lastSeek, isNotNull);
+      expect(
+        tester
+            .widget<CupertinoSlider>(find.byKey(const Key('media-scrubber')))
+            .onChanged,
+        isNotNull,
+      );
+      await tester.tap(find.text('動画に戻る'));
+      await tester.pumpAndSettle();
+      expect(scenes.single.disposed, isTrue);
+      expect(videos, hasLength(2));
+      await tester.tap(find.text('自由視点で見る'));
+      await tester.pumpAndSettle();
+      await tester.tap(iconButton('次のハイライト'));
+      await tester.pumpAndSettle();
+      expect(scenes.last.disposed, isTrue);
+      expect(find.byKey(const Key('real-scene-surface')), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'free-view failure retries with a new viewer and keeps phone layout usable',
+    (tester) async {
+      final scenes = <FakeViewer>[];
+      await pumpApp(
+        tester,
+        size: const Size(844, 390),
+        repository: const DemoClipRepository(
+          sceneUrl: 'https://example.invalid/scene.json',
+        ),
+        viewerFactory: (_) => FakeViewer(),
+        sceneFactory: (_) {
+          final viewer = FakeViewer(surfaceKey: 'real-scene-surface');
+          scenes.add(viewer);
+          return viewer;
+        },
+      );
+      await tester.tap(iconButton('自由視点で見る'));
+      await tester.pumpAndSettle();
+      scenes.single.fail();
+      await tester.pump();
+      expect(find.text('自由視点を表示できませんでした'), findsOneWidget);
+      await tester.ensureVisible(find.text('再試行'));
+      await tester.tap(find.text('再試行'));
+      await tester.pumpAndSettle();
+      expect(scenes.first.disposed, isTrue);
+      expect(scenes, hasLength(2));
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'free view keeps drawing on iframe focus but pauses when hidden',
+    (tester) async {
+      final scene = FakeViewer(surfaceKey: 'real-scene-surface');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: PreviewViewer(
+              source: Uri.parse('https://example.invalid/scene.json'),
+              factory: (_) => scene,
+              freeView: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      expect(scene.pauseCount, 0);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      expect(scene.pauseCount, 1);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      expect(scene.resumeCount, 1);
     },
   );
 }

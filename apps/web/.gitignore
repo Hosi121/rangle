@@ -6,5 +6,8 @@ build/
 coverage/
 .idea/
 *.iml
+web/viewer/viewer.js
+web/viewer/viewer.js.LEGAL.txt
+web/viewer/THIRD_PARTY_LICENSES.txt
 .local/
 *.log

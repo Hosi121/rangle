@@ -1,0 +1,16 @@
+{
+  "name": "rangle-scene-viewer",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@mkkellogg/gaussian-splats-3d": "0.4.7",
+    "three": "0.160.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.12"
+  }
+}

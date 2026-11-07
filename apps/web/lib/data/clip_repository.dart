@@ -4,11 +4,12 @@ abstract interface class ClipRepository {
   Future<List<Clip>> load();
 }
 
-/// Explicit demo metadata: there are no bundled videos or sports photographs.
+/// The first entry uses the bundled research sample unless a video URL overrides it.
 class DemoClipRepository implements ClipRepository {
-  const DemoClipRepository({this.previewUrl = ''});
+  const DemoClipRepository({this.previewUrl = '', this.sceneUrl = ''});
 
   final String previewUrl;
+  final String sceneUrl;
 
   @override
   Future<List<Clip>> load() async {
@@ -20,15 +21,24 @@ class DemoClipRepository implements ClipRepository {
             !{'http', 'https'}.contains(uri.scheme))) {
       throw const FormatException('Preview URL must use HTTP or HTTPS.');
     }
+    final scene = sceneUrl.trim();
+    final sceneUri = scene.isEmpty ? null : Uri.tryParse(scene);
+    if (scene.isNotEmpty &&
+        (sceneUri == null ||
+            !sceneUri.hasAuthority ||
+            !{'http', 'https'}.contains(sceneUri.scheme))) {
+      throw const FormatException('Scene URL must use HTTP or HTTPS.');
+    }
     return [
       Clip(
         id: 'demo-01',
-        title: value.isEmpty ? 'バスケットボール 01' : 'プレビュー映像',
-        sport: value.isEmpty ? 'バスケットボール' : 'プレビュー',
+        title: value.isEmpty ? 'VRU Basketball' : 'プレビュー映像',
+        sport: 'バスケットボール',
         description: value.isEmpty
-            ? '表示と操作を確認するためのデモ項目です。映像の公開をお待ちください。'
-            : '通常の動画プレビューです。自由視点の再生には対応していません。',
-        previewUrl: uri,
+            ? '短い再構成サンプル。AVS-VRU / Jiahao Wu ほか（CC BY 4.0）'
+            : '通常の動画プレビューです。',
+        previewUrl: uri ?? Uri.parse('assets/samples/basketball.webm'),
+        sceneUrl: sceneUri,
       ),
       const Clip(
         id: 'demo-02',

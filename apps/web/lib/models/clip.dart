@@ -6,6 +6,7 @@ class Clip {
     required this.sport,
     required this.description,
     this.previewUrl,
+    this.sceneUrl,
   });
 
   final String id;
@@ -15,4 +16,5 @@ class Clip {
 
   /// Ordinary, browser-playable video. Never a Gaussian transport payload.
   final Uri? previewUrl;
+  final Uri? sceneUrl;
 }
