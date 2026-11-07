@@ -1,4 +1,5 @@
 import { attachReferenceSampling } from './reference-sampling.js';
+import { attachCameraIntrinsics } from './camera-intrinsics.js';
 import { Viewer, SceneRevealMode, RenderMode } from '@mkkellogg/gaussian-splats-3d';
 import { CHANNEL, SceneSession } from './session.js';
 import { FrameLoader } from './frame-loader.js';
@@ -25,10 +26,11 @@ window.addEventListener('message', async (event) => {
           renderMode: RenderMode.OnChange,
         });
         viewer.camera.fov = camera.fovYDegrees;
+        const releaseIntrinsics = attachCameraIntrinsics(viewer.camera, camera.intrinsics);
         viewer.camera.updateProjectionMatrix();
         const releaseSampling = attachReferenceSampling(viewer, camera.referenceImageHeight);
         const dispose = viewer.dispose.bind(viewer);
-        viewer.dispose = () => { releaseSampling(); return dispose(); };
+        viewer.dispose = () => { releaseSampling(); releaseIntrinsics(); return dispose(); };
         return viewer;
       },
     });

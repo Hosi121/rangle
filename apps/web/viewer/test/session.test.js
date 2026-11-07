@@ -84,6 +84,17 @@ test('optional reference raster height is bounded and survives manifest parsing'
   }
 });
 
+test('optional calibrated intrinsics survive parsing and reject unstable projection values', () => {
+  const input = manifest();
+  const intrinsics = { width: 960, height: 803, fx: 915, fy: 916, cx: 476, cy: 407 };
+  input.camera.intrinsics = intrinsics;
+  assert.deepEqual(parseManifest(input, source).camera.intrinsics, intrinsics);
+  for (const change of [null, { ...intrinsics, fy: Number.MIN_VALUE }, { ...intrinsics, fx: Infinity }]) {
+    input.camera.intrinsics = change;
+    assert.throws(() => parseManifest(input, source), /Invalid scene manifest/);
+  }
+});
+
 test('seeks are serialized, skip queued intermediate frames, and preserve the orbit camera', async () => {
   const { session, viewer, messages } = harness();
   await session.load(source);
