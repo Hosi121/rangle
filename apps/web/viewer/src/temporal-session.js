@@ -44,7 +44,7 @@ export class TemporalSession {
   }
 
   async install(model) {
-    if (model.frameCount !== this.manifest.frameCount || model.frameRate !== this.manifest.frameRate) {
+    if (model.frameCount !== this.manifest.frameCount || model.frameRate !== Math.fround(this.manifest.frameRate)) {
       throw new Error('Temporal model timeline mismatch');
     }
     this.viewer = this.createViewer(this.manifest.camera);

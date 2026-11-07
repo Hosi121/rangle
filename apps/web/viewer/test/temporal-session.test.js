@@ -40,8 +40,8 @@ function harness() {
     textureHeight: 1, texture: new Float32Array(2048 * 4) };
   const respond = command => worker.emit({ type: 'sorted', id: command.id,
     time: command.time, indexes: new Uint32Array([0]), active: 1 });
-  const load = async () => {
-    const promise = session.load(manifest);
+  const load = async (timeline = manifest) => {
+    const promise = session.load(timeline);
     worker.emit(model); await flush();
     respond(commands.at(-1)); await promise;
   };
@@ -60,6 +60,14 @@ test('hidden preparation draws a real first frame before ready, then waits for v
   assert.equal(h.counts.starts, 1);
   await h.session.dispose();
   assert.equal(h.worker.terminated, true);
+});
+
+test('fractional source rates match their float32 binary representation', async () => {
+  const h = harness();
+  h.model.frameRate = Math.fround(29.97);
+  await h.load({ ...manifest, frameRate: 29.97 });
+  assert.equal(h.messages.find(message => message.type === 'ready').frameRate, 29.97);
+  await h.session.dispose();
 });
 
 test('seeks reuse one mesh and commit the matching camera snapshot', async () => {
