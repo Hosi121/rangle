@@ -74,6 +74,8 @@ JS viewerは`@mkkellogg/gaussian-splats-3d@0.4.7`と`three@0.160.0`（ともにM
 
 `frames`は非空の`.splat` URL配列、`frameRate`は正の有限数です。frame数とrateはmanifestから読み、例の2frameやサンプルの20frameに固定しません。相対frame URLはmanifestの最終URLを基準に解決します。上の例では最後の時刻は0.04秒、20frame/25fpsでは0.76秒です。各ファイルはその時刻の実際の3D Gaussianを持つ必要があります。
 
+学習時の描画スケールに依存する資産には、`camera.referenceImageHeight`を指定できます（64〜2160の整数pixel、例：480×270で学習した資産なら270）。指定時はdrawing bufferの高さをその値に保ち、幅は表示領域の縦横比に合わせます。CSSの表示サイズ・縦画角・視点操作は維持します。これは端末DPRから独立したモデルの描画条件であり、解像度を上げるほど高画質になるという指定ではありません。未指定時は従来どおり端末DPRを使います。[比較結果と制約](../../docs/gaussian-quality.md)を参照してください。
+
 frame切替は1つずつ処理し、切替中の追加seekは最後の要求へ集約します。orbitのカメラ状態は時刻間で保持します。初回読み込みやseekの失敗にはカード内で再試行を示します。失敗後の遅い応答で表示が復活しないようにしています。
 
 フレームの取得・parse・分割・packingはWeb Workerで行い、準備したbufferをtransferします。Workerは1つを再利用し、取消・離脱時は終了します。入力は1フレーム32MiBまでです。GPU転送とmesh構築はメインスレッドに残ります。[資源管理・SDKの変更・測定の範囲](../../docs/client-processing.md)を参照してください。

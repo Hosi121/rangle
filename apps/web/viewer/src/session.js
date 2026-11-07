@@ -15,6 +15,8 @@ export function parseManifest(input, source) {
       !camera.up.some((value) => value !== 0) ||
       camera.position.every((value, index) => value === camera.lookAt[index]) ||
       !Number.isFinite(camera.fovYDegrees) || camera.fovYDegrees <= 0 || camera.fovYDegrees >= 180 ||
+      (camera.referenceImageHeight !== undefined && (!Number.isInteger(camera.referenceImageHeight) ||
+        camera.referenceImageHeight < 64 || camera.referenceImageHeight > 2160)) ||
       !['label', 'source', 'license'].every((key) => typeof input.attribution?.[key] === 'string' && input.attribution[key].trim())) {
     throw new Error('Invalid scene manifest');
   }
