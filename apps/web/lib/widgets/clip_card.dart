@@ -4,18 +4,43 @@ import '../models/clip.dart';
 import '../viewer/viewer_adapter.dart';
 import 'preview_viewer.dart';
 
-class ClipCard extends StatelessWidget {
+class ClipCard extends StatefulWidget {
   const ClipCard({
     required this.clip,
     required this.active,
     required this.viewerFactory,
+    required this.sceneFactory,
+    required this.onFreeViewChanged,
     this.onNext,
     super.key,
   });
   final Clip clip;
   final bool active;
   final ViewerFactory viewerFactory;
+  final ViewerFactory sceneFactory;
+  final ValueChanged<bool> onFreeViewChanged;
   final VoidCallback? onNext;
+
+  @override
+  State<ClipCard> createState() => _ClipCardState();
+}
+
+class _ClipCardState extends State<ClipCard> {
+  bool _freeView = false;
+  Clip get clip => widget.clip;
+  bool get active => widget.active;
+  VoidCallback? get onNext => widget.onNext;
+
+  @override
+  void didUpdateWidget(ClipCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!active) _freeView = false;
+  }
+
+  void _toggleMode() {
+    setState(() => _freeView = !_freeView);
+    widget.onFreeViewChanged(_freeView);
+  }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -59,7 +84,11 @@ class ClipCard extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              clip.previewUrl == null ? '映像準備中' : '通常動画',
+                              _freeView
+                                  ? '自由視点'
+                                  : clip.previewUrl == null
+                                  ? '映像準備中'
+                                  : '通常動画',
                               style: Theme.of(context).textTheme.labelSmall,
                             ),
                           ],
@@ -68,11 +97,18 @@ class ClipCard extends StatelessWidget {
                       const Divider(height: 1),
                     ],
                     Expanded(
-                      child: clip.previewUrl != null && active
+                      child: _freeView && active && clip.sceneUrl != null
                           ? PreviewViewer(
-                              key: ValueKey(clip.id),
+                              key: ValueKey('${clip.id}-scene'),
+                              source: clip.sceneUrl!,
+                              factory: widget.sceneFactory,
+                              freeView: true,
+                            )
+                          : clip.previewUrl != null && active
+                          ? PreviewViewer(
+                              key: ValueKey('${clip.id}-video'),
                               source: clip.previewUrl!,
-                              factory: viewerFactory,
+                              factory: widget.viewerFactory,
                             )
                           : Column(
                               children: [
@@ -137,16 +173,28 @@ class ClipCard extends StatelessWidget {
                               ),
                             ),
                             Text(
-                              clip.previewUrl == null ? '映像準備中' : '通常動画',
+                              _freeView
+                                  ? '自由視点'
+                                  : clip.previewUrl == null
+                                  ? '映像準備中'
+                                  : '通常動画',
                               style: Theme.of(context).textTheme.labelSmall,
                             ),
                           ],
                         ),
                       ),
-                      const IconButton(
-                        tooltip: '自由視点は準備中',
-                        onPressed: null,
-                        icon: Icon(Icons.threed_rotation),
+                      IconButton(
+                        tooltip: clip.sceneUrl == null
+                            ? '自由視点は準備中'
+                            : _freeView
+                            ? '動画に戻る'
+                            : '自由視点で見る',
+                        onPressed: clip.sceneUrl == null ? null : _toggleMode,
+                        icon: Icon(
+                          _freeView
+                              ? Icons.movie_outlined
+                              : Icons.threed_rotation,
+                        ),
                       ),
                     ],
                   )
@@ -173,9 +221,20 @@ class ClipCard extends StatelessWidget {
                       SizedBox(
                         width: double.infinity,
                         child: OutlinedButton.icon(
-                          onPressed: null,
-                          icon: const Icon(Icons.threed_rotation, size: 18),
-                          label: const Text('自由視点は準備中'),
+                          onPressed: clip.sceneUrl == null ? null : _toggleMode,
+                          icon: Icon(
+                            _freeView
+                                ? Icons.movie_outlined
+                                : Icons.threed_rotation,
+                            size: 18,
+                          ),
+                          label: Text(
+                            clip.sceneUrl == null
+                                ? '自由視点は準備中'
+                                : _freeView
+                                ? '動画に戻る'
+                                : '自由視点で見る',
+                          ),
                         ),
                       ),
                     ],

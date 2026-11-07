@@ -13,6 +13,7 @@ dependencies:
   flutter_localizations:
     sdk: flutter
   video_player: 2.14.1
+  web: 1.1.1
 
 dev_dependencies:
   flutter_test:
@@ -21,3 +22,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/samples/basketball.webm
