@@ -21,15 +21,18 @@ class TestRepository implements ClipRepository {
 class FakeViewer extends ViewerAdapter {
   FakeViewer({
     ViewerStatus initialStatus = ViewerStatus.ready,
+    bool canPlay = true,
     this.surfaceKey = 'real-video-surface',
   }) : _value = ViewerValue(
          status: initialStatus,
          duration: const Duration(seconds: 20),
+         canPlay: canPlay,
        );
 
   ViewerValue _value;
   final String surfaceKey;
   bool disposed = false;
+  bool paused = false;
   int pauseCount = 0;
   int resumeCount = 0;
   Duration? lastSeek;
@@ -45,11 +48,20 @@ class FakeViewer extends ViewerAdapter {
     notifyListeners();
   }
 
+  void becomeReady() {
+    _value = const ViewerValue(
+      status: ViewerStatus.ready,
+      duration: Duration(seconds: 20),
+    );
+    notifyListeners();
+  }
+
   @override
   Future<void> togglePlayback() async {
     _value = ViewerValue(
       status: _value.status,
       playing: !_value.playing,
+      canPlay: _value.canPlay,
       muted: _value.muted,
       position: _value.position,
       duration: _value.duration,
@@ -65,6 +77,7 @@ class FakeViewer extends ViewerAdapter {
       position: position,
       duration: _value.duration,
       playing: _value.playing,
+      canPlay: _value.canPlay,
       muted: _value.muted,
     );
     notifyListeners();
@@ -77,6 +90,7 @@ class FakeViewer extends ViewerAdapter {
       position: _value.position,
       duration: _value.duration,
       playing: _value.playing,
+      canPlay: _value.canPlay,
       muted: !_value.muted,
     );
     notifyListeners();
@@ -85,11 +99,13 @@ class FakeViewer extends ViewerAdapter {
   @override
   Future<void> pause() async {
     pauseCount++;
+    paused = true;
   }
 
   @override
   Future<void> resume() async {
     resumeCount++;
+    paused = false;
   }
 
   @override
@@ -98,6 +114,7 @@ class FakeViewer extends ViewerAdapter {
   @override
   void dispose() {
     disposed = true;
+    paused = true;
     pauseCount++;
     super.dispose();
   }
@@ -392,7 +409,7 @@ void main() {
   );
 
   testWidgets(
-    'free view replaces video, seeks without playback, and releases on return or navigation',
+    'legacy free view seeks without playback and releases on return or navigation',
     (tester) async {
       final videos = <FakeViewer>[];
       final scenes = <FakeViewer>[];
@@ -407,7 +424,10 @@ void main() {
           return viewer;
         },
         sceneFactory: (_) {
-          final viewer = FakeViewer(surfaceKey: 'real-scene-surface');
+          final viewer = FakeViewer(
+            surfaceKey: 'real-scene-surface',
+            canPlay: false,
+          );
           scenes.add(viewer);
           return viewer;
         },
@@ -439,10 +459,13 @@ void main() {
       );
       await tester.tap(find.text('動画に戻る'));
       await tester.pumpAndSettle();
-      expect(scenes.single.disposed, isTrue);
+      expect(scenes.single.disposed, isFalse);
+      expect(scenes.single.paused, isTrue);
       expect(videos, hasLength(2));
       await tester.tap(find.text('自由視点で見る'));
       await tester.pumpAndSettle();
+      expect(scenes, hasLength(1));
+      expect(scenes.single.paused, isFalse);
       await tester.tap(iconButton('次のハイライト'));
       await tester.pumpAndSettle();
       expect(scenes.last.disposed, isTrue);
@@ -470,14 +493,162 @@ void main() {
       await tester.tap(iconButton('自由視点で見る'));
       await tester.pumpAndSettle();
       scenes.single.fail();
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.text('自由視点を表示できませんでした'), findsOneWidget);
-      await tester.ensureVisible(find.text('再試行'));
-      await tester.tap(find.text('再試行'));
+      expect(find.byKey(const Key('real-video-surface')), findsOneWidget);
+      await tester.tap(iconButton('自由視点を再試行'));
       await tester.pumpAndSettle();
       expect(scenes.first.disposed, isTrue);
       expect(scenes, hasLength(2));
       expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
+    'cancel disposes pending GS while completed GS is retained for reentry',
+    (tester) async {
+      final videos = <FakeViewer>[];
+      final scenes = <FakeViewer>[];
+      await pumpApp(
+        tester,
+        repository: const DemoClipRepository(
+          sceneUrl: 'https://example.invalid/scene.json',
+        ),
+        viewerFactory: (_) {
+          final viewer = FakeViewer();
+          videos.add(viewer);
+          return viewer;
+        },
+        sceneFactory: (_) {
+          final viewer = FakeViewer(
+            initialStatus: ViewerStatus.loading,
+            canPlay: false,
+            surfaceKey: 'real-scene-surface',
+          );
+          scenes.add(viewer);
+          return viewer;
+        },
+      );
+      await tester.tap(iconButton('再生'));
+      await tester.pump();
+      await tester.tap(find.text('自由視点で見る'));
+      await tester.pumpAndSettle();
+      expect(videos, hasLength(1));
+      expect(videos.single.disposed, isFalse);
+      expect(videos.single.value.playing, isTrue);
+      expect(scenes.single.paused, isTrue);
+      final sceneWidget = tester.widget<PreviewViewer>(
+        find.byWidgetPredicate(
+          (widget) => widget is PreviewViewer && widget.freeView,
+        ),
+      );
+      expect(sceneWidget.visible, isFalse);
+      await tester.tap(iconButton('一時停止'));
+      await tester.pump();
+      expect(videos.single.value.playing, isFalse);
+      await tester.tap(find.byType(Slider));
+      await tester.pump();
+      expect(videos.single.lastSeek, isNotNull);
+
+      await tester.tap(find.text('自由視点の準備をキャンセル'));
+      // Queue a late ready callback before the cancelled widget is removed.
+      scenes.single.becomeReady();
+      await tester.pumpAndSettle();
+      expect(videos.single.disposed, isFalse);
+      expect(scenes.single.disposed, isTrue);
+      expect(scenes.single.paused, isTrue);
+      expect(find.byKey(const Key('real-video-surface')), findsOneWidget);
+      expect(find.byKey(const Key('real-scene-surface')), findsNothing);
+      await tester.tap(find.text('自由視点で見る'));
+      await tester.pumpAndSettle();
+      expect(scenes, hasLength(2));
+      expect(videos.single.disposed, isFalse);
+      expect(scenes.last.paused, isTrue);
+      scenes.last.becomeReady();
+      await tester.pumpAndSettle();
+      expect(videos.single.disposed, isTrue);
+      expect(scenes.last.paused, isFalse);
+      await tester.tap(find.text('動画に戻る'));
+      await tester.pumpAndSettle();
+      expect(scenes.last.paused, isTrue);
+      expect(scenes.last.disposed, isFalse);
+      expect(videos, hasLength(2));
+      await tester.tap(find.text('自由視点で見る'));
+      await tester.pumpAndSettle();
+      expect(scenes, hasLength(2));
+      expect(scenes.last.paused, isFalse);
+      await tester.tap(iconButton('次のハイライト'));
+      await tester.pumpAndSettle();
+      expect(scenes.last.disposed, isTrue);
+    },
+  );
+
+  testWidgets('navigation while GS prepares releases the pending scene', (
+    tester,
+  ) async {
+    final video = FakeViewer();
+    final scene = FakeViewer(
+      initialStatus: ViewerStatus.loading,
+      canPlay: false,
+      surfaceKey: 'real-scene-surface',
+    );
+    await pumpApp(
+      tester,
+      repository: const DemoClipRepository(
+        sceneUrl: 'https://example.invalid/scene.json',
+      ),
+      viewerFactory: (_) => video,
+      sceneFactory: (_) => scene,
+    );
+    await tester.tap(find.text('自由視点で見る'));
+    await tester.pumpAndSettle();
+    expect(video.disposed, isFalse);
+    expect(scene.paused, isTrue);
+    await tester.tap(iconButton('次のハイライト'));
+    await tester.pumpAndSettle();
+    expect(video.disposed, isTrue);
+    expect(scene.disposed, isTrue);
+  });
+
+  testWidgets(
+    'failed GS preparation retains video and retry replaces the scene',
+    (tester) async {
+      final video = FakeViewer();
+      final scenes = <FakeViewer>[];
+      await pumpApp(
+        tester,
+        repository: const DemoClipRepository(
+          sceneUrl: 'https://example.invalid/scene.json',
+        ),
+        viewerFactory: (_) => video,
+        sceneFactory: (_) {
+          final scene = FakeViewer(
+            initialStatus: ViewerStatus.loading,
+            canPlay: false,
+            surfaceKey: 'real-scene-surface',
+          );
+          scenes.add(scene);
+          return scene;
+        },
+      );
+      await tester.tap(find.text('自由視点で見る'));
+      await tester.pumpAndSettle();
+      scenes.single.fail();
+      await tester.pumpAndSettle();
+      expect(scenes.single.disposed, isTrue);
+      expect(video.disposed, isFalse);
+      expect(find.text('自由視点を表示できませんでした'), findsOneWidget);
+      await tester.tap(iconButton('再生'));
+      await tester.pump();
+      expect(video.value.playing, isTrue);
+      await tester.tap(find.text('自由視点を再試行'));
+      await tester.pumpAndSettle();
+      expect(scenes, hasLength(2));
+      expect(video.disposed, isFalse);
+      scenes.last.becomeReady();
+      await tester.pumpAndSettle();
+      expect(video.disposed, isTrue);
+      expect(scenes.last.paused, isFalse);
     },
   );
 

@@ -27,6 +27,10 @@ class ClipCard extends StatefulWidget {
 
 class _ClipCardState extends State<ClipCard> {
   bool _freeView = false;
+  bool _sceneRequested = false;
+  bool _sceneReady = false;
+  bool _pendingScene = false;
+  bool _sceneError = false;
   Clip get clip => widget.clip;
   bool get active => widget.active;
   VoidCallback? get onNext => widget.onNext;
@@ -34,12 +38,113 @@ class _ClipCardState extends State<ClipCard> {
   @override
   void didUpdateWidget(ClipCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!active) _freeView = false;
+    if (!active ||
+        oldWidget.clip.id != clip.id ||
+        oldWidget.clip.sceneUrl != clip.sceneUrl) {
+      _freeView = false;
+      _sceneRequested = false;
+      _sceneReady = false;
+      _pendingScene = false;
+      _sceneError = false;
+    }
   }
 
   void _toggleMode() {
-    setState(() => _freeView = !_freeView);
+    setState(() {
+      if (_freeView) {
+        _freeView = false;
+      } else if (_pendingScene) {
+        _pendingScene = false;
+        _sceneRequested = false;
+        _sceneReady = false;
+      } else {
+        _sceneRequested = true;
+        _sceneError = false;
+        _freeView = _sceneReady;
+        _pendingScene = !_sceneReady;
+      }
+    });
     widget.onFreeViewChanged(_freeView);
+  }
+
+  void _onSceneReady() {
+    if (!active || !_sceneRequested) return;
+    final reveal = _pendingScene;
+    setState(() {
+      _sceneReady = true;
+      _pendingScene = false;
+      _freeView = reveal;
+    });
+    if (reveal) widget.onFreeViewChanged(true);
+  }
+
+  void _onSceneStatus(ViewerStatus status) {
+    if (!active || !_sceneRequested || status != ViewerStatus.error) return;
+    final wasFreeView = _freeView;
+    setState(() {
+      _sceneRequested = false;
+      _sceneReady = false;
+      _pendingScene = false;
+      _freeView = false;
+      _sceneError = true;
+    });
+    if (wasFreeView) widget.onFreeViewChanged(false);
+  }
+
+  String get _modeLabel => _sceneError
+      ? '自由視点を表示できませんでした'
+      : _pendingScene
+      ? '通常動画・自由視点準備中'
+      : _freeView
+      ? '自由視点'
+      : clip.previewUrl == null
+      ? '映像準備中'
+      : '通常動画';
+
+  String get _modeAction => clip.sceneUrl == null
+      ? '自由視点は準備中'
+      : _freeView
+      ? '動画に戻る'
+      : _pendingScene
+      ? '自由視点の準備をキャンセル'
+      : _sceneError
+      ? '自由視点を再試行'
+      : '自由視点で見る';
+
+  Widget _ordinaryView(bool compact) {
+    if (clip.previewUrl != null && active) {
+      return PreviewViewer(
+        key: ValueKey('${clip.id}-video'),
+        source: clip.previewUrl!,
+        factory: widget.viewerFactory,
+      );
+    }
+    return Column(
+      children: [
+        Expanded(
+          child: compact
+              ? Center(
+                  child: Text(
+                    '映像を準備しています',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                )
+              : ViewerMessage(
+                  icon: Icons.video_library_outlined,
+                  title: '映像を準備しています',
+                  description: '公開されたハイライトが\nここに表示されます。',
+                  action: onNext == null
+                      ? null
+                      : OutlinedButton.icon(
+                          onPressed: onNext,
+                          icon: const Icon(Icons.arrow_downward, size: 18),
+                          label: const Text('次の項目を見る'),
+                        ),
+                ),
+        ),
+        if (!compact) const _PendingControls(),
+      ],
+    );
   }
 
   @override
@@ -83,13 +188,16 @@ class _ClipCardState extends State<ClipCard> {
                                 style: Theme.of(context).textTheme.labelLarge,
                               ),
                             ),
-                            Text(
-                              _freeView
-                                  ? '自由視点'
-                                  : clip.previewUrl == null
-                                  ? '映像準備中'
-                                  : '通常動画',
-                              style: Theme.of(context).textTheme.labelSmall,
+                            Flexible(
+                              child: Semantics(
+                                liveRegion: true,
+                                child: Text(
+                                  _modeLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.labelSmall,
+                                ),
+                              ),
                             ),
                           ],
                         ),
@@ -97,51 +205,29 @@ class _ClipCardState extends State<ClipCard> {
                       const Divider(height: 1),
                     ],
                     Expanded(
-                      child: _freeView && active && clip.sceneUrl != null
-                          ? PreviewViewer(
+                      child: Stack(
+                        fit: StackFit.expand,
+                        children: [
+                          if (_sceneRequested &&
+                              active &&
+                              clip.sceneUrl != null)
+                            PreviewViewer(
                               key: ValueKey('${clip.id}-scene'),
                               source: clip.sceneUrl!,
                               factory: widget.sceneFactory,
                               freeView: true,
-                            )
-                          : clip.previewUrl != null && active
-                          ? PreviewViewer(
-                              key: ValueKey('${clip.id}-video'),
-                              source: clip.previewUrl!,
-                              factory: widget.viewerFactory,
-                            )
-                          : Column(
-                              children: [
-                                Expanded(
-                                  child: compact
-                                      ? Center(
-                                          child: Text(
-                                            '映像を準備しています',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleSmall,
-                                          ),
-                                        )
-                                      : ViewerMessage(
-                                          icon: Icons.video_library_outlined,
-                                          title: '映像を準備しています',
-                                          description:
-                                              '公開されたハイライトが\nここに表示されます。',
-                                          action: onNext == null
-                                              ? null
-                                              : OutlinedButton.icon(
-                                                  onPressed: onNext,
-                                                  icon: const Icon(
-                                                    Icons.arrow_downward,
-                                                    size: 18,
-                                                  ),
-                                                  label: const Text('次の項目を見る'),
-                                                ),
-                                        ),
-                                ),
-                                if (!compact) const _PendingControls(),
-                              ],
+                              visible: _freeView,
+                              onReady: _onSceneReady,
+                              onStatusChanged: _onSceneStatus,
                             ),
+                          if (!_freeView)
+                            ColoredBox(
+                              key: ValueKey('${clip.id}-video-layer'),
+                              color: colors.surfaceContainer,
+                              child: _ordinaryView(compact),
+                            ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
@@ -172,26 +258,25 @@ class _ClipCardState extends State<ClipCard> {
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
                             ),
-                            Text(
-                              _freeView
-                                  ? '自由視点'
-                                  : clip.previewUrl == null
-                                  ? '映像準備中'
-                                  : '通常動画',
-                              style: Theme.of(context).textTheme.labelSmall,
+                            Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                _modeLabel,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
                             ),
                           ],
                         ),
                       ),
                       IconButton(
-                        tooltip: clip.sceneUrl == null
-                            ? '自由視点は準備中'
-                            : _freeView
-                            ? '動画に戻る'
-                            : '自由視点で見る',
+                        tooltip: _modeAction,
                         onPressed: clip.sceneUrl == null ? null : _toggleMode,
                         icon: Icon(
-                          _freeView
+                          _pendingScene
+                              ? Icons.hourglass_top
+                              : _freeView
                               ? Icons.movie_outlined
                               : Icons.threed_rotation,
                         ),
@@ -223,18 +308,14 @@ class _ClipCardState extends State<ClipCard> {
                         child: OutlinedButton.icon(
                           onPressed: clip.sceneUrl == null ? null : _toggleMode,
                           icon: Icon(
-                            _freeView
+                            _pendingScene
+                                ? Icons.hourglass_top
+                                : _freeView
                                 ? Icons.movie_outlined
                                 : Icons.threed_rotation,
                             size: 18,
                           ),
-                          label: Text(
-                            clip.sceneUrl == null
-                                ? '自由視点は準備中'
-                                : _freeView
-                                ? '動画に戻る'
-                                : '自由視点で見る',
-                          ),
+                          label: Text(_modeAction),
                         ),
                       ),
                     ],
