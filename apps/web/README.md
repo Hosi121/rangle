@@ -76,6 +76,8 @@ JS viewerは`@mkkellogg/gaussian-splats-3d@0.4.7`と`three@0.160.0`（ともにM
 
 frame切替は1つずつ処理し、切替中の追加seekは最後の要求へ集約します。orbitのカメラ状態は時刻間で保持します。初回読み込みやseekの失敗にはカード内で再試行を示します。失敗後の遅い応答で表示が復活しないようにしています。
 
+フレームの取得・parse・分割・packingはWeb Workerで行い、準備したbufferをtransferします。Workerは1つを再利用し、取消・離脱時は終了します。入力は1フレーム32MiBまでです。GPU転送とmesh構築はメインスレッドに残ります。[資源管理・SDKの変更・測定の範囲](../../docs/client-processing.md)を参照してください。
+
 viewerは同じoriginのiframe内でbody直下に生成します。Flutterとの小さなmessage APIはorigin・source・channelを確認します。これは上流viewerのDOM所有権に合わせ、離脱時に非同期disposeとiframe破棄を行うためです。非表示時は描画ループも止めます。SharedArrayBufferとGPU sortは有効にしていません。
 
 ## 検証
