@@ -174,6 +174,9 @@ func TestRangeAndConditionals(t *testing.T) {
 }
 
 func TestMultipartRange(t *testing.T) {
+	// Keep this multipart-specific test independent of the toolchain's default
+	// range limit. The server retains the standard library's runtime policy.
+	t.Setenv("GODEBUG", "httpservecontentmaxranges=200")
 	manifest, assets := delivery.DemoFixture()
 	handler := mustHandler(t, manifest, assets)
 	url := manifest.Representations[0].Segments[0].URL

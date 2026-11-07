@@ -21,7 +21,7 @@ GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを
 
 ## 配信部品の動作確認
 
-Go 1.23以降を利用します。初期実装は外部依存なしで動きます。
+Go 1.27.3以降を利用します。開発・検証に使うGoの下限を `go.mod` に揃えています。配信root外へのファイル参照を防ぐ標準 [`os.Root`](https://go.dev/blog/osroot) を利用し、初期実装は外部依存なしで動きます。
 
 ```bash
 go test -race ./...
@@ -44,9 +44,33 @@ curl -i -H 'Range: bytes=0-15' http://127.0.0.1:8080/assets/demo/synthetic-v1/lo
 
 デモの資産と帯域系列は合成データです。実際の4DGSの復号やHLS/DASH再生、実回線での高速化を実証するものではありません。GoのABR制御は、モバイル実装へ判断規則とテストケースを引き継ぐための基準です。
 
+## WebビルドとローカルsceneのGo配信
+
+既存の [Flutter Webビルド](apps/web/README.md) と、利用が許可されたローカルsceneを指定して配信できます。パスは手元のディレクトリへ置き換えてください。実データや学習重みはGitへ追加しません。
+
+```bash
+go run ./cmd/rangle-server \
+  -ui-root /path/to/build/web \
+  -scene-dir /path/to/local/scene \
+  -scene-id basketball
+```
+
+`http://127.0.0.1:4174/` がUI、`/samples/basketball/scene.json` がsceneです。このURLを `RANGLE_SCENE_URL` に指定したビルドを利用できます。sceneを使わない場合は `-scene-dir` と `-scene-id` の両方を省きます。`/healthz` は起動確認用です。終了はCtrl+Cで、処理中のHTTP要求を最大5秒待って停止します。
+
+UIは `index.html` を必須とし、隠しファイル、`*.local.md`、`*.private.md`、ディレクトリ一覧を公開しません。`/samples/` はUI内の同名ディレクトリから独立し、指定sceneのmanifestとそこに列挙された相対 `.splat` だけを配信します。root外へ参照を解決させず、大きなframeは全量をRAMへコピーせずストリーミングします。
+
+公開対象は起動時に固定します。UIの再ビルド、ファイルの置換、manifestの変更はサーバーを再起動して反映します。ローカルの可変ファイルなので `immutable` は付けず、`no-cache` と `Last-Modified` で再検証します。HEAD・Range・条件付きGETに対応し、エラーは `no-store` です。例のframe名は自身のmanifestに合わせてください。
+
+```bash
+curl -I http://127.0.0.1:4174/samples/basketball/scene.json
+curl -i -H 'Range: bytes=0-15' http://127.0.0.1:4174/samples/basketball/frames/000.splat
+```
+
+この入口はループバックIPだけを受け付け、`PORT` 環境変数は読みません。実回線の性能や大規模配信を検証するものではなく、本番の大容量資産はCDN・object storageから直接配信する方針を維持します。
+
 ## ログ
 
-Goコマンドのログは標準 `log/slog` を使い、INFO以上のJSONをstderrへ出力します。`service` でコマンドを識別し、コマンドの失敗には `error` を付けます。`rangle-dev` は起動・終了とHTTPサーバー内部エラーを記録し、起動時に `listen_addr`、`manifest_url`、`fixture="synthetic"` を示します。`abr-sim` の計算結果はstdout、ログはエラー時だけです。
+Goコマンドのログは標準 `log/slog` を使い、INFO以上のJSONをstderrへ出力します。`service` でコマンドを識別し、コマンドの失敗には `error` を付けます。`rangle-dev` と `rangle-server` は起動・終了とHTTPサーバー内部エラーを記録します。起動時の `listen_addr` に加え、`rangle-dev` は `manifest_url` と `fixture="synthetic"`、`rangle-server` は `scene_id` を示します。`abr-sim` の計算結果はstdout、ログはエラー時だけです。
 
 ## リポジトリ
 

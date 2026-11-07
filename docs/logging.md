@@ -36,7 +36,7 @@ GoのAPI・CLI・ワーカーで、実行ログは標準の `log/slog` に統一
 | `clip_id`・`revision` | 対象のコンテンツと資産の版 |
 | `duration_ms` | ミリ秒単位の数値。単位をキーで明示 |
 
-起動時の `listen_addr`・`manifest_url`、合成資産の `fixture="synthetic"` は配信コマンドで使う属性とする。認証情報、署名付きURLのクエリ、リクエストの本文・ヘッダー全体は記録しない。
+配信コマンドは起動時に `listen_addr` を記録する。`rangle-dev` は `manifest_url` と `fixture="synthetic"`、`rangle-server` は明示的に公開するサンプルの `scene_id` を付ける。認証情報、署名付きURLのクエリ、リクエストの本文・ヘッダー全体は記録しない。
 
 ## 他言語と運用
 
