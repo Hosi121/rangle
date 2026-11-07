@@ -1,6 +1,6 @@
 # インフラ構成案
 
-設計段階の提案。ピーク時に数千〜数万人が同時視聴する規模を目標とする。クラウド資源の作成・起動と、この規模の負荷検証は未実施である。
+設計段階の提案。ピーク時に数千〜数万人が同時視聴する規模を目標とする。Cloud Runへの実配備と、この規模の負荷検証は未実施である。
 
 ## 推奨する構成
 
@@ -19,7 +19,7 @@ flowchart LR
     GPU -->|評価後に公開| Assets
 ```
 
-ローカル/MVPではアプリを1サービスに抑え、Storage直接取得で成立を確認してよい。本番のGo APIは単一インスタンスへ状態を閉じず水平分散し、資産の全バイトを中継しない。UIの独立したリリースが必要になったら配信先を分ける。現在の `rangle-server` はWeb・フィードAPI・版付き資産をローカルで提供し、取得先originの設定で大容量配信を分離できる。クラウド用の待受けとコンテナ化・実配備は後続とする。[APIと配信の契約](api-delivery.md)
+ローカル/MVPではアプリを1サービスに抑え、Storage直接取得で成立を確認してよい。本番のGo APIは単一インスタンスへ状態を閉じず水平分散し、資産の全バイトを中継しない。UIの独立したリリースが必要になったら配信先を分ける。現在の `rangle-server` はWeb・フィードAPI・版付き資産を提供し、取得先originの設定で大容量配信を分離できる。PORT環境変数による待受けとGo・Flutter Webのコンテナ化に対応し、内蔵デモのローカル起動を確認した。Cloud Runへの実配備は後続とする。[APIと配信の契約](api-delivery.md)、[Dockerの手順](docker.md)
 
 ## 可搬性の境界
 
@@ -48,6 +48,6 @@ HCLとGoogle providerを候補とし、実装前にTerraformかOpenTofuの一方
 
 根拠: [Googleのroot-module指針](https://docs.cloud.google.com/docs/terraform/best-practices/root-modules)、[Terraform GCS backend](https://developer.hashicorp.com/terraform/language/backend/gcs)、[OpenTofu GCS backend](https://opentofu.org/docs/language/settings/backends/gcs/)、[CI向けWIF](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)。
 
-## 実装前に決めること
+## 実配備前に決めること
 
-project、region、quota、公開する資産、費用・GPU時間・ジョブ並列数の上限、stateと実行権限の管理者を決める。容量検証の実行予算と中止条件も別途定め、現在は起動可否、配信性能、GPU互換性、費用を未検証として扱う。
+project、region、quota、公開する資産、費用・GPU時間・ジョブ並列数の上限、stateと実行権限の管理者を決める。容量検証の実行予算と中止条件も別途定める。ローカルでのコンテナ起動と、Cloud Runでの起動可否、配信性能、GPU互換性、費用の検証は区別する。Cloud Runでの動作と大規模配信性能は未検証として扱う。
