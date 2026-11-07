@@ -21,7 +21,7 @@ GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを
 
 ## 配信部品の動作確認
 
-Go 1.24以降を利用します。配信root外へのファイル参照を防ぐ標準 [`os.Root`](https://go.dev/blog/osroot) を利用するためです。初期実装は外部依存なしで動きます。
+Go 1.27.3以降を利用します。開発・検証に使うGoの下限を `go.mod` に揃えています。配信root外へのファイル参照を防ぐ標準 [`os.Root`](https://go.dev/blog/osroot) を利用し、初期実装は外部依存なしで動きます。
 
 ```bash
 go test -race ./...

@@ -4,7 +4,7 @@
 
 ## 共通の型
 
-`internal/stream/manifest.go` を実装間の正本にする。モジュール名は `github.com/Hosi121/rangle`。Go 1.24以降の標準ライブラリだけで初期実装を動かす。
+`internal/stream/manifest.go` を実装間の正本にする。モジュール名は `github.com/Hosi121/rangle`。Go 1.27.3以降の標準ライブラリだけで初期実装を動かす。
 
 - 品質ごとに同じ時刻・長さ・区間数を持つ。
 - 各区間は独立に復号可能とする。独立でない資産は初期形式で受け付けない。
