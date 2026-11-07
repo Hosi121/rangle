@@ -12,6 +12,7 @@ class ViewerValue {
     this.position = Duration.zero,
     this.duration = Duration.zero,
     this.playing = false,
+    this.canPlay = true,
     this.muted = false,
     this.buffering = false,
   });
@@ -20,6 +21,7 @@ class ViewerValue {
   final Duration position;
   final Duration duration;
   final bool playing;
+  final bool canPlay;
   final bool muted;
   final bool buffering;
 }

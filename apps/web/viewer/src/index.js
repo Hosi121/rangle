@@ -37,6 +37,8 @@ window.addEventListener('message', async (event) => {
     await session.load(message.url);
   } else if (message.type === 'seek') {
     await session?.seek(message.frame);
+  } else if (message.type === 'togglePlayback') {
+    session?.togglePlayback();
   } else if (message.type === 'pause') {
     session?.pause(true);
   } else if (message.type === 'resume') {
