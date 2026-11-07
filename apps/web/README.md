@@ -2,7 +2,7 @@
 
 スポーツのハイライトを切り替える、Flutter / DartのWebフロントエンドです。日本語UIとMaterial 3を使います。
 
-先頭の **VRU Basketball** は、実験で再構成した480×270・25fps・0.8秒の通常動画サンプルです。出典はAVS-VRU / Jiahao Wuほか（CC BY 4.0）。詳細は [assets/samples/ATTRIBUTION.md](assets/samples/ATTRIBUTION.md) に記載しています。残り2項目は準備中です。動画は自動再生せず、再生・停止・シーク・ミュートに対応します。
+APIモードではGoの公開フィードからカードと動画・sceneのURLを読み込みます。APIを指定しない場合は内蔵の3件のデモを使います。デモ先頭の **VRU Basketball** は、実験で再構成した480×270・25fps・0.8秒の通常動画サンプルです。出典はAVS-VRU / Jiahao Wuほか（CC BY 4.0）。詳細は [assets/samples/ATTRIBUTION.md](assets/samples/ATTRIBUTION.md) に記載しています。動画は自動再生せず、再生・停止・シーク・ミュートに対応します。
 
 `RANGLE_SCENE_URL` を設定すると、同じカードを3D Gaussian Splatting表示へ切り替えられます。ドラッグで視点を回転し、スクロールで拡大縮小、スライダーで静止時刻を選びます。自由視点モードでは既存の前後ボタンで項目を切り替え、モードを切り替える際に前の再生資源を破棄します。
 
@@ -19,6 +19,26 @@ npm run build --prefix viewer
 flutter --suppress-analytics pub get --enforce-lockfile
 flutter --suppress-analytics run -d web-server --web-hostname 127.0.0.1 --web-port 8080
 ```
+
+### APIから動画・自由視点を開く
+
+```bash
+flutter --suppress-analytics build web --no-web-resources-cdn \
+  --dart-define=RANGLE_API_URL=/api/v1/clips
+```
+
+リポジトリのrootから、[catalogと資産の配置](../../docs/api-delivery.md)に従って起動します。
+
+```bash
+go run ./cmd/rangle-server -ui-root apps/web/build/web \
+  -catalog .local/catalog.json -asset-root .local/published
+```
+
+`http://127.0.0.1:4174`を開き、動画を再生 →「自由視点で見る」→ 下のつまみをドラッグして時刻を選ぶ → シーンをドラッグして視点を回す →「動画に戻る」の順に操作できます。scene URLはcatalogの`scene_url`から読み、各frameは版付きHTTP資産として配信します。上のAPI URLは同じoriginを使うため、`localhost`でも開けます。
+
+初期版は先頭の1ページだけを読みます（API既定10件、最大50件）。自動追加読込・ABR制御・連続3D再生は未実装です。API失敗時は再読み込みを表示し、デモへ自動で切り替えません。外部APIを指定する場合は、そのAPIと資産にCORSが必要です。
+
+### APIを使わないデモ
 
 自由視点を有効にする場合は、HTTP(S)で取得できるscene manifestを指定します。外部動画で先頭サンプルを置き換える場合だけ`RANGLE_PREVIEW_URL`を追加します。外部overrideはHTTP(S)のみ受け付け、内蔵動画は`VideoPlayerController.asset`で再生します。
 
@@ -70,4 +90,4 @@ flutter --suppress-analytics build web --no-web-resources-cdn
 
 JSテストはmanifest、異なるframe数/rate、最新seekへの集約、カメラ保持、失敗・離脱中の破棄をGPUなしで検証します。Flutterテストは既存のフィードと動画操作に加え、asset参照、動画と自由視点の切替、seek、再試行、離脱時の破棄を検証します。実ブラウザのWebGL描画、orbit、コーデック、HTTP/CORS、worker解放は、実際の配信資産を使うブラウザ確認が必要です。
 
-`ViewerAdapter`は従来の動画APIを保ち、`Clip.sceneUrl`で自由視点の参照を追加しています。`RANGLE_SCENE_URL`が空なら自由視点ボタンは無効です。Goプロトタイプの`/manifests/{clip_id}/{revision}.json`と合成`.bin`は別の転送契約であり、このscene manifestや通常動画には流用しません。
+`ViewerAdapter`は従来の動画APIを保ち、`Clip.sceneUrl`で自由視点の参照を追加しています。APIモードは`scene_url`、デモモードは`RANGLE_SCENE_URL`が未設定なら自由視点ボタンを無効にします。Goの`/manifests/{clip_id}/{revision}.json`は配信契約です。描画用scene manifestとは役割が異なり、この画面ではABR判断にまだ使いません。
