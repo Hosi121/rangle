@@ -1,7 +1,7 @@
 import '../models/clip.dart';
 
 abstract interface class ClipRepository {
-  Future<List<Clip>> load();
+  Future<List<Clip>> load({String query = '', String tag = '', String? clipId});
 }
 
 /// The first entry uses the bundled research sample unless a video URL overrides it.
@@ -12,7 +12,11 @@ class DemoClipRepository implements ClipRepository {
   final String sceneUrl;
 
   @override
-  Future<List<Clip>> load() async {
+  Future<List<Clip>> load({
+    String query = '',
+    String tag = '',
+    String? clipId,
+  }) async {
     final value = previewUrl.trim();
     final uri = value.isEmpty ? null : Uri.tryParse(value);
     if (value.isNotEmpty &&
@@ -29,11 +33,12 @@ class DemoClipRepository implements ClipRepository {
             !{'http', 'https'}.contains(sceneUri.scheme))) {
       throw const FormatException('Scene URL must use HTTP or HTTPS.');
     }
-    return [
+    final clips = [
       Clip(
         id: 'demo-01',
         title: value.isEmpty ? 'VRU Basketball' : 'プレビュー映像',
         sport: 'バスケットボール',
+        tags: const ['バスケットボール', '自由視点'],
         description: value.isEmpty
             ? '短い再構成サンプル。AVS-VRU / Jiahao Wu ほか（CC BY 4.0）'
             : '通常の動画プレビューです。',
@@ -44,14 +49,43 @@ class DemoClipRepository implements ClipRepository {
         id: 'demo-02',
         title: 'バスケットボール 02',
         sport: 'バスケットボール',
+        tags: ['バスケットボール'],
         description: '表示と操作を確認するためのデモ項目です。映像の公開をお待ちください。',
       ),
       const Clip(
         id: 'demo-03',
         title: 'バスケットボール 03',
         sport: 'バスケットボール',
+        tags: ['バスケットボール'],
         description: '表示と操作を確認するためのデモ項目です。映像の公開をお待ちください。',
       ),
     ];
+    final terms = query
+        .toLowerCase()
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((term) => term.isNotEmpty);
+    final filtered = clips
+        .where(
+          (clip) =>
+              (tag.isEmpty ||
+                  clip.tags.any(
+                    (value) => value.toLowerCase() == tag.toLowerCase(),
+                  )) &&
+              terms.every(
+                (term) =>
+                    '${clip.title} ${clip.sport} ${clip.description} ${clip.tags.join(' ')}'
+                        .toLowerCase()
+                        .contains(term),
+              ),
+        )
+        .toList();
+    if (clipId != null) {
+      final index = filtered.indexWhere((clip) => clip.id == clipId);
+      if (index < 0) throw const FormatException('Shared clip not found.');
+      final shared = filtered.removeAt(index);
+      filtered.insert(0, shared);
+    }
+    return filtered;
   }
 }

@@ -16,10 +16,67 @@ Map<String, Object?> clip() => {
 
 void main() {
   test(
+    'search parameters and tags reach the complete server catalog',
+    () async {
+      final client = MockClient((request) async {
+        expect(request.url.queryParameters, {
+          'limit': '50',
+          'q': '決勝 SLAM',
+          'tag': 'Basketball',
+        });
+        return http.Response.bytes(
+          utf8.encode(
+            jsonEncode({
+              'clips': [
+                {
+                  ...clip(),
+                  'tags': ['Basketball', '決勝'],
+                },
+              ],
+            }),
+          ),
+          200,
+        );
+      });
+      final rows = await ApiClipRepository(
+        endpoint: 'https://rangle.test/api/v1/clips',
+        client: client,
+      ).load(query: '決勝 SLAM', tag: 'Basketball');
+      expect(rows.single.tags, ['Basketball', '決勝']);
+      client.close();
+    },
+  );
+  test(
+    'a shared clip is loaded by ID even when absent from the first page',
+    () async {
+      final client = MockClient(
+        (request) async => http.Response.bytes(
+          utf8.encode(
+            jsonEncode(
+              request.url.path.endsWith('/hidden')
+                  ? {...clip(), 'id': 'hidden'}
+                  : {
+                      'clips': [clip()],
+                    },
+            ),
+          ),
+          200,
+        ),
+      );
+      final rows = await ApiClipRepository(
+        endpoint: 'https://rangle.test/api/v1/clips',
+        client: client,
+      ).load(clipId: 'hidden');
+      expect(rows.map((row) => row.id), ['hidden', 'basketball']);
+      client.close();
+    },
+  );
+  test(
     'API metadata resolves the preview and free-view scene on the API origin',
     () async {
       final client = MockClient((request) async {
-        expect(request.url.toString(), 'https://rangle.test/api/v1/clips');
+        expect(request.url.path, '/api/v1/clips');
+        expect(request.url.queryParameters['limit'], '50');
         return http.Response.bytes(
           utf8.encode(
             jsonEncode({

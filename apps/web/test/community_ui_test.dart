@@ -1,0 +1,282 @@
+import 'dart:convert';
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
+import 'package:rangle_web/community/community_api.dart';
+import 'package:rangle_web/data/clip_repository.dart';
+import 'package:rangle_web/main.dart';
+import 'package:rangle_web/sharing/share_clip.dart';
+
+import 'support/fake_viewer.dart';
+
+class CommunityFixture {
+  Map<String, String>? user;
+  bool liked = false, rejectLogin = false, loseFirstCommentResponse = false;
+  final comments = <String, Map<String, Object?>>{};
+  final posts = <Map<String, dynamic>>[];
+  Future<http.Response>? delayedEngagement;
+  late final client = MockClient((request) async {
+    final path = request.url.path;
+    http.Response reply(Object value, [int status = 200]) =>
+        http.Response.bytes(utf8.encode(jsonEncode(value)), status);
+    if (path.endsWith('/auth/me')) {
+      return reply({'user': user, 'available': true});
+    }
+    if (path.endsWith('/auth/login') || path.endsWith('/auth/register')) {
+      if (rejectLogin) return reply({'error': 'invalid_credentials'}, 401);
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      user = {
+        'id': body['username'] as String,
+        'name': (body['name'] as String?)?.isNotEmpty == true
+            ? body['name'] as String
+            : 'テストユーザー',
+      };
+      return reply({'user': user});
+    }
+    if (path.endsWith('/auth/logout')) {
+      user = null;
+      return http.Response('', 204);
+    }
+    if (path.endsWith('/engagement')) {
+      final delayed = delayedEngagement;
+      delayedEngagement = null;
+      if (delayed != null) return delayed;
+      return reply({
+        'likes': liked ? 1 : 0,
+        'comments': comments.length,
+        'liked': liked,
+      });
+    }
+    if (path.endsWith('/likes')) {
+      liked = request.method == 'PUT';
+      return http.Response('', 204);
+    }
+    if (path.endsWith('/comments') && request.method == 'GET') {
+      return reply({'comments': comments.values.toList(), 'next_cursor': ''});
+    }
+    if (path.endsWith('/comments') && request.method == 'POST') {
+      final body = jsonDecode(request.body) as Map<String, dynamic>;
+      posts.add(body);
+      final id = body['request_id'] as String;
+      final row = comments.putIfAbsent(
+        id,
+        () => {
+          'id': id,
+          'author': user,
+          'text': body['text'],
+          'created_at': '2026-11-09T00:00:00Z',
+        },
+      );
+      if (loseFirstCommentResponse) {
+        loseFirstCommentResponse = false;
+        return reply({'error': 'service_unavailable'}, 503);
+      }
+      return reply(row, 201);
+    }
+    if (path.contains('/comments/') && request.method == 'DELETE') {
+      comments.remove(path.split('/').last);
+      return http.Response('', 204);
+    }
+    throw StateError('Unexpected request: ${request.method} $path');
+  });
+  CommunityApi get api => CommunityApi(
+    endpoint: Uri.parse('https://rangle.test/api/v1/'),
+    client: client,
+  );
+}
+
+Future<void> pumpCommunity(
+  WidgetTester tester,
+  CommunityFixture fixture, {
+  void Function()? videoCreated,
+}) async {
+  tester.view.physicalSize = const Size(390, 844);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(fixture.client.close);
+  await tester.pumpWidget(
+    RangleApp(
+      repository: const DemoClipRepository(),
+      community: fixture.api,
+      viewerFactory: (_) {
+        videoCreated?.call();
+        return FakeViewer();
+      },
+      sceneFactory: (_) => FakeViewer(),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<void> login(WidgetTester tester) async {
+  await tester.enterText(find.byKey(const Key('account-username')), 'viewer');
+  await tester.enterText(
+    find.byKey(const Key('account-password')),
+    'a long test password 2026',
+  );
+  await tester.tap(find.widgetWithText(FilledButton, 'ログインする'));
+  await tester.pumpAndSettle();
+}
+
+void main() {
+  testWidgets('a late anonymous count cannot overwrite a completed like', (
+    tester,
+  ) async {
+    final initial = Completer<http.Response>();
+    final fixture = CommunityFixture()..delayedEngagement = initial.future;
+    await pumpCommunity(tester, fixture);
+    await tester.tap(find.byTooltip('いいね'));
+    await tester.pumpAndSettle();
+    await login(tester);
+    expect(find.byTooltip('いいねを取り消す'), findsOneWidget);
+    initial.complete(
+      http.Response('{"likes":0,"comments":0,"liked":false}', 200),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('いいねを取り消す'), findsOneWidget);
+  });
+  testWidgets(
+    'registration validates passwords and exposes only the public account',
+    (tester) async {
+      final fixture = CommunityFixture();
+      await pumpCommunity(tester, fixture);
+      await tester.tap(find.byTooltip('ログイン'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(TextButton, 'アカウントを作成'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byKey(const Key('account-username')),
+        'viewer',
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-password')),
+        'short',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '登録する'));
+      await tester.pumpAndSettle();
+      expect(find.text('15〜128文字で入力してください。'), findsOneWidget);
+      expect(fixture.user, isNull);
+      await tester.enterText(
+        find.byKey(const Key('account-password')),
+        'a long test password 2026',
+      );
+      await tester.enterText(
+        find.byKey(const Key('account-confirm-password')),
+        'a long test password 2026',
+      );
+      await tester.tap(find.widgetWithText(FilledButton, '登録する'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('アカウント'), findsOneWidget);
+      await tester.tap(find.byTooltip('アカウント'));
+      await tester.pumpAndSettle();
+      expect(find.text('@viewer'), findsOneWidget);
+      await tester.tap(find.widgetWithText(OutlinedButton, 'ログアウト'));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('ログイン'), findsOneWidget);
+      expect(fixture.user, isNull);
+    },
+  );
+  testWidgets('liking asks for login and leaves the active viewer resident', (
+    tester,
+  ) async {
+    var videos = 0;
+    final fixture = CommunityFixture();
+    await pumpCommunity(tester, fixture, videoCreated: () => videos++);
+    await tester.tap(find.byTooltip('いいね'));
+    await tester.pumpAndSettle();
+    await login(tester);
+    expect(fixture.liked, isTrue);
+    expect(find.byTooltip('いいねを取り消す'), findsOneWidget);
+    expect(videos, 1);
+    await tester.tap(find.byTooltip('いいねを取り消す'));
+    await tester.pumpAndSettle();
+    expect(fixture.liked, isFalse);
+    expect(videos, 1);
+  });
+  testWidgets('bad credentials keep the form open and show a useful error', (
+    tester,
+  ) async {
+    final fixture = CommunityFixture()..rejectLogin = true;
+    await pumpCommunity(tester, fixture);
+    await tester.tap(find.byTooltip('ログイン'));
+    await tester.pumpAndSettle();
+    await login(tester);
+    expect(find.text('IDまたはパスワードが正しくありません。'), findsOneWidget);
+    expect(find.byKey(const Key('account-password')), findsOneWidget);
+  });
+  testWidgets(
+    'retrying a comment keeps its request identity and can delete the result',
+    (tester) async {
+      final fixture = CommunityFixture()
+        ..user = {'id': 'viewer', 'name': 'テスト'}
+        ..loseFirstCommentResponse = true;
+      await pumpCommunity(tester, fixture);
+      await tester.tap(find.byTooltip('コメント'));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.byType(TextField),
+        'いい角度！ <script>plain text</script>',
+      );
+      await tester.pump();
+      await tester.tap(find.byTooltip('コメントを投稿'));
+      await tester.pumpAndSettle();
+      expect(find.text('現在この機能を利用できません。'), findsOneWidget);
+      await tester.tap(find.byTooltip('コメントを投稿'));
+      await tester.pumpAndSettle();
+      expect(fixture.posts, hasLength(2));
+      expect(fixture.posts[0]['request_id'], fixture.posts[1]['request_id']);
+      expect(fixture.comments, hasLength(1));
+      expect(find.text('いい角度！ <script>plain text</script>'), findsOneWidget);
+      await tester.tap(find.byTooltip('自分のコメントを削除'));
+      await tester.pumpAndSettle();
+      expect(fixture.comments, isEmpty);
+    },
+  );
+  testWidgets('hashtag and keyword search can return to the complete feed', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      RangleApp(
+        repository: const DemoClipRepository(),
+        viewerFactory: (_) => FakeViewer(),
+        sceneFactory: (_) => FakeViewer(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), '#自由視点');
+    await tester.tap(find.widgetWithText(FilledButton, '検索'));
+    await tester.pumpAndSettle();
+    expect(find.text('01 / 01'), findsOneWidget);
+    await tester.tap(find.byTooltip('絞り込み解除'));
+    await tester.pumpAndSettle();
+    expect(find.text('01 / 03'), findsOneWidget);
+    await tester.tap(find.byTooltip('検索'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), '存在しないキーワード');
+    await tester.tap(find.widgetWithText(FilledButton, '検索'));
+    await tester.pumpAndSettle();
+    expect(find.text('ハイライトが見つかりませんでした'), findsOneWidget);
+    await tester.tap(find.widgetWithText(OutlinedButton, 'すべてのハイライトを見る'));
+    await tester.pumpAndSettle();
+    expect(find.text('01 / 03'), findsOneWidget);
+  });
+  test(
+    'shared links point to the selected clip and clear unrelated filters',
+    () {
+      final url = clipLink(
+        Uri.parse('https://app.rangleplay.stream/demo/?q=old#section'),
+        'basketball',
+      );
+      expect(
+        url.toString(),
+        'https://app.rangleplay.stream/demo/?clip=basketball',
+      );
+    },
+  );
+}

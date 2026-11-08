@@ -1,9 +1,15 @@
 import 'dart:math' as math;
+import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import 'data/clip_repository.dart';
+import 'community/community_api.dart';
+import 'community/account_controller.dart';
+import 'community/account_dialog.dart';
+import 'sharing/share_clip.dart';
+import 'widgets/search_dialog.dart';
 import 'models/clip.dart';
 import 'viewer/viewer_adapter.dart';
 import 'widgets/clip_card.dart';
@@ -16,11 +22,17 @@ class ClipFeedScreen extends StatefulWidget {
     required this.repository,
     required this.viewerFactory,
     required this.sceneFactory,
+    this.community,
+    this.initialClipId,
+    this.shareAction = shareClip,
     super.key,
   });
   final ClipRepository repository;
   final ViewerFactory viewerFactory;
   final ViewerFactory sceneFactory;
+  final CommunityApi? community;
+  final String? initialClipId;
+  final ClipShareAction shareAction;
 
   @override
   State<ClipFeedScreen> createState() => _ClipFeedScreenState();
@@ -28,15 +40,61 @@ class ClipFeedScreen extends StatefulWidget {
 
 class _ClipFeedScreenState extends State<ClipFeedScreen> {
   late Future<List<Clip>> _clips;
+  AccountController? _account;
+  String _query = '', _tag = '';
 
   @override
   void initState() {
     super.initState();
-    _clips = widget.repository.load();
+    _clips = widget.repository.load(clipId: widget.initialClipId);
+    if (widget.community != null) {
+      _account = AccountController(widget.community!);
+      unawaited(_account!.initialize());
+    }
+  }
+
+  @override
+  void dispose() {
+    _account?.dispose();
+    super.dispose();
+  }
+
+  Future<void> _search(Iterable<String> tags) async {
+    final value = await showSearchDialog(
+      context,
+      initial: _tag.isEmpty ? _query : '#$_tag',
+      tags: tags,
+    );
+    if (value == null || !mounted) return;
+    setState(() {
+      _tag = value.startsWith('#') ? value.substring(1) : '';
+      _query = value.startsWith('#') ? '' : value;
+    });
+    _reload();
+  }
+
+  void _filterTag(String tag) {
+    setState(() {
+      _tag = tag;
+      _query = '';
+    });
+    _reload();
+  }
+
+  void _clearSearch() {
+    setState(() {
+      _tag = '';
+      _query = '';
+    });
+    _reload();
   }
 
   void _reload() {
-    final clips = widget.repository.load();
+    final clips = widget.repository.load(
+      query: _query,
+      tag: _tag,
+      clipId: _query.isEmpty && _tag.isEmpty ? widget.initialClipId : null,
+    );
     setState(() {
       _clips = clips;
     });
@@ -70,6 +128,17 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
           }
           final clips = snapshot.data ?? const <Clip>[];
           if (clips.isEmpty) {
+            if (_query.isNotEmpty || _tag.isNotEmpty) {
+              return ViewerMessage(
+                icon: Icons.search_off,
+                title: 'ハイライトが見つかりませんでした',
+                description: '別のキーワードやハッシュタグで検索できます。',
+                action: OutlinedButton(
+                  onPressed: _clearSearch,
+                  child: const Text('すべてのハイライトを見る'),
+                ),
+              );
+            }
             return ViewerMessage(
               icon: Icons.video_library_outlined,
               title: '公開されたハイライトはまだありません',
@@ -86,6 +155,12 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
             clips: clips,
             viewerFactory: widget.viewerFactory,
             sceneFactory: widget.sceneFactory,
+            account: _account,
+            shareAction: widget.shareAction,
+            onSearch: () => _search(clips.expand((clip) => clip.tags).toSet()),
+            onTag: _filterTag,
+            onClearSearch: _clearSearch,
+            filterLabel: _tag.isEmpty ? _query : '#$_tag',
           );
         },
       ),
@@ -103,11 +178,22 @@ class _HighlightFeed extends StatefulWidget {
     required this.clips,
     required this.viewerFactory,
     required this.sceneFactory,
+    required this.account,
+    required this.shareAction,
+    required this.onSearch,
+    required this.onTag,
+    required this.onClearSearch,
+    required this.filterLabel,
     super.key,
   });
   final List<Clip> clips;
   final ViewerFactory viewerFactory;
   final ViewerFactory sceneFactory;
+  final AccountController? account;
+  final ClipShareAction shareAction;
+  final VoidCallback onSearch, onClearSearch;
+  final ValueChanged<String> onTag;
+  final String filterLabel;
 
   @override
   State<_HighlightFeed> createState() => _HighlightFeedState();
@@ -182,6 +268,9 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           active: index == _selected,
                           viewerFactory: widget.viewerFactory,
                           sceneFactory: widget.sceneFactory,
+                          account: widget.account,
+                          shareAction: widget.shareAction,
+                          onTag: widget.onTag,
                           onFreeViewChanged: (value) =>
                               setState(() => _freeView = value),
                           onNext: index < widget.clips.length - 1
@@ -194,49 +283,98 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                       top: 12,
                       left: 16,
                       right: 16,
-                      child: IgnorePointer(
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Semantics(
-                                header: true,
-                                label: 'rangle リプレイ アングル',
-                                child: ExcludeSemantics(
-                                  child: Text(
-                                    'rangle',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.w800),
-                                  ),
-                                ),
-                              ),
-                            ),
-                            Semantics(
-                              liveRegion: true,
-                              label:
-                                  '${widget.clips.length}件中${_selected + 1}件目',
+                      child: Row(
+                        children: [
+                          Expanded(
+                            child: Semantics(
+                              header: true,
+                              label: 'rangle リプレイ アングル',
                               child: ExcludeSemantics(
                                 child: Text(
-                                  '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.clips.length.toString().padLeft(2, '0')}',
-                                  style: Theme.of(context).textTheme.labelMedium
-                                      ?.copyWith(
-                                        fontFeatures: const [
-                                          FontFeature.tabularFigures(),
-                                        ],
-                                      ),
+                                  'rangle',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w800),
                                 ),
                               ),
                             ),
-                          ],
-                        ),
+                          ),
+                          Semantics(
+                            liveRegion: true,
+                            label: '${widget.clips.length}件中${_selected + 1}件目',
+                            child: ExcludeSemantics(
+                              child: Text(
+                                '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.clips.length.toString().padLeft(2, '0')}',
+                                style: Theme.of(context).textTheme.labelMedium
+                                    ?.copyWith(
+                                      fontFeatures: const [
+                                        FontFeature.tabularFigures(),
+                                      ],
+                                    ),
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: '検索',
+                            onPressed: widget.onSearch,
+                            icon: const Icon(Icons.search),
+                          ),
+                          if (widget.account != null)
+                            ListenableBuilder(
+                              listenable: widget.account!,
+                              builder: (context, _) => IconButton(
+                                tooltip: widget.account!.user == null
+                                    ? 'ログイン'
+                                    : 'アカウント',
+                                onPressed: () =>
+                                    showAccountDialog(context, widget.account),
+                                icon: Icon(
+                                  widget.account!.user == null
+                                      ? Icons.person_outline
+                                      : Icons.account_circle,
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
                     ),
+                    if (widget.filterLabel.isNotEmpty)
+                      Positioned(
+                        top: 68,
+                        left: 16,
+                        right: 72,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: .7),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  widget.filterLabel,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: '絞り込み解除',
+                                onPressed: widget.onClearSearch,
+                                icon: const Icon(Icons.close, size: 18),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
                     Positioned(
                       right: 8,
-                      top: constraints.maxHeight * .4,
+                      top: constraints.maxHeight < 500
+                          ? constraints.maxHeight * .4
+                          : widget.filterLabel.isEmpty
+                          ? 76
+                          : 132,
                       child: Column(
                         children: [
                           IconButton.filledTonal(

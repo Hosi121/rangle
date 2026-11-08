@@ -8,6 +8,8 @@ rangleは、実写から再構成したスポーツのハイライトを縦型�
 
 GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを実装しています。Webでは再構成サンプルの動画再生、Gaussian資産の視点操作・時刻シーク・連続再生に対応します。実Gaussianの分割配信とABR再生の接続は今後の実装です。
 
+ハッシュタグとキーワードでハイライトを探し、選んだclipのリンクを共有できます。ユーザーID・パスワードでログインすると、いいね・コメントの投稿と自分のコメントの削除ができます。交流データは専用Firestoreに保存します。[アカウントAPIと設定](docs/accounts.md)・[保存先の構成](docs/community-storage.md)。
+
 ## 資料
 
 - [Webアプリの実行方法](apps/web/README.md)
@@ -25,7 +27,7 @@ GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを
 
 ## 配信部品の動作確認
 
-Go 1.27.3以降を利用します。開発・検証に使うGoの下限を `go.mod` に揃えています。配信root外へのファイル参照を防ぐ標準 [`os.Root`](https://go.dev/blog/osroot) を利用し、初期実装は外部依存なしで動きます。
+Go 1.27.3以降を利用します。開発・検証に使うGoの下限を `go.mod` に揃えています。配信root外へのファイル参照は標準 [`os.Root`](https://go.dev/blog/osroot) で防ぎ、交流データの保存と認証にはFirestore SDK・Argon2idを使います。
 
 ```bash
 go test -race ./...
