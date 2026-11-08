@@ -243,7 +243,10 @@ func (h *Handler) startSession(w http.ResponseWriter, r *http.Request, user User
 	http.SetCookie(w, h.cookie(token, 7*24*60*60))
 	h.write(w, r, status, map[string]any{"user": user})
 }
-func (h *Handler) user(r *http.Request) (*User, error) {
+
+// SessionUser validates the same opaque, expiring session used by community
+// actions. Other authenticated APIs reuse it without handling cookie secrets.
+func (h *Handler) SessionUser(r *http.Request) (*User, error) {
 	if h.cfg.Store == nil {
 		return nil, nil
 	}
@@ -268,7 +271,7 @@ func (h *Handler) user(r *http.Request) (*User, error) {
 	return &s.User, nil
 }
 func (h *Handler) requireUser(w http.ResponseWriter, r *http.Request) *User {
-	user, err := h.user(r)
+	user, err := h.SessionUser(r)
 	if err != nil {
 		h.unavailable(w, r, "session", err)
 		return nil
@@ -285,7 +288,7 @@ func (h *Handler) requireUser(w http.ResponseWriter, r *http.Request) *User {
 	return user
 }
 func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
-	user, err := h.user(r)
+	user, err := h.SessionUser(r)
 	if err != nil {
 		h.unavailable(w, r, "session", err)
 		return
@@ -315,7 +318,7 @@ func (h *Handler) engagement(w http.ResponseWriter, r *http.Request) {
 	if clip == "" {
 		return
 	}
-	user, err := h.user(r)
+	user, err := h.SessionUser(r)
 	if err != nil {
 		h.unavailable(w, r, "session", err)
 		return

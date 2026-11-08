@@ -14,6 +14,7 @@ import (
 	"github.com/Hosi121/rangle/internal/catalog"
 	"github.com/Hosi121/rangle/internal/community"
 	"github.com/Hosi121/rangle/internal/delivery"
+	"github.com/Hosi121/rangle/internal/generation"
 )
 
 type config struct {
@@ -26,6 +27,8 @@ type config struct {
 	FirestoreProject  string
 	FirestoreDatabase string
 	SecureCookies     bool
+	GenerationFile    string
+	GenerationService *generation.Service
 }
 
 type application struct {
@@ -49,6 +52,9 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	}
 	if (cfg.CommunityMemory || cfg.FirestoreProject != "" || cfg.CommunityStore != nil) && cfg.CatalogFile == "" {
 		return nil, fmt.Errorf("community requires a clip catalog")
+	}
+	if cfg.GenerationFile != "" && (cfg.FirestoreProject == "" || !cfg.SecureCookies || cfg.CatalogFile == "") {
+		return nil, fmt.Errorf("generation requires persistent accounts, secure cookies and a catalog")
 	}
 	var clips *catalog.Catalog
 	if cfg.CatalogFile != "" {
@@ -119,6 +125,47 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	api, err := catalog.NewHandler(clips, cfg.AssetOrigin)
 	if err != nil {
 		return app, err
+	}
+	generationService := cfg.GenerationService
+	if cfg.GenerationFile != "" {
+		file, err := os.Open(cfg.GenerationFile)
+		if err != nil {
+			return app, fmt.Errorf("open generation config: %w", err)
+		}
+		settings, loadError := generation.ReadConfig(file)
+		if err := errors.Join(loadError, file.Close()); err != nil {
+			return app, err
+		}
+		if settings.Project != cfg.FirestoreProject || settings.Database != cfg.FirestoreDatabase || settings.MediaOrigin != cfg.AssetOrigin {
+			return app, fmt.Errorf("generation project, database and media origin must match this application")
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		database, err := generation.NewFirestoreStore(ctx, settings.Project, settings.Database)
+		if err != nil {
+			cancel()
+			return app, err
+		}
+		app.closers = append(app.closers, database)
+		provider, err := generation.NewVertex(ctx, settings)
+		cancel()
+		if err != nil {
+			return app, err
+		}
+		generationService = &generation.Service{Config: settings, Store: database, Provider: provider, Logger: logger}
+	}
+	if generationService != nil {
+		jobs, err := generation.NewHandler(generationService, func(r *http.Request) (string, error) {
+			user, err := interactions.SessionUser(r)
+			if err != nil || user == nil {
+				return "", err
+			}
+			return user.ID, nil
+		})
+		if err != nil {
+			return app, err
+		}
+		mux.Handle("/api/v1/generation/", jobs)
+		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))
 	}
 	mux.Handle("/api/", api)
 	manifests := clips.Manifests()
