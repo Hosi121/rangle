@@ -16,6 +16,7 @@ class ControlledVideoController extends VideoPlayerController {
   final released = Completer<void>();
   int disposeCount = 0;
   int pauseCount = 0;
+  int initializeCount = 0;
   final commands = <String>[];
   Object? playFailure;
   String? playStreamFailure;
@@ -46,7 +47,10 @@ class ControlledVideoController extends VideoPlayerController {
   }
 
   @override
-  Future<void> initialize() => initialized.future;
+  Future<void> initialize() {
+    initializeCount++;
+    return initialized.future;
+  }
 
   @override
   Future<void> pause() async {
@@ -71,6 +75,64 @@ class ControlledVideoController extends VideoPlayerController {
 }
 
 void main() {
+  testWidgets(
+    'native loop position wraps retain one initialized player and suppress short waiting pulses',
+    (tester) async {
+      final controller = ControlledVideoController();
+      var replacements = 0, adapters = 0;
+      final adapter = VideoPreviewAdapter.withController(
+        controller,
+        retryController: () {
+          replacements++;
+          return ControlledVideoController();
+        },
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PreviewViewer(
+            source: Uri.parse('https://example.invalid/preview.mp4'),
+            factory: (_) {
+              adapters++;
+              return adapter;
+            },
+          ),
+        ),
+      );
+      controller.becomeReady();
+      await tester.pumpAndSettle();
+      final playerState = tester.state(find.byType(VideoPlayer));
+      for (var i = 0; i < 4; i++) {
+        controller.value = controller.value.copyWith(
+          position: const Duration(milliseconds: 19960),
+        );
+        await tester.pump();
+        controller.value = controller.value.copyWith(
+          position: Duration.zero,
+          isBuffering: true,
+        );
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(find.text('映像を読み込んでいます'), findsNothing);
+        controller.value = controller.value.copyWith(
+          position: const Duration(milliseconds: 40),
+          isBuffering: false,
+        );
+        await tester.pump();
+        expect(tester.state(find.byType(VideoPlayer)), same(playerState));
+      }
+      expect(adapters, 1);
+      expect(controller.initializeCount, 1);
+      expect(controller.disposeCount, 0);
+      expect(replacements, 0);
+      expect(controller.commands, ['volume:0.0', 'loop:true', 'play']);
+      expect(adapter.value.status, ViewerStatus.ready);
+      expect(adapter.value.playing, isTrue);
+      controller.released.complete();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+      expect(controller.disposeCount, 1);
+    },
+  );
+
   testWidgets(
     'autoplay policy fallback resumes through the video surface without a play button',
     (tester) async {
