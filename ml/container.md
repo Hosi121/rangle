@@ -9,7 +9,7 @@ docker run --rm --network=none --read-only --tmpfs /tmp:rw,nosuid,nodev,size=64m
   'import torch, gsplat.csrc; from gsplat.cuda._backend import _C; assert _C is gsplat.csrc; print(torch.__version__, torch.version.cuda)'
 ```
 
-After the reviewed `ml/rangle_training/` source is present, build the final `trainer` target. Its entrypoint is `python -m rangle_training.train`; append the approved job arguments. Publish and select an immutable image digest in the private generation config only after integration and T4 validation.
+After the reviewed `ml/rangle_training/` source is present, build the final `trainer` target. Its entrypoint is `python -m rangle_training.train`; append the approved job arguments. Push a candidate using its source commit tag, then pin the returned digest in the private generation config for one bounded T4 validation job. Keep the attempt limit at one until that job has been checked.
 
 ```sh
 docker build --platform=linux/amd64 --target trainer -f ml/Dockerfile -t rangle-trainer:local .
@@ -22,4 +22,4 @@ The requested Torch 2.6 / CUDA 12.4 wheel index returned 404, and the official [
 
 The runtime stage imports the compiled extension and asserts that gsplat actually uses it, preventing a successful build with a missing extension that would require paid cold-start JIT. CUDA compiler tools remain in the build stage; runtime uses the official runtime base and retains the package headers supplied by it. The final image runs as UID/GID 65532, uses `/tmp` for work, and copies only worker Python source. No dataset, config, credentials or gcloud SDK is included. Google Storage uses the job service account through ADC; do not mount a user credential file.
 
-The packaging preparation validates only `dependencies`; final worker integration follows source review. Build checks cover NumPy-to-Torch conversion, cKDTree query, Pillow PNG encode/decode, Storage import, extension loading and package consistency. A separate local smoke repeats these as UID 65532 with a read-only filesystem and no network. GPU kernel execution, driver compatibility, training quality, duration and spend require the bounded real T4 test before deployment. The B300 local validation track remains separate and has no container, GCS or live-service integration here.
+The final target includes the worker and has passed `--help` and its five CPU contract tests as UID 65532, without network access and with a read-only filesystem. Build checks cover NumPy-to-Torch conversion, cKDTree query, Pillow PNG encode/decode, Storage import, extension loading and package consistency. A separate local smoke repeats these as UID 65532 with a read-only filesystem and no network. GPU kernel execution, driver compatibility, training quality, duration and spend require the bounded real T4 test before enabling further attempts. The B300 local validation track remains separate and has no container, GCS or live-service integration here.
