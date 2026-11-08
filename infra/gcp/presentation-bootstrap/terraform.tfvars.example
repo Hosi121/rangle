@@ -1,0 +1,3 @@
+project_id = "rangle-example"
+region = "asia-northeast1"
+state_bucket_name = "rangle-example-stg-tfstate"

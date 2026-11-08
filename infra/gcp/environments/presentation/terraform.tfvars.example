@@ -1,0 +1,13 @@
+# Fake project and site, with an illustrative USD early-stop guard.
+project_id = "rangle-example"
+project_number = "123456789012"
+region = "asia-northeast1"
+hosting_site_id = "rangle-example-stg-media"
+initialize_firebase = false
+budget_currency = "USD"
+budget_stop_amount = 150
+application = null
+# application = {
+#   image_digest = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+#   catalog_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+# }
