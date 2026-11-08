@@ -8,9 +8,29 @@ import 'package:rangle_web/community/account_controller.dart';
 import 'package:rangle_web/data/clip_repository.dart';
 import 'package:rangle_web/generation/generation_screen.dart';
 import 'package:rangle_web/main.dart';
+import 'package:rangle_web/models/clip.dart';
+import 'package:rangle_web/viewer/viewer_adapter.dart';
 
 import 'support/fake_viewer.dart';
 import 'support/generation_fixture.dart';
+
+class _GeneratedClip implements ClipRepository {
+  @override
+  Future<List<Clip>> load({
+    String query = '',
+    String tag = '',
+    String? clipId,
+  }) async => [
+    Clip(
+      id: 'generated-$generationJobId',
+      title: '生成した3DGS',
+      sport: 'バスケットボール',
+      description: '静的3DGS',
+      previewUrl: Uri.parse('https://example.invalid/source.webm'),
+      sceneUrl: Uri.parse('https://example.invalid/scene.json'),
+    ),
+  ];
+}
 
 Future<AccountController> _show(
   WidgetTester tester,
@@ -57,6 +77,52 @@ Future<void> _tap(WidgetTester tester, String text) async {
 }
 
 void main() {
+  testWidgets(
+    'generated result deep links create the scene before any input video',
+    (tester) async {
+      final factories = <String>[];
+      final scene = FakeViewer(
+        initialStatus: ViewerStatus.loading,
+        surfaceKey: 'generated-scene',
+        canPlay: false,
+      );
+      await tester.pumpWidget(
+        RangleApp(
+          repository: _GeneratedClip(),
+          initialClipId: 'generated-$generationJobId',
+          viewerFactory: (_) {
+            factories.add('video');
+            return FakeViewer();
+          },
+          sceneFactory: (_) {
+            factories.add('scene');
+            return scene;
+          },
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(factories, ['scene']);
+      expect(find.text('自由視点を読み込んでいます'), findsOneWidget);
+      expect(find.byKey(const Key('real-video-surface')), findsNothing);
+      scene.becomeReady();
+      await tester.pumpAndSettle();
+      expect(factories, ['scene']);
+      expect(find.byKey(const Key('generated-scene')), findsOneWidget);
+      expect(
+        tester
+            .widget<PageView>(find.byKey(const Key('highlight-feed')))
+            .physics,
+        isA<NeverScrollableScrollPhysics>(),
+      );
+      final back = find.text('動画に戻る');
+      await tester.tap(
+        back.evaluate().isEmpty ? find.byTooltip('動画に戻る') : back,
+      );
+      await tester.pumpAndSettle();
+      expect(factories, ['scene', 'video']);
+    },
+  );
+
   testWidgets(
     'two activations before rebuilding still create one generation request',
     (tester) async {

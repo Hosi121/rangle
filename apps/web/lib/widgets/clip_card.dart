@@ -20,6 +20,7 @@ class ClipCard extends StatefulWidget {
     this.account,
     this.onTag,
     this.shareAction = shareClip,
+    this.initialFreeView = false,
     super.key,
   });
   final Clip clip;
@@ -31,6 +32,7 @@ class ClipCard extends StatefulWidget {
   final AccountController? account;
   final ValueChanged<String>? onTag;
   final ClipShareAction shareAction;
+  final bool initialFreeView;
 
   @override
   State<ClipCard> createState() => _ClipCardState();
@@ -45,6 +47,13 @@ class _ClipCardState extends State<ClipCard> {
   Clip get clip => widget.clip;
   bool get active => widget.active;
   VoidCallback? get onNext => widget.onNext;
+
+  @override
+  void initState() {
+    super.initState();
+    _freeView = widget.initialFreeView && active && clip.sceneUrl != null;
+    _sceneRequested = _freeView;
+  }
 
   @override
   void didUpdateWidget(ClipCard oldWidget) {
@@ -80,7 +89,7 @@ class _ClipCardState extends State<ClipCard> {
 
   void _onSceneReady() {
     if (!active || !_sceneRequested) return;
-    final reveal = _pendingScene;
+    final reveal = _pendingScene || _freeView;
     setState(() {
       _sceneReady = true;
       _pendingScene = false;

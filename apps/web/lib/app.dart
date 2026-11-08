@@ -203,6 +203,13 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                   onClearSearch: _clearSearch,
                   filterLabel: _tag.isEmpty ? _query : '#$_tag',
                   onGenerate: _openGeneration,
+                  initialFreeView:
+                      RegExp(r'^generated-[a-f0-9]{32}$')
+                          .hasMatch(widget.initialClipId ?? '') &&
+                      _query.isEmpty &&
+                      _tag.isEmpty &&
+                      clips.first.id == widget.initialClipId &&
+                      clips.first.sceneUrl != null,
                 );
               },
             ),
@@ -227,6 +234,7 @@ class _HighlightFeed extends StatefulWidget {
     required this.onTag,
     required this.onClearSearch,
     required this.filterLabel,
+    this.initialFreeView = false,
     super.key,
   });
   final List<Clip> clips;
@@ -237,6 +245,7 @@ class _HighlightFeed extends StatefulWidget {
   final VoidCallback onSearch, onClearSearch, onGenerate;
   final ValueChanged<String> onTag;
   final String filterLabel;
+  final bool initialFreeView;
 
   @override
   State<_HighlightFeed> createState() => _HighlightFeedState();
@@ -246,6 +255,12 @@ class _HighlightFeedState extends State<_HighlightFeed> {
   final PageController _pages = PageController();
   int _selected = 0;
   bool _freeView = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _freeView = widget.initialFreeView;
+  }
 
   void _select(int index) {
     if (index < 0 || index >= widget.clips.length || index == _selected) return;
@@ -319,6 +334,7 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           onNext: index < widget.clips.length - 1
                               ? () => _select(index + 1)
                               : null,
+                          initialFreeView: widget.initialFreeView && index == 0,
                         ),
                       ),
                     ),
@@ -360,10 +376,22 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           ),
                           PointerInterceptor(
                             intercepting: _freeView,
-                            child: IconButton(
-                              tooltip: '3DGSを生成',
-                              onPressed: widget.onGenerate,
-                              icon: const Icon(Icons.add_box_outlined),
+                            child: Tooltip(
+                              message: '3DGSを生成',
+                              child:
+                                  MediaQuery.textScalerOf(context).scale(1) >
+                                      1.4
+                                  ? IconButton(
+                                      onPressed: widget.onGenerate,
+                                      icon: const Icon(Icons.add_box_outlined),
+                                    )
+                                  : TextButton(
+                                      style: TextButton.styleFrom(
+                                        minimumSize: const Size(48, 48),
+                                      ),
+                                      onPressed: widget.onGenerate,
+                                      child: const Text('生成'),
+                                    ),
                             ),
                           ),
                           PointerInterceptor(
