@@ -1,0 +1,28 @@
+# Adapted from yossi0413's PR #40, original commit
+# bc827b7294c5038a86e29191fa66a79cc6db0eae. Keep its shared BuildKit cache scope.
+name: Docker Build
+on:
+  pull_request:
+    branches: [stg, main]
+permissions:
+  contents: read
+concurrency:
+  group: docker-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: false
+          tags: rangle:ci
+          build-args: RANGLE_API_URL=/api/v1/clips
+          cache-from: type=gha,scope=rangle-docker
+          cache-to: type=gha,scope=rangle-docker,mode=max
+          provenance: false
