@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:ui' show PointerDeviceKind;
 
-import 'package:flutter/cupertino.dart' show CupertinoSlider;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -62,6 +61,7 @@ Future<void> _dragScene(
   await gesture.moveBy(const Offset(40, 40));
   await gesture.moveBy(const Offset(20, 20));
   await gesture.up();
+  if (kind == PointerDeviceKind.mouse) await gesture.removePointer();
 }
 
 void _expectProtected(WidgetTester tester, Finder control) {
@@ -191,11 +191,10 @@ void main() {
           'ログイン',
           '前のハイライト',
           '次のハイライト',
-          '再生',
         ]) {
           _expectProtected(tester, find.byTooltip(tooltip));
         }
-        _expectProtected(tester, find.byType(CupertinoSlider));
+        _expectProtected(tester, find.byKey(const Key('media-scrubber')));
         final mode = find.text('動画に戻る').evaluate().isEmpty
             ? find.byTooltip('動画に戻る')
             : find.text('動画に戻る');
@@ -213,12 +212,31 @@ void main() {
         await tester.tapAt(orbit);
         await tester.pumpAndSettle();
         expect(scene.value.playing, isTrue);
-        await tester.tap(find.byTooltip('一時停止'));
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: const Offset(1, 1));
+        final pauses = scene.pauseCount, drags = scene.drags;
+        await mouse.moveTo(
+          tester.getCenter(find.byKey(const Key('media-scrubber'))),
+        );
+        await tester.pump(const Duration(milliseconds: 80));
+        expect(scene.lastSeek, isNull);
+        expect(scene.value.playing, isTrue);
+        expect(scene.pauseCount, pauses);
+        expect(scene.drags, drags);
+        _expectSceneExposed(tester);
+        await mouse.removePointer();
+        await tester.pump();
+        Focus.of(tester.element(find.byKey(const Key('scene-input'))))
+            .requestFocus();
+        await tester.pump();
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
         await tester.pumpAndSettle();
         expect(scene.value.playing, isFalse);
-        await tester.tap(find.byTooltip('再生'));
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
         await tester.pumpAndSettle();
-        final scrubber = tester.getRect(find.byType(CupertinoSlider));
+        final scrubber = tester.getRect(
+          find.byKey(const Key('media-scrubber')),
+        );
         await tester.dragFrom(
           Offset(scrubber.left + 22, scrubber.center.dy),
           const Offset(80, 0),
@@ -253,7 +271,11 @@ void main() {
         await tester.pumpAndSettle();
         expect(scene.paused, isTrue);
         expect(scene.disposed, isFalse);
-        expect(_interceptors, findsNothing);
+        expect(
+          find.byKey(const Key('scene-input')),
+          findsOneWidget,
+        ); // Retained hidden scene.
+        expect(find.byType(BottomSheet), findsNothing);
         expect(find.byKey(const Key('real-video-surface')), findsOneWidget);
       },
     );

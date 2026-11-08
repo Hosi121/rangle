@@ -1,8 +1,10 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rangle_web/viewer/viewer_adapter.dart';
+import 'package:rangle_web/widgets/preview_viewer.dart';
 import 'package:video_player/video_player.dart';
 
 /// Exercises the production adapter without network, browser, or native media.
@@ -69,6 +71,42 @@ class ControlledVideoController extends VideoPlayerController {
 }
 
 void main() {
+  testWidgets(
+    'autoplay policy fallback resumes through the video surface without a play button',
+    (tester) async {
+      final blocked = ControlledVideoController()
+        ..playFailure = PlatformException(code: 'NotAllowedError');
+      final manual = ControlledVideoController();
+      final adapter = VideoPreviewAdapter.withController(
+        blocked,
+        retryController: () => manual,
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PreviewViewer(
+            source: Uri.parse('https://example.invalid/preview.mp4'),
+            factory: (_) => adapter,
+          ),
+        ),
+      );
+      blocked.becomeReady();
+      await tester.pump();
+      manual.becomeReady();
+      await tester.pumpAndSettle();
+      expect(adapter.value.playing, isFalse);
+      expect(find.text('タップで再生'), findsOneWidget);
+      expect(find.byIcon(Icons.play_arrow), findsNothing);
+      await tester.tap(find.byKey(const Key('video-playback-surface')));
+      await tester.pump();
+      expect(adapter.value.playing, isTrue);
+      expect(find.text('タップで再生'), findsNothing);
+      blocked.released.complete();
+      manual.released.complete();
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    },
+  );
+
   testWidgets('autoplay confirms mute and looping before starting', (
     tester,
   ) async {

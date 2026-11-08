@@ -153,7 +153,6 @@ class _ClipCardState extends State<ClipCard> {
                         ),
                 ),
         ),
-        if (!compact) const _PendingControls(),
       ],
     );
   }
@@ -211,6 +210,7 @@ class _ClipCardState extends State<ClipCard> {
                 source: clip.sceneUrl!,
                 factory: widget.sceneFactory,
                 freeView: true,
+                thumbnailSource: clip.previewUrl,
                 visible: _freeView,
                 onReady: _onSceneReady,
                 onStatusChanged: _onSceneStatus,
@@ -240,7 +240,7 @@ class _ClipCardState extends State<ClipCard> {
             Positioned(
               left: 16,
               right: 72,
-              bottom: largeText ? 152 : 112,
+              bottom: largeText ? 104 : 64,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
@@ -363,35 +363,5 @@ class _ClipCardState extends State<ClipCard> {
         ),
       );
     },
-  );
-}
-
-class _PendingControls extends StatelessWidget {
-  const _PendingControls();
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-    child: Column(
-      children: [
-        Semantics(
-          label: '映像準備中のため再生位置を変更できません',
-          child: const Slider(value: 0, onChanged: null),
-        ),
-        const Row(
-          children: [
-            IconButton.filledTonal(
-              tooltip: '映像準備中のため再生できません',
-              onPressed: null,
-              icon: Icon(Icons.play_arrow),
-            ),
-            SizedBox(width: 12),
-            Expanded(
-              child: Text('未公開', maxLines: 1, overflow: TextOverflow.ellipsis),
-            ),
-          ],
-        ),
-      ],
-    ),
   );
 }

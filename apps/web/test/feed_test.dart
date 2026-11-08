@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:flutter/cupertino.dart' show CupertinoSlider;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +8,7 @@ import 'package:rangle_web/main.dart';
 import 'package:rangle_web/models/clip.dart';
 import 'package:rangle_web/viewer/viewer_adapter.dart';
 import 'package:rangle_web/widgets/preview_viewer.dart';
+import 'package:rangle_web/widgets/edge_seek_bar.dart';
 
 import 'support/fake_viewer.dart';
 
@@ -87,9 +87,8 @@ void main() {
     expect(find.text('映像を準備しています'), findsOneWidget);
     expect(find.text('バスケットボール 01'), findsOneWidget);
     expect(created, 0);
-    final play = tester.widget<IconButton>(iconButton('映像準備中のため再生できません'));
-    expect(play.onPressed, isNull);
-    expect(tester.widget<Slider>(find.byType(Slider)).onChanged, isNull);
+    expect(find.byIcon(Icons.play_arrow), findsNothing);
+    expect(find.byType(EdgeSeekBar), findsNothing);
     final freeView = find.ancestor(
       of: find.text('自由視点は準備中'),
       matching: find.byType(FilledButton),
@@ -133,7 +132,12 @@ void main() {
       final media = tester.getRect(find.byKey(const Key('real-video-surface')));
       expect(player.size, const Size(390, 844));
       expect(media, player);
-      expect(player.contains(tester.getCenter(iconButton('再生'))), isTrue);
+      expect(
+        player.contains(
+          tester.getCenter(find.byKey(const Key('video-playback-surface'))),
+        ),
+        isTrue,
+      );
       expect(
         player.contains(tester.getCenter(find.text('VRU Basketball'))),
         isTrue,
@@ -268,14 +272,14 @@ void main() {
     );
     expect(viewers, hasLength(1));
     expect(find.byKey(const Key('real-video-surface')), findsOneWidget);
-    await tester.tap(iconButton('再生'));
+    await tester.tap(find.byKey(const Key('video-playback-surface')));
     await tester.pump();
     expect(viewers.single.value.playing, isTrue);
-    expect(iconButton('一時停止'), findsOneWidget);
+    expect(find.byIcon(Icons.pause), findsNothing);
     await tester.tap(iconButton('ミュート'));
     await tester.pump();
     expect(viewers.single.value.muted, isTrue);
-    await tester.tap(find.byKey(const Key('media-scrubber')));
+    await tester.tap(find.byKey(const Key('media-scrubber')).hitTestable());
     await tester.pump();
     expect(viewers.single.lastSeek, isNotNull);
     expect(viewers.single.lastSeek!.inMilliseconds, inInclusiveRange(1, 20000));
@@ -309,7 +313,7 @@ void main() {
       },
     );
     expect(find.text('映像を読み込んでいます'), findsOneWidget);
-    expect(tester.widget<IconButton>(iconButton('再生')).onPressed, isNull);
+    expect(find.byKey(const Key('video-playback-surface')), findsNothing);
     viewers.single.fail();
     await tester.pump();
     expect(find.text('映像を再生できませんでした'), findsOneWidget);
@@ -438,9 +442,7 @@ void main() {
       await tester.pump();
       expect(scenes.single.lastSeek, isNotNull);
       expect(
-        tester
-            .widget<CupertinoSlider>(find.byKey(const Key('media-scrubber')))
-            .onChanged,
+        tester.widget<EdgeSeekBar>(find.byType(EdgeSeekBar)).onSeek,
         isNotNull,
       );
       await tester.tap(find.text('動画に戻る'));
@@ -515,7 +517,7 @@ void main() {
           return viewer;
         },
       );
-      await tester.tap(iconButton('再生'));
+      await tester.tap(find.byKey(const Key('video-playback-surface')));
       await tester.pump();
       await tester.tap(find.text('自由視点で見る'));
       await tester.pumpAndSettle();
@@ -529,10 +531,10 @@ void main() {
         ),
       );
       expect(sceneWidget.visible, isFalse);
-      await tester.tap(iconButton('一時停止'));
+      await tester.tap(find.byKey(const Key('video-playback-surface')));
       await tester.pump();
       expect(videos.single.value.playing, isFalse);
-      await tester.tap(find.byType(Slider));
+      await tester.tap(find.byKey(const Key('media-scrubber')).hitTestable());
       await tester.pump();
       expect(videos.single.lastSeek, isNotNull);
 
@@ -624,7 +626,7 @@ void main() {
       expect(scenes.single.disposed, isTrue);
       expect(video.disposed, isFalse);
       expect(find.textContaining('自由視点を表示できませんでした'), findsOneWidget);
-      await tester.tap(iconButton('再生'));
+      await tester.tap(find.byKey(const Key('video-playback-surface')));
       await tester.pump();
       expect(video.value.playing, isTrue);
       await tester.tap(find.text('自由視点を再試行'));

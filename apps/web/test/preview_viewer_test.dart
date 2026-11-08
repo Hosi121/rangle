@@ -1,9 +1,9 @@
-import 'package:flutter/cupertino.dart' show CupertinoSlider;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rangle_web/viewer/viewer_adapter.dart';
 import 'package:rangle_web/widgets/preview_viewer.dart';
+import 'package:rangle_web/widgets/edge_seek_bar.dart';
 
 class ControlledViewer extends ViewerAdapter {
   ControlledViewer(this._value);
@@ -91,15 +91,12 @@ void main() {
     await showViewer(tester, viewer);
     expect(find.text('自由視点を読み込んでいます'), findsOneWidget);
     expect(find.byTooltip('再生'), findsNothing);
-    expect(
-      tester.widget<CupertinoSlider>(find.byType(CupertinoSlider)).onChanged,
-      isNull,
-    );
+    expect(tester.widget<EdgeSeekBar>(find.byType(EdgeSeekBar)).onSeek, isNull);
 
     viewer.update(playable);
     await tester.pump();
     expect(find.text('自由視点を読み込んでいます'), findsNothing);
-    expect(find.byTooltip('再生'), findsOneWidget);
+    expect(find.byIcon(Icons.play_arrow), findsNothing);
   });
 
   testWidgets(
@@ -109,24 +106,11 @@ void main() {
       try {
         final viewer = ControlledViewer(playable);
         await showViewer(tester, viewer);
-        final play = find.byTooltip('再生');
-        expect(
-          tester.getSemantics(play),
-          matchesSemantics(
-            label: '',
-            tooltip: '再生',
-            isButton: true,
-            hasEnabledState: true,
-            isEnabled: true,
-            isFocusable: true,
-            hasTapAction: true,
-            hasFocusAction: true,
-          ),
-        );
-        // Exercise the actual Material button's Enter binding.
-        Focus.of(tester.element(find.byIcon(Icons.play_arrow))).requestFocus();
+        expect(find.byIcon(Icons.play_arrow), findsNothing);
+        Focus.of(tester.element(find.byKey(const Key('scene-surface'))))
+            .requestFocus();
         await tester.pump();
-        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.sendKeyEvent(LogicalKeyboardKey.space);
         await tester.pump();
         expect(viewer.toggleCount, 1);
 
@@ -139,14 +123,20 @@ void main() {
           ),
         );
         await tester.pump();
-        expect(find.byTooltip('一時停止'), findsOneWidget);
-        expect(find.text('0.40秒 / 0.76秒'), findsOneWidget);
+        expect(find.byIcon(Icons.pause), findsNothing);
         expect(
-          tester.widget<CupertinoSlider>(find.byType(CupertinoSlider)).value,
-          400,
+          tester
+              .getSemantics(find.byKey(const Key('media-scrubber')))
+              .getSemanticsData()
+              .value,
+          '0.40秒 / 0.76秒',
+        );
+        expect(
+          tester.widget<EdgeSeekBar>(find.byType(EdgeSeekBar)).position,
+          const Duration(milliseconds: 400),
         );
         expect(find.byTooltip('ミュート'), findsNothing);
-        expect(find.byTooltip('ドラッグで視点操作、ダブルタップで再生・停止'), findsOneWidget);
+        expect(find.byIcon(Icons.touch_app_outlined), findsNothing);
       } finally {
         semantics.dispose();
       }
@@ -170,11 +160,11 @@ void main() {
     await tester.pump();
     expect(find.byType(ViewerMessage), findsNothing);
     expect(find.text('時刻を読み込んでいます'), findsNothing);
-    expect(find.byTooltip('一時停止'), findsOneWidget);
+    expect(find.byIcon(Icons.pause), findsNothing);
     await tester.tap(find.byKey(const Key('scene-surface')));
     expect(viewer.surfaceTaps, 1);
-    tester.widget<CupertinoSlider>(find.byType(CupertinoSlider)).onChanged!(
-      600,
+    tester.widget<EdgeSeekBar>(find.byType(EdgeSeekBar)).onSeek!(
+      const Duration(milliseconds: 600),
     );
     expect(viewer.lastSeek, const Duration(milliseconds: 600));
 
@@ -198,9 +188,9 @@ void main() {
     );
     await showViewer(tester, viewer);
     expect(find.byTooltip('再生'), findsNothing);
-    expect(find.byTooltip('ドラッグで視点操作'), findsOneWidget);
+    expect(find.byIcon(Icons.touch_app_outlined), findsNothing);
     expect(
-      tester.widget<CupertinoSlider>(find.byType(CupertinoSlider)).onChanged,
+      tester.widget<EdgeSeekBar>(find.byType(EdgeSeekBar)).onSeek,
       isNotNull,
     );
   });
@@ -218,7 +208,7 @@ void main() {
     );
     await showViewer(tester, viewer, freeView: false);
     expect(find.text('映像を読み込んでいます'), findsOneWidget);
-    expect(find.byTooltip('一時停止'), findsOneWidget);
+    expect(find.byIcon(Icons.pause), findsNothing);
     expect(find.byTooltip('ミュート'), findsOneWidget);
   });
 
