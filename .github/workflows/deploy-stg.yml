@@ -18,10 +18,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Check authorized window and WIF configuration
+      - name: Check authorized window, domain, and WIF configuration
         env:
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          RANGLE_STG_DOMAIN: ${{ vars.RANGLE_STG_DOMAIN }}
         run: bash scripts/deploy-stg.sh guard
   validate:
     needs: guard
@@ -37,7 +38,11 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Recheck before build
-        run: bash scripts/deploy-stg.sh deadline
+        env:
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          RANGLE_STG_DOMAIN: ${{ vars.RANGLE_STG_DOMAIN }}
+        run: bash scripts/deploy-stg.sh guard
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - id: build-auth
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
@@ -77,4 +82,5 @@ jobs:
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
           CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.deploy-auth.outputs.access_token }}
+          RANGLE_STG_DOMAIN: ${{ vars.RANGLE_STG_DOMAIN }}
         run: bash scripts/deploy-stg.sh deploy

@@ -2,6 +2,40 @@
 # Bounded HTTP smoke only. No asset uploads or infrastructure changes.
 set -euo pipefail
 
+# Share one domain contract with the deployment guard. No DNS lookup is needed
+# here: the new domain may not have records yet. HTTPS smoke verifies the edge.
+origins=$(python3 - <<'PY'
+import ipaddress
+import os
+import re
+
+domain = os.environ.get('RANGLE_STG_DOMAIN', '')
+message = 'Set RANGLE_STG_DOMAIN to a DNS base domain without scheme, credentials, port, path, or whitespace.'
+if not domain or len('media.' + domain) > 253 or not domain.isascii() or domain != domain.strip():
+    raise SystemExit(message)
+domain = domain.lower()
+labels = domain.split('.')
+label = re.compile(r'[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?')
+if len(labels) < 2 or not all(label.fullmatch(part) for part in labels) or not re.fullmatch(r'[a-z][a-z0-9-]*[a-z0-9]', labels[-1]):
+    raise SystemExit(message)
+try:
+    ipaddress.ip_address(domain)
+except ValueError:
+    pass
+else:
+    raise SystemExit(message)
+if any(part in {'localhost', 'localdomain'} for part in labels) or labels[-1] == 'local':
+    raise SystemExit(message)
+print('https://app.' + domain)
+print('https://media.' + domain)
+PY
+)
+if [[ ${1:-} == origins ]]; then
+  printf '%s\n' "$origins"
+  exit 0
+fi
+readonly media_origin=${origins#*$'\n'}
+
 base=${1:?Usage: check-deployment.sh https://service.run.app}
 base=${base%/}
 python3 - "$base" <<'PY'
@@ -24,7 +58,7 @@ fetch /healthz health
 fetch / landing
 fetch /demo/ demo
 fetch '/api/v1/clips?limit=1' api
-python3 - "$work" <<'PY'
+python3 - "$work" "$media_origin" <<'PY'
 import json
 import sys
 from html.parser import HTMLParser
@@ -32,6 +66,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 work = Path(sys.argv[1])
+expected_media = urlsplit(sys.argv[2])
 if work.joinpath('health').read_bytes() != b'ok\n':
     raise SystemExit('healthz did not return the application health contract.')
 if 'rangle' not in work.joinpath('landing').read_text().lower():
@@ -64,7 +99,7 @@ for key in ('manifest_url', 'preview_url', 'scene_url'):
     if value is None:
         continue
     u = urlsplit(value)
-    if u.scheme != 'https' or u.netloc != 'rangle-stg-113704194486.web.app' or not u.path.startswith('/') or u.query or u.fragment:
-        raise SystemExit(f'{key} must use the separately published stg media origin.')
+    if u.scheme != expected_media.scheme or u.netloc != expected_media.netloc or not u.path.startswith('/') or u.query or u.fragment:
+        raise SystemExit(f'{key} must use the configured Cloud CDN media origin.')
 print('Smoke passed: health, landing, /demo/, and published clip API.')
 PY
