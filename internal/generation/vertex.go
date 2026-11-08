@@ -1,0 +1,135 @@
+package generation
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"google.golang.org/api/aiplatform/v1"
+	"google.golang.org/api/googleapi"
+	"google.golang.org/api/option"
+)
+
+type Vertex struct {
+	api    *aiplatform.Service
+	config Config
+	parent string
+}
+
+func NewVertex(ctx context.Context, cfg Config, opts ...option.ClientOption) (*Vertex, error) {
+	opts = append([]option.ClientOption{option.WithEndpoint("https://" + Location + "-aiplatform.googleapis.com/")}, opts...)
+	api, err := aiplatform.NewService(ctx, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return &Vertex{api: api, config: cfg, parent: "projects/" + cfg.Project + "/locations/" + Location}, nil
+}
+
+func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, error) {
+	request := &aiplatform.GoogleCloudAiplatformV1CustomJob{
+		DisplayName: "rangle-" + job.ID,
+		Labels:      map[string]string{"application": "rangle", "environment": "presentation-stg", "rangle_job": job.ID},
+		JobSpec: &aiplatform.GoogleCloudAiplatformV1CustomJobSpec{
+			ServiceAccount: v.config.ServiceAccount,
+			Scheduling: &aiplatform.GoogleCloudAiplatformV1Scheduling{
+				Strategy: "SPOT", Timeout: "1800s", DisableRetries: true,
+			},
+			WorkerPoolSpecs: []*aiplatform.GoogleCloudAiplatformV1WorkerPoolSpec{{
+				ReplicaCount: 1,
+				MachineSpec: &aiplatform.GoogleCloudAiplatformV1MachineSpec{
+					MachineType: "n1-standard-4", AcceleratorType: "NVIDIA_TESLA_T4", AcceleratorCount: 1,
+				},
+				DiskSpec: &aiplatform.GoogleCloudAiplatformV1DiskSpec{BootDiskType: "pd-standard", BootDiskSizeGb: 100},
+				ContainerSpec: &aiplatform.GoogleCloudAiplatformV1ContainerSpec{
+					ImageUri: v.config.Image,
+					Args: []string{
+						"--input-uri", preset.InputURI, "--input-sha256", preset.InputSHA256,
+						"--output-prefix", "gs://" + v.config.OutputBucket + "/generated/" + job.ID + "/",
+						"--job-id", job.ID, "--deadline", job.CreatedAt.Add(MaxRuntime).Format(time.RFC3339Nano),
+						"--title", preset.Title, "--source", preset.Source, "--license", preset.License,
+					},
+				},
+			}},
+		},
+	}
+	created, err := v.api.Projects.Locations.CustomJobs.Create(v.parent, request).Context(ctx).Do()
+	if err != nil {
+		var apiError *googleapi.Error
+		if errors.As(err, &apiError) && apiError.Code >= 400 && apiError.Code < 500 && apiError.Code != 408 {
+			return "", &Rejected{Err: err}
+		}
+		return "", err
+	}
+	if !v.validName(created.Name) {
+		return "", fmt.Errorf("provider returned an invalid job name")
+	}
+	return created.Name, nil
+}
+
+func (v *Vertex) validName(name string) bool {
+	for _, project := range []string{v.config.Project, v.config.ProjectNumber} {
+		suffix, ok := strings.CutPrefix(name, "projects/"+project+"/locations/"+Location+"/customJobs/")
+		if ok && suffix != "" && !strings.ContainsAny(suffix, "/?# :") {
+			return true
+		}
+	}
+	return false
+}
+
+func (v *Vertex) Find(ctx context.Context, id string) (string, error) {
+	if !requestID.MatchString(id) {
+		return "", fmt.Errorf("invalid job label")
+	}
+	response, err := v.api.Projects.Locations.CustomJobs.List(v.parent).
+		Filter(`labels.application="rangle" AND labels.environment="presentation-stg" AND labels.rangle_job="` + id + `"`).PageSize(2).Context(ctx).Do()
+	if err != nil {
+		return "", err
+	}
+	if len(response.CustomJobs) == 0 {
+		return "", nil
+	}
+	if len(response.CustomJobs) > 1 || response.NextPageToken != "" {
+		return "", fmt.Errorf("multiple provider jobs found for one generation request")
+	}
+	name := response.CustomJobs[0].Name
+	if !v.validName(name) {
+		return "", fmt.Errorf("provider returned an invalid job name")
+	}
+	return name, nil
+}
+
+func (v *Vertex) Status(ctx context.Context, name string) (State, error) {
+	if !v.validName(name) {
+		return "", fmt.Errorf("invalid provider job name")
+	}
+	job, err := v.api.Projects.Locations.CustomJobs.Get(name).Context(ctx).Do()
+	if err != nil {
+		return "", err
+	}
+	switch job.State {
+	case "JOB_STATE_PENDING", "JOB_STATE_QUEUED":
+		return Queued, nil
+	case "JOB_STATE_RUNNING":
+		return Running, nil
+	case "JOB_STATE_CANCELLING":
+		return Cancelling, nil
+	case "JOB_STATE_SUCCEEDED":
+		return Succeeded, nil
+	case "JOB_STATE_CANCELLED":
+		return Cancelled, nil
+	case "JOB_STATE_FAILED", "JOB_STATE_EXPIRED", "JOB_STATE_PARTIALLY_SUCCEEDED":
+		return Failed, nil
+	default:
+		return "", fmt.Errorf("unexpected provider job state %q", job.State)
+	}
+}
+
+func (v *Vertex) Cancel(ctx context.Context, name string) error {
+	if !v.validName(name) {
+		return fmt.Errorf("invalid provider job name")
+	}
+	_, err := v.api.Projects.Locations.CustomJobs.Cancel(name, &aiplatform.GoogleCloudAiplatformV1CancelCustomJobRequest{}).Context(ctx).Do()
+	return err
+}

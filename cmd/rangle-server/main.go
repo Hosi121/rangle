@@ -34,6 +34,7 @@ func main() {
 	firestoreProject := flag.String("firestore-project", os.Getenv("RANGLE_FIRESTORE_PROJECT"), "project for the persistent community database")
 	firestoreDatabase := flag.String("firestore-database", "rangle-stg", "dedicated Firestore database ID")
 	insecureCookies := flag.Bool("insecure-local-cookies", false, "allow session cookies over HTTP on loopback only")
+	generationFile := flag.String("generation-config", "", "optional immutable generation configuration JSON")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "rangle-server")
@@ -49,6 +50,7 @@ func main() {
 		FirestoreProject:  *firestoreProject,
 		FirestoreDatabase: *firestoreDatabase,
 		SecureCookies:     !*insecureCookies,
+		GenerationFile:    *generationFile,
 	}
 
 	if err := run(ctx, *address, cfg, logger); err != nil {
