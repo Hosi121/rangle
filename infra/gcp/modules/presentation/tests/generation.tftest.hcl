@@ -63,6 +63,10 @@ run "generation_uses_private_config_and_separate_trainer" {
     condition     = one([for step in yamldecode(google_workflows_workflow.guard.source_contents).scan_owned_generation_jobs.steps : step.list_jobs if can(step.list_jobs)]).args.query.filter == "labels.application=\"rangle\" AND labels.environment=\"presentation-stg\" AND labels.rangle_job:*" && strcontains(google_workflows_workflow.guard.source_contents, "^[0-9a-f]{32}$") && strcontains(google_workflows_workflow.guard.source_contents, "^projects/(rangle-example|123456789012)/locations/asia-northeast1/customJobs/") && strcontains(google_workflows_workflow.guard.source_contents, "nextPageToken") && strcontains(google_workflows_workflow.guard.source_contents, "sys.now() + 300")
     error_message = "Guard must paginate the exact environment, recheck owned names/labels, and stop polling within a finite window."
   }
+  assert {
+    condition     = alltrue([for expression in regexall("\\$\\{[^\\n]*\\}", google_workflows_workflow.guard.source_contents) : length(expression) <= 400]) && length(regexall("\\$\\{[^\\n]*\\}", google_workflows_workflow.guard.source_contents)) == length(regexall("\\$\\{", google_workflows_workflow.guard.source_contents))
+    error_message = "Every rendered Workflow expression, including its delimiters, must fit the compiler's 400-character limit."
+  }
 }
 run "reject_unversioned_generation_config" {
   command = plan

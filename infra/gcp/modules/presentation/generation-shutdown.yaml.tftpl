@@ -84,9 +84,16 @@ scan_owned_generation_jobs:
                     steps:
                       - job_deadline_exceeded:
                           raise: "Vertex job cancellation exceeded its bounded shutdown window"
+            - classify_job:
+                assign:
+                  - labels: $${default(map.get(job, "labels"), {})}
+                  - owned_environment: $${map.get(labels, "application") == "rangle" and map.get(labels, "environment") == "presentation-stg"}
+                  - valid_job_id: $${text.match_regex(default(map.get(labels, "rangle_job"), ""), "^[0-9a-f]{32}$")}
+                  - valid_resource_name: $${text.match_regex(default(map.get(job, "name"), ""), "^projects/(${project_id}|${project_number})/locations/${region}/customJobs/[A-Za-z0-9_-]+$")}
+                  - is_terminal: $${map.get(job, "state") in ["JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED", "JOB_STATE_PARTIALLY_SUCCEEDED"]}
             - owned_nonterminal:
                 switch:
-                  - condition: $${map.get(default(map.get(job, "labels"), {}), "application") == "rangle" and map.get(default(map.get(job, "labels"), {}), "environment") == "presentation-stg" and text.match_regex(default(map.get(default(map.get(job, "labels"), {}), "rangle_job"), ""), "^[0-9a-f]{32}$") and text.match_regex(default(map.get(job, "name"), ""), "^projects/(${project_id}|${project_number})/locations/${region}/customJobs/[A-Za-z0-9_-]+$") and not (map.get(job, "state") in ["JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED", "JOB_STATE_PARTIALLY_SUCCEEDED"])}
+                  - condition: $${owned_environment and valid_job_id and valid_resource_name and not is_terminal}
                     steps:
                       - count_active:
                           assign:
