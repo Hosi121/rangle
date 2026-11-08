@@ -4,7 +4,7 @@
 
 ## 接続契約
 
-`application.generation_config_sha256` は nullable、既定 `null`。app と SHA が揃ったときだけ `-generation-config /mnt/catalog/generation/<sha256>.json` を追加する。設定は既存 private catalog bucket の `generation/<sha256>.json` に非上書き配置し、既存 readonly mount から読む。中身と content SHA は配備担当者と Go loader が検証する。image / traffic / client metadata は既存どおり CI、args / mount / IAM は Terraform が所有する。
+`application.generation_config_sha256` は nullable、既定 `null`。app と SHA が揃ったときだけ `-generation-config /mnt/catalog/generation/<sha256>.json` を追加する。設定は既存 private catalog bucket の `generation/<sha256>.json` に非上書き配置し、既存 readonly mount から読む。配備時に content SHA を確認し、Go loader は内容を検証する。image / traffic / client metadata は既存どおり CI、args / mount / IAM は Terraform が所有する。
 
 JSON は project / 必須の `project_number` / named Firestore database / pinned trainer image / trainer SA / 既知 input URI と SHA / media origin / deadline / attempts / reviewed presets を保持する。実値や dataset を Terraform へ埋め込まない。生成 API は既存の private `rangle-stg` Firestore と runtime IAM を使い、trainer には Firestore 権限を渡さない。先に対応 Go image と config を用意してから SHA を設定し、disable 時は既存 job が terminal であることを確認してから config / IAM を外す。
 
@@ -19,10 +19,12 @@ Go の CustomJob request と immutable config が **Tokyo / SPOT T4×1 / n1-stan
 - 専用 trainer SA は `rangle-stg-trainer@comin-up.iam.gserviceaccount.com`。runtime はこの SA だけに期限付き actAs を持つ。
 - runtime の追加権限は `aiplatform.customJobs.{create,get,list,cancel}` の4件で既存期限まで。guard は取消後の確認に必要な `list/cancel` の2件を期限後も持つ。CustomJob / Location の `resource.name` 条件は公式対応表で確認できないため、これらは **project custom role** と明示し、region/job/label 単位 IAM が成立するとは主張しない。API は固定 Tokyo endpoint と reviewed config を使用する。[IAM resource attributes](https://docs.cloud.google.com/iam/docs/conditions-resource-attributes)
 - trainer の入力は inputs bucket の `datasets/` prefix に条件を付けた `storage.objects.get` だけ。`storage.objects.list` は bucket に対する権限で object prefix へ制限できないため付けず、worker は既知 URI を直接取得する。出力は media bucket の `generated/` だけに objectCreator、非上書き `if_generation_match=0`。delete / 上書き / catalog / account data への権限は付けない。いずれも既存期限で切る。[Storage conditions](https://docs.cloud.google.com/storage/docs/access-control/iam#conditions)
-- image pull は既定 Vertex service agent の責務で、同 project の既存 AR を使う。trainer へ AR role、追加の service-agent reader / token creator を既定で付けない。必要な既存 service-agent role は親が実環境で確認する。[Custom service account](https://docs.cloud.google.com/vertex-ai/docs/general/custom-service-account)
+- image pull は既定 Vertex service agent の責務で、同 project の既存 AR を使う。生成有効時だけ、この project の `service-${project_number}@gcp-sa-aiplatform.iam.gserviceaccount.com` に公式 `roles/aiplatform.serviceAgent` を付け、app はその binding を待つ。runtime / deployer / trainer にはこの role を付けない。trainer の AR role、追加の service-agent reader / token creator も既定では付けない。[Custom service account](https://docs.cloud.google.com/vertex-ai/docs/general/custom-service-account)
 - stdout/stderr の structured JSON は platform が収集するため、直接 Logging SDK を使わない trainer へ logsWriter は追加しない。[Container logs](https://docs.cloud.google.com/vertex-ai/docs/training/code-requirements#write_code_to_return_container_logs)
 
 `generated/` は公開 media CDN の配信領域なので、入力や利用者の private data を配置しない。ファイル一式を検証し、manifest を最後に広告する工程は worker / API の責務である。
+
+初回は API を有効にした後、Service Usage の `POST /v1beta1/projects/<project_number>/services/aiplatform.googleapis.com:generateServiceIdentity`（空の JSON body）で Google-managed identity を作り、operation 完了と返却 principal を確認してから生成を有効化する。API 有効化だけでは初回非同期 job まで identity が存在しない場合がある。事前の明示作成では通常の service-agent role が自動付与されないため、上記 binding を Terraform で管理する。固定 Google provider 8.10.0 の実 schema に identity resource はなく、公式 resource は beta provider 専用なので provider は追加せず、この初回手順を分離する。[Service agent creation](https://docs.cloud.google.com/iam/docs/create-service-agents)、[Vertex service agents](https://docs.cloud.google.com/vertex-ai/docs/general/access-control#service_agents)、[Generate identity API](https://docs.cloud.google.com/service-usage/docs/reference/rest/v1beta1/services/generateServiceIdentity)
 
 ## 期限・budget guard
 

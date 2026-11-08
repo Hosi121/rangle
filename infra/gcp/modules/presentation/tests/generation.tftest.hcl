@@ -17,7 +17,7 @@ variables {
 run "generation_is_disabled_for_existing_application" {
   command = plan
   assert {
-    condition     = length(google_project_service.generation) == 0 && length(google_service_account.trainer) == 0 && length(google_project_iam_member.generation_runtime) == 0 && length(google_project_iam_member.generation_guard) == 0 && output.deployment.generation == null
+    condition     = length(google_project_service.generation) == 0 && length(google_service_account.trainer) == 0 && length(google_project_iam_member.generation_runtime) == 0 && length(google_project_iam_member.generation_guard) == 0 && length(google_project_iam_member.generation_service_agent) == 0 && output.deployment.generation == null
     error_message = "An existing application must gain no Vertex API changes, trainer or generation permissions."
   }
   assert {
@@ -38,6 +38,10 @@ run "generation_uses_private_config_and_separate_trainer" {
   assert {
     condition     = google_service_account.trainer[0].account_id == "rangle-stg-trainer" && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "/mnt/catalog/generation/2222222222222222222222222222222222222222222222222222222222222222.json") && google_service_account_iam_member.trainer_act_as[0].role == "roles/iam.serviceAccountUser"
     error_message = "Use the dedicated trainer through the one immutable, readonly-mounted generation config flag."
+  }
+  assert {
+    condition     = length(google_project_iam_member.generation_service_agent) == 1 && google_project_iam_member.generation_service_agent[0].project == "rangle-example" && google_project_iam_member.generation_service_agent[0].role == "roles/aiplatform.serviceAgent" && google_project_iam_member.generation_service_agent[0].member == "serviceAccount:service-123456789012@gcp-sa-aiplatform.iam.gserviceaccount.com"
+    error_message = "Grant the official service-agent role only to this project's Google-managed Vertex principal."
   }
   assert {
     condition     = google_project_iam_custom_role.generation_runtime[0].permissions == toset(["aiplatform.customJobs.create", "aiplatform.customJobs.get", "aiplatform.customJobs.list", "aiplatform.customJobs.cancel"]) && google_project_iam_custom_role.generation_guard[0].permissions == toset(["aiplatform.customJobs.list", "aiplatform.customJobs.cancel"]) && strcontains(google_project_iam_member.generation_runtime[0].condition[0].expression, "2026-11-14T15:00:00Z")
