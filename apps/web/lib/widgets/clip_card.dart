@@ -5,6 +5,7 @@ import '../community/account_controller.dart';
 import '../community/clip_actions.dart';
 import '../sharing/share_clip.dart';
 import '../viewer/viewer_adapter.dart';
+import 'feed_sheet.dart';
 import 'preview_viewer.dart';
 
 class ClipCard extends StatefulWidget {
@@ -156,63 +157,36 @@ class _ClipCardState extends State<ClipCard> {
     );
   }
 
-  void _showDetails() {
-    showModalBottomSheet<void>(
-      context: context,
-      useSafeArea: true,
-      isScrollControlled: true,
-      builder: (context) => ConstrainedBox(
-        constraints: BoxConstraints(
-          maxHeight: MediaQuery.sizeOf(context).height * .8,
-        ),
-        child: SingleChildScrollView(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      '出典・詳細',
-                      style: Theme.of(context).textTheme.titleMedium,
+  void _showDetails(double width) {
+    showFeedSheet(
+      context,
+      title: '出典・詳細',
+      width: width,
+      builder: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(clip.title, style: Theme.of(context).textTheme.titleLarge),
+          const SizedBox(height: 8),
+          Text(clip.sport),
+          if (clip.tags.isNotEmpty)
+            Wrap(
+              spacing: 8,
+              children: clip.tags
+                  .map(
+                    (tag) => TextButton(
+                      onPressed: () {
+                        Navigator.pop(context);
+                        widget.onTag?.call(tag);
+                      },
+                      child: Text('#$tag'),
                     ),
-                  ),
-                  IconButton(
-                    tooltip: '閉じる',
-                    onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(clip.title, style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text(clip.sport),
-              if (clip.tags.isNotEmpty)
-                Wrap(
-                  spacing: 8,
-                  children: clip.tags
-                      .map(
-                        (tag) => TextButton(
-                          onPressed: () {
-                            Navigator.pop(context);
-                            widget.onTag?.call(tag);
-                          },
-                          child: Text('#$tag'),
-                        ),
-                      )
-                      .toList(),
-                ),
-              const SizedBox(height: 16),
-              SelectableText(
-                clip.description,
-                semanticsLabel: clip.description,
-              ),
-            ],
-          ),
-        ),
+                  )
+                  .toList(),
+            ),
+          const SizedBox(height: 16),
+          SelectableText(clip.description, semanticsLabel: clip.description),
+        ],
       ),
     );
   }
@@ -247,7 +221,7 @@ class _ClipCardState extends State<ClipCard> {
                 child: _ordinaryView(compact),
               ),
             Positioned(
-              right: 8,
+              right: compact ? 72 : 8,
               top: compact ? 64 : null,
               bottom: compact ? null : constraints.maxHeight * .36,
               child: ClipActions(
@@ -256,6 +230,7 @@ class _ClipCardState extends State<ClipCard> {
                 account: widget.account,
                 share: widget.shareAction,
                 compact: compact,
+                sheetWidth: constraints.maxWidth,
               ),
             ),
             Positioned(
@@ -364,7 +339,7 @@ class _ClipCardState extends State<ClipCard> {
                       const SizedBox(width: 8),
                       IconButton.filledTonal(
                         tooltip: '出典・詳細',
-                        onPressed: _showDetails,
+                        onPressed: () => _showDetails(constraints.maxWidth),
                         icon: const Icon(Icons.info_outline),
                       ),
                     ],

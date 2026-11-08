@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/clip.dart';
 import '../sharing/share_clip.dart';
+import '../sharing/share_sheet.dart';
 import 'account_controller.dart';
 import 'account_dialog.dart';
 import 'comments_sheet.dart';
@@ -14,10 +15,12 @@ class ClipActions extends StatefulWidget {
     required this.account,
     required this.share,
     required this.compact,
+    required this.sheetWidth,
     super.key,
   });
   final Clip clip;
   final bool active, compact;
+  final double sheetWidth;
   final AccountController? account;
   final ClipShareAction share;
   @override
@@ -108,29 +111,12 @@ class _ClipActionsState extends State<ClipActions> {
     }
   }
 
-  Future<void> _share() async {
-    try {
-      final result = await widget.share(widget.clip);
-      if (result == ShareResult.copied) _message('リンクをコピーしました');
-    } catch (_) {
-      if (!mounted) return;
-      await showDialog<void>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: const Text('ハイライトを共有'),
-          content: SelectableText(
-            clipLink(Uri.base, widget.clip.id).toString(),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('閉じる'),
-            ),
-          ],
-        ),
-      );
-    }
-  }
+  Future<void> _share() => showClipShare(
+    context,
+    clip: widget.clip,
+    share: widget.share,
+    width: widget.sheetWidth,
+  );
 
   @override
   Widget build(BuildContext context) {
