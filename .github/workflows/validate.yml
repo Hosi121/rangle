@@ -12,7 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: python3 -m venv /tmp/rangle-contract-env
-      - run: /tmp/rangle-contract-env/bin/pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
+      - run: |
+          /tmp/rangle-contract-env/bin/pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
       - run: PYTHONPATH=ml /tmp/rangle-contract-env/bin/python -m unittest discover -s ml/tests -v
   go:
     runs-on: ubuntu-24.04
