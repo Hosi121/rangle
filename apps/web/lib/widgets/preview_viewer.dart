@@ -42,6 +42,8 @@ class _PreviewViewerState extends State<PreviewViewer>
   bool _hasReadyFrame = false;
   bool _readyNotified = false;
   bool _appVisible = true;
+  bool _showBuffering = false;
+  Timer? _bufferingTimer;
   ViewerStatus? _lastStatus;
 
   @override
@@ -52,6 +54,7 @@ class _PreviewViewerState extends State<PreviewViewer>
   }
 
   void _create() {
+    _clearBuffering();
     _hasReadyFrame = false;
     _readyNotified = false;
     _lastStatus = null;
@@ -64,6 +67,7 @@ class _PreviewViewerState extends State<PreviewViewer>
 
   void _reportStatus() {
     final adapter = _adapter;
+    _updateBufferingFeedback();
     final status = adapter.value.status;
     if (status == ViewerStatus.ready) _hasReadyFrame = true;
     if (status == _lastStatus) return;
@@ -82,6 +86,32 @@ class _PreviewViewerState extends State<PreviewViewer>
     });
   }
 
+  bool get _buffering =>
+      !widget.freeView &&
+      widget.visible &&
+      _appVisible &&
+      _adapter.value.status == ViewerStatus.ready &&
+      _adapter.value.buffering;
+
+  void _clearBuffering() {
+    _bufferingTimer?.cancel();
+    _bufferingTimer = null;
+    _showBuffering = false;
+  }
+
+  void _updateBufferingFeedback() {
+    if (!_buffering) {
+      _clearBuffering();
+    } else if (!_showBuffering && _bufferingTimer == null) {
+      // Native startup, seeks and loop boundaries can briefly report waiting.
+      // Preserve the displayed frame and only announce a sustained stall.
+      _bufferingTimer = Timer(const Duration(milliseconds: 600), () {
+        _bufferingTimer = null;
+        if (mounted && _buffering) setState(() => _showBuffering = true);
+      });
+    }
+  }
+
   @override
   void didUpdateWidget(PreviewViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
@@ -89,6 +119,7 @@ class _PreviewViewerState extends State<PreviewViewer>
   }
 
   void _applyVisibility() {
+    _updateBufferingFeedback();
     if (widget.visible && _appVisible) {
       unawaited(_adapter.resume());
     } else {
@@ -108,12 +139,13 @@ class _PreviewViewerState extends State<PreviewViewer>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // Focusing the iframe blurs its Flutter parent without hiding the scene.
     if (widget.freeView && state == AppLifecycleState.inactive) return;
-    _appVisible = state == AppLifecycleState.resumed;
+    setState(() => _appVisible = state == AppLifecycleState.resumed);
     _applyVisibility();
   }
 
   @override
   void dispose() {
+    _bufferingTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _adapter.removeListener(_reportStatus);
     _adapter.dispose();
@@ -236,7 +268,7 @@ class _PreviewViewerState extends State<PreviewViewer>
                     ),
                   ),
                 ),
-              if (ready && value.buffering)
+              if (ready && _showBuffering)
                 const Positioned(
                   top: 64,
                   left: 16,

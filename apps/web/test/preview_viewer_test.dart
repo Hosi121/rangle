@@ -80,6 +80,146 @@ Future<void> showViewer(
 }
 
 void main() {
+  testWidgets(
+    'short startup and loop buffering pulses leave the ready frame visible',
+    (tester) async {
+      final viewer = ControlledViewer(
+        const ViewerValue(
+          status: ViewerStatus.ready,
+          duration: Duration(seconds: 20),
+          playing: true,
+          buffering: true,
+        ),
+      );
+      await showViewer(tester, viewer, freeView: false);
+      for (var i = 0; i < 4; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+        expect(find.text('映像を読み込んでいます'), findsNothing);
+        expect(find.byKey(const Key('scene-surface')), findsOneWidget);
+        expect(find.byType(ViewerMessage), findsNothing);
+        viewer.update(
+          const ViewerValue(
+            status: ViewerStatus.ready,
+            duration: Duration(seconds: 20),
+            playing: true,
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 700));
+        expect(find.text('映像を読み込んでいます'), findsNothing);
+        viewer.update(
+          const ViewerValue(
+            status: ViewerStatus.ready,
+            duration: Duration(seconds: 20),
+            playing: true,
+            buffering: true,
+          ),
+        );
+        await tester.pump();
+      }
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(seconds: 1));
+      expect(viewer.disposed, isTrue);
+    },
+  );
+
+  testWidgets(
+    'sustained buffering survives value updates and clears on recovery or error',
+    (tester) async {
+      const waiting = ViewerValue(
+        status: ViewerStatus.ready,
+        duration: Duration(seconds: 20),
+        playing: true,
+        buffering: true,
+      );
+      final viewer = ControlledViewer(waiting);
+      await showViewer(tester, viewer, freeView: false);
+      await tester.pump(const Duration(milliseconds: 300));
+      viewer.update(waiting);
+      await tester.pump(const Duration(milliseconds: 299));
+      expect(find.text('映像を読み込んでいます'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(find.text('映像を読み込んでいます'), findsOneWidget);
+      expect(find.byKey(const Key('scene-surface')), findsOneWidget);
+      expect(find.byType(ViewerMessage), findsNothing);
+      viewer.update(playable);
+      await tester.pump();
+      expect(find.text('映像を読み込んでいます'), findsNothing);
+      viewer.update(waiting);
+      await tester.pump(const Duration(milliseconds: 50));
+      viewer.update(const ViewerValue(status: ViewerStatus.error));
+      await tester.pump();
+      expect(find.text('映像を再生できませんでした'), findsOneWidget);
+      await tester.pump(const Duration(milliseconds: 600));
+      expect(find.text('映像を読み込んでいます'), findsNothing);
+    },
+  );
+
+  testWidgets('hiding or leaving a buffering clip cancels pending feedback', (
+    tester,
+  ) async {
+    final viewer = ControlledViewer(
+      const ViewerValue(
+        status: ViewerStatus.ready,
+        duration: Duration(seconds: 20),
+        buffering: true,
+      ),
+    );
+    await showViewer(tester, viewer, freeView: false);
+    await tester.pump(const Duration(milliseconds: 300));
+    await showViewer(tester, viewer, freeView: false, visible: false);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('映像を読み込んでいます'), findsNothing);
+    await showViewer(tester, viewer, freeView: false);
+    await tester.pump(const Duration(milliseconds: 300));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    await tester.pump(const Duration(seconds: 1));
+    expect(find.text('映像を読み込んでいます'), findsNothing);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pump(const Duration(milliseconds: 600));
+    expect(find.text('映像を読み込んでいます'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 1));
+    expect(viewer.disposed, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'changing keyed clips releases the old viewer and resets stall timing',
+    (tester) async {
+      final viewers = <ControlledViewer>[];
+      Future<void> clip(String id) => tester.pumpWidget(
+        MaterialApp(
+          home: PreviewViewer(
+            key: ValueKey(id),
+            source: Uri.parse('https://example.invalid/$id.webm'),
+            factory: (_) {
+              final viewer = ControlledViewer(
+                const ViewerValue(
+                  status: ViewerStatus.ready,
+                  duration: Duration(seconds: 20),
+                  buffering: true,
+                ),
+              );
+              viewers.add(viewer);
+              return viewer;
+            },
+          ),
+        ),
+      );
+      await clip('first');
+      await tester.pump(const Duration(milliseconds: 400));
+      await clip('second');
+      expect(viewers.first.disposed, isTrue);
+      expect(viewers, hasLength(2));
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(find.text('映像を読み込んでいます'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 400));
+      expect(find.text('映像を読み込んでいます'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      expect(viewers.last.disposed, isTrue);
+    },
+  );
+
   test('ordinary videos retain playback capability by default', () {
     expect(const ViewerValue().canPlay, isTrue);
   });
@@ -207,6 +347,8 @@ void main() {
       ),
     );
     await showViewer(tester, viewer, freeView: false);
+    expect(find.text('映像を読み込んでいます'), findsNothing);
+    await tester.pump(const Duration(milliseconds: 600));
     expect(find.text('映像を読み込んでいます'), findsOneWidget);
     expect(find.byIcon(Icons.pause), findsNothing);
     expect(find.byTooltip('ミュート'), findsOneWidget);
