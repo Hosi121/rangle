@@ -1,25 +1,13 @@
 import { SplatBuffer, SplatParser } from '@mkkellogg/gaussian-splats-3d';
+import { temporalHeader } from './temporal-codec.js';
 
-export const MAX_TEMPORAL_BYTES = 32 * 1024 * 1024;
+export { MAX_TEMPORAL_BYTES } from './temporal-codec.js';
 export const MOTION_TEXTURE_WIDTH = 2048;
 
 /** RGS1 retains canonical IDs: the SDK's spatial partitioner must not reorder them. */
 export function prepareTemporal(data) {
-  if (!(data instanceof ArrayBuffer) || data.byteLength < 32 || data.byteLength > MAX_TEMPORAL_BYTES) {
-    throw new Error('Invalid temporal model size');
-  }
-  const header = new DataView(data);
-  if (new TextDecoder().decode(new Uint8Array(data, 0, 8)) !== 'RANGL4D1') throw new Error('Invalid temporal model magic');
-  const count = header.getUint32(8, true);
-  const frameCount = header.getUint32(16, true);
-  const frameRate = header.getFloat32(20, true);
-  const duration = header.getFloat32(24, true);
-  if (!count || header.getUint32(12, true) !== 56 || header.getUint32(28, true) !== 0 ||
-      data.byteLength !== 32 + count * 56 || frameCount < 2 || frameCount > 15000 ||
-      !Number.isFinite(frameRate) || frameRate <= 0 || frameRate > 240 ||
-      !Number.isFinite(duration) || duration <= 0 || Math.abs(duration - (frameCount - 1) / frameRate) > 1e-5) {
-    throw new Error('Invalid temporal model header');
-  }
+  const { count, frameCount, frameRate, duration, compressed } = temporalHeader(data);
+  if (compressed) throw new Error('Temporal model must be decompressed before preparation');
   const raw = new ArrayBuffer(count * 32);
   const rawBytes = new Uint8Array(raw);
   const words = new Uint32Array(data), staticWords = new Uint32Array(raw);

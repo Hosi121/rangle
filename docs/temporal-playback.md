@@ -44,6 +44,8 @@ scene manifestの`camera`・`attribution`は既存の契約を使い、`frames`�
 | 48 | float32 | 正の時間幅duration |
 | 52 | float32 | peak opacity、0〜1 |
 
+配信時は[可逆圧縮したRGS1-Z](gaussian-compression.md)も使用できる。復号後はこのRGS1と全byteが一致し、同じ準備・描画経路を使う。
+
 モデル時刻`t`は物理秒を最終時刻で割った値。位置は`mu + velocity * (t - tau)`、不透明度は`peak * exp(-0.5 * ((t - tau) / duration)^2)`とする。scale・回転・色は時間に対して一定。alphaは既存snapshotと同じ8bit・ties-to-evenで丸め、1未満を描画対象から外す。初期時刻で透明なGaussianも保持し、後の時刻で出現できるようにする。Gaussianの追加間引きは行わない。RGBとquaternionはsnapshotと同じ量子化を含むため、可逆圧縮ではない。
 
 ## 描画と資源管理
