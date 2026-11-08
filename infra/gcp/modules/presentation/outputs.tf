@@ -27,6 +27,13 @@ output "deployment" {
       location    = google_firestore_database.community[0].location_id
       session_ttl = "sessions.expires_at"
     } : null
+    generation = local.generation_enabled ? {
+      config_object           = "generation/${var.application.generation_config_sha256}.json"
+      trainer_service_account = google_service_account.trainer[0].email
+      region                  = var.region
+      input_prefix            = "gs://${google_storage_bucket.private["inputs"].name}/datasets/"
+      output_prefix           = "gs://${google_storage_bucket.private["media"].name}/generated/"
+    } : null
     deadline = var.deadline
   }
 }
