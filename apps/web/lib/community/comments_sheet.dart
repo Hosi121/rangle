@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/viewer_modal.dart';
+
 import 'account_controller.dart';
 import 'account_dialog.dart';
 import 'community_api.dart';
@@ -14,10 +16,8 @@ Future<void> showComments(
         .showSnackBar(const SnackBar(content: Text('現在コメントを利用できません。')));
     return;
   }
-  await showModalBottomSheet<void>(
+  await showViewerBottomSheet<void>(
     context: context,
-    isScrollControlled: true,
-    useSafeArea: true,
     builder: (_) => _CommentsSheet(clip: clip, account: account),
   );
 }

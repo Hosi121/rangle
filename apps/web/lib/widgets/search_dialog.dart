@@ -2,11 +2,13 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import 'viewer_modal.dart';
+
 Future<String?> showSearchDialog(
   BuildContext context, {
   required String initial,
   required Iterable<String> tags,
-}) => showDialog<String>(
+}) => showViewerDialog<String>(
   context: context,
   builder: (_) => _SearchDialog(initial: initial, tags: tags.take(12).toList()),
 );
