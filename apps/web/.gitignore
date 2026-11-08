@@ -10,6 +10,8 @@ web/viewer/viewer.js
 web/viewer/viewer.js.LEGAL.txt
 web/viewer/frame-worker.js
 web/viewer/frame-worker.js.LEGAL.txt
+web/viewer/temporal-worker.js
+web/viewer/temporal-worker.js.LEGAL.txt
 web/viewer/THIRD_PARTY_LICENSES.txt
 .local/
 *.log

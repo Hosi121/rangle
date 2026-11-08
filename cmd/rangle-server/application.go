@@ -36,6 +36,19 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	if cfg.CatalogFile != "" && cfg.AssetRoot == "" && cfg.AssetOrigin == "" {
 		return nil, fmt.Errorf("a catalog requires an asset root or external asset origin")
 	}
+	var clips *catalog.Catalog
+	if cfg.CatalogFile != "" {
+		source, err := os.Open(cfg.CatalogFile)
+		if err != nil {
+			return nil, fmt.Errorf("open catalog: %w", err)
+		}
+		var loadError error
+		clips, loadError = catalog.Load(source)
+		if err := errors.Join(loadError, source.Close()); err != nil {
+			return nil, err
+		}
+		cfg.Web.PreviewPaths = clips.LocalPreviewPaths()
+	}
 	mux := http.NewServeMux()
 	app = &application{Handler: mux}
 	defer func() {
@@ -64,14 +77,6 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	if cfg.CatalogFile == "" {
 		return app, nil
 	}
-	source, err := os.Open(cfg.CatalogFile)
-	if err != nil {
-		return app, fmt.Errorf("open catalog: %w", err)
-	}
-	clips, loadError := catalog.Load(source)
-	if err := errors.Join(loadError, source.Close()); err != nil {
-		return app, err
-	}
 	api, err := catalog.NewHandler(clips, cfg.AssetOrigin)
 	if err != nil {
 		return app, err
@@ -87,8 +92,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			}
 			app.closers = append(app.closers, origin)
 			mux.Handle(manifest.URL(), origin)
-			// Reserve only published clip revisions, leaving Flutter's own
-			// /assets/... resources available through the Web handler.
+			// Published media keeps its root URLs; Flutter resources live at /demo/.
 			mux.Handle("/assets/"+manifest.ClipID+"/"+manifest.Revision+"/", origin)
 		}
 	}

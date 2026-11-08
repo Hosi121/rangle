@@ -17,10 +17,12 @@ class _FreeViewAdapter extends ViewerAdapter {
   late final JSFunction _listener = _onMessage.toJS;
   final _initialized = Completer<void>();
   final _released = Completer<void>();
-  ViewerValue _value = const ViewerValue();
+  ViewerValue _value = const ViewerValue(canPlay: false);
   bool _disposed = false;
   bool _failed = false;
   bool _listening = false;
+  bool _hasReadyFrame = false;
+  bool _visible = true;
   double _frameRate = 25;
   int _frameCount = 0;
   int _requestedFrame = 0;
@@ -48,6 +50,15 @@ class _FreeViewAdapter extends ViewerAdapter {
       ..width = '100%'
       ..height = '100%'
       ..border = '0';
+    _applyVisibility();
+  }
+
+  void _applyVisibility() {
+    final frame = _frame;
+    if (frame == null) return;
+    frame.style
+      ..visibility = _visible ? 'visible' : 'hidden'
+      ..pointerEvents = _visible ? 'auto' : 'none';
   }
 
   void _send(String type, [Map<String, Object?> extra = const {}]) {
@@ -77,15 +88,16 @@ class _FreeViewAdapter extends ViewerAdapter {
       switch (data['type']) {
         case 'boot':
           _send('load', {'url': source.toString()});
+          if (!_visible) _send('pause');
         case 'loading':
           _timeout?.cancel();
           _timeout = Timer(const Duration(seconds: 30), _fail);
           _value = ViewerValue(
-            status: _value.duration > Duration.zero
-                ? ViewerStatus.ready
-                : ViewerStatus.loading,
+            status: _hasReadyFrame ? ViewerStatus.ready : ViewerStatus.loading,
             position: _value.position,
             duration: _value.duration,
+            playing: _value.playing,
+            canPlay: _value.canPlay,
             buffering: true,
           );
           notifyListeners();
@@ -103,6 +115,7 @@ class _FreeViewAdapter extends ViewerAdapter {
           _frameCount = count;
           if (index != _requestedFrame) return;
           _timeout?.cancel();
+          _hasReadyFrame = true;
           _value = ViewerValue(
             status: ViewerStatus.ready,
             position: Duration(
@@ -111,8 +124,40 @@ class _FreeViewAdapter extends ViewerAdapter {
             duration: Duration(
               microseconds: ((count - 1) * 1000000 / _frameRate).round(),
             ),
+            canPlay: data['canPlay'] == true,
+            playing: data['playing'] is bool
+                ? data['playing'] as bool
+                : _value.playing,
           );
           if (!_initialized.isCompleted) _initialized.complete();
+          notifyListeners();
+        case 'playback':
+          final seconds = data['positionSeconds'];
+          final playing = data['playing'];
+          if (!_hasReadyFrame ||
+              seconds is! num ||
+              !seconds.isFinite ||
+              seconds < 0 ||
+              playing is! bool) {
+            return;
+          }
+          final position = Duration(
+            microseconds: (seconds * 1000000).round().clamp(
+              0,
+              _value.duration.inMicroseconds,
+            ),
+          );
+          _requestedFrame = (position.inMicroseconds * _frameRate / 1000000)
+              .round()
+              .clamp(0, _frameCount - 1);
+          _value = ViewerValue(
+            status: _value.status,
+            position: position,
+            duration: _value.duration,
+            playing: playing,
+            canPlay: _value.canPlay,
+            buffering: _value.buffering,
+          );
           notifyListeners();
         case 'error':
           _fail();
@@ -126,7 +171,7 @@ class _FreeViewAdapter extends ViewerAdapter {
     if (_disposed || _failed) return;
     _failed = true;
     _timeout?.cancel();
-    _value = const ViewerValue(status: ViewerStatus.error);
+    _value = const ViewerValue(status: ViewerStatus.error, canPlay: false);
     if (!_initialized.isCompleted) _initialized.complete();
     notifyListeners();
     unawaited(_release());
@@ -146,6 +191,8 @@ class _FreeViewAdapter extends ViewerAdapter {
           microseconds: (frame * 1000000 / _frameRate).round(),
         ),
         duration: _value.duration,
+        playing: _value.playing,
+        canPlay: _value.canPlay,
         buffering: true,
       );
       notifyListeners();
@@ -156,13 +203,31 @@ class _FreeViewAdapter extends ViewerAdapter {
   }
 
   @override
-  Future<void> pause() async => _send('pause');
+  Future<void> pause() async {
+    _visible = false;
+    _applyVisibility();
+    _send('pause');
+  }
+
   @override
-  Future<void> resume() async => _send('resume');
+  Future<void> resume() async {
+    if (_disposed || _failed) return;
+    _visible = true;
+    _applyVisibility();
+    _send('resume');
+  }
+
   @override
   Future<void> toggleMute() async {}
   @override
-  Future<void> togglePlayback() async {}
+  Future<void> togglePlayback() async {
+    if (!_disposed &&
+        !_failed &&
+        _value.status == ViewerStatus.ready &&
+        _value.canPlay) {
+      _send('togglePlayback');
+    }
+  }
 
   late final Widget _view = HtmlElementView.fromTagName(
     key: ObjectKey(this),

@@ -19,9 +19,12 @@ import (
 
 func TestApplicationFeedToManifestAndAsset(t *testing.T) {
 	cfg, manifest, assets := publishedFixture(t)
-	// Flutter's own /assets tree must coexist with versioned media assets.
+	// Demo UI resources and declared previews coexist with unchanged media URLs.
 	ui := t.TempDir()
+	writeFile(t, filepath.Join(ui, "landing.html"), []byte("Product entry"))
 	writeFile(t, filepath.Join(ui, "index.html"), []byte("Web app"))
+	writeFile(t, filepath.Join(ui, "quality-previews/clip.webm"), []byte("preview bytes"))
+	writeFile(t, filepath.Join(ui, "quality-previews/unlisted.webm"), []byte("unlisted media"))
 	writeFile(t, filepath.Join(ui, "assets/AssetManifest.bin.json"), []byte("Flutter assets"))
 	cfg.Web = appserver.Config{UIRoot: ui}
 	app, err := newApplication(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)))
@@ -34,6 +37,7 @@ func TestApplicationFeedToManifestAndAsset(t *testing.T) {
 	var feed struct {
 		Clips []struct {
 			ManifestURL string `json:"manifest_url"`
+			PreviewURL  string `json:"preview_url"`
 		} `json:"clips"`
 	}
 	response, body := fetch(t, server.URL+"/api/v1/clips", nil)
@@ -42,6 +46,9 @@ func TestApplicationFeedToManifestAndAsset(t *testing.T) {
 	}
 	if feed.Clips[0].ManifestURL != manifest.URL() {
 		t.Fatalf("manifest URL = %q", feed.Clips[0].ManifestURL)
+	}
+	if feed.Clips[0].PreviewURL != "/quality-previews/clip.webm" {
+		t.Fatalf("preview URL changed: %q", feed.Clips[0].PreviewURL)
 	}
 	response, body = fetch(t, server.URL+feed.Clips[0].ManifestURL, nil)
 	var received stream.Manifest
@@ -56,13 +63,13 @@ func TestApplicationFeedToManifestAndAsset(t *testing.T) {
 	if response.StatusCode != 206 || string(body) != string(assets[assetURL][1:5]) || !strings.Contains(response.Header.Get("Cache-Control"), "immutable") {
 		t.Fatalf("asset: %d %q %v", response.StatusCode, body, response.Header)
 	}
-	for target, want := range map[string]string{"/": "Web app", "/assets/AssetManifest.bin.json": "Flutter assets", "/healthz": "ok\n"} {
+	for target, want := range map[string]string{"/": "Product entry", "/demo/": "Web app", "/quality-previews/clip.webm": "preview bytes", "/demo/assets/AssetManifest.bin.json": "Flutter assets", "/healthz": "ok\n"} {
 		response, body := fetch(t, server.URL+target, nil)
 		if response.StatusCode != 200 || string(body) != want {
 			t.Fatalf("%s: %d %q", target, response.StatusCode, body)
 		}
 	}
-	for _, target := range []string{"/catalog.json", "/assets/demo/synthetic-v1/low/private.txt", "/api/unknown"} {
+	for _, target := range []string{"/index.html", "/assets/AssetManifest.bin.json", "/quality-previews/unlisted.webm", "/catalog.json", "/assets/demo/synthetic-v1/low/private.txt", "/api/unknown"} {
 		response, _ := fetch(t, server.URL+target, nil)
 		if response.StatusCode != 404 || response.Header.Get("Cache-Control") != "no-store" {
 			t.Fatalf("private or unknown %s: %d %v", target, response.StatusCode, response.Header)
@@ -124,7 +131,7 @@ func publishedFixture(t *testing.T) (config, stream.Manifest, map[string][]byte)
 	writeFile(t, filepath.Join(root, "assets/demo/synthetic-v1/low/private.txt"), []byte("private"))
 	data, err := json.Marshal(map[string]any{
 		"version": 1,
-		"clips":   []any{map[string]any{"title": "Synthetic clip", "sport": "demo", "description": "Synthetic transport fixture", "manifest": manifest}},
+		"clips":   []any{map[string]any{"title": "Synthetic clip", "sport": "demo", "description": "Synthetic transport fixture", "preview_url": "/quality-previews/clip.webm", "manifest": manifest}},
 	})
 	if err != nil {
 		t.Fatal(err)

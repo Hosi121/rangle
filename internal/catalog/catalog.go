@@ -101,6 +101,18 @@ func (c *Catalog) Manifests() []stream.Manifest {
 	return result
 }
 
+// LocalPreviewPaths returns an independent list of catalog-declared root paths.
+// Absolute external URLs are metadata only and never become local file aliases.
+func (c *Catalog) LocalPreviewPaths() []string {
+	var paths []string
+	for _, entry := range c.clips {
+		if strings.HasPrefix(entry.PreviewURL, "/") {
+			paths = append(paths, entry.PreviewURL)
+		}
+	}
+	return paths
+}
+
 func validMediaURL(value string) bool {
 	if len(value) > 4096 {
 		return false

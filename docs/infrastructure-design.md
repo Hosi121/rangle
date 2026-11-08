@@ -1,6 +1,6 @@
 # インフラ構成案
 
-設計段階の提案。ピーク時に数千〜数万人が同時視聴する規模を目標とする。Cloud Runへの実配備と、この規模の負荷検証は未実施である。
+配信構成の設計と [Terraform のコード準備](../infra/gcp/README.md) を行う段階。将来の目標は 10 万同時視聴（CCU）。GoとFlutter WebをまとめたDockerイメージのローカル起動は確認したが、Terraformによる実環境の作成、Cloud Runへの実配備、容量・quota・費用の検証は未実施である。[課題一覧](https://github.com/Hosi121/rangle/issues/20)
 
 ## 推奨する構成
 
@@ -13,7 +13,7 @@ flowchart LR
     Browser[Flutter Web] --> App[Cloud Run: Go API + Web]
     Browser --> CDN[本番: CDN]
     CDN --> Assets[Storage: 配信用資産]
-    App --> Assets
+    Catalog[Storage: 非公開catalog snapshot] -->|read-only mount| App
     Input[Storage: 非公開入力・重み] --> GPU[CustomJob: Python/CUDA]
     GPU --> Input
     GPU -->|評価後に公開| Assets
@@ -37,17 +37,23 @@ origin保護では、immutable revisionを含むcache keyとCache-Control、同�
 
 APIのconcurrency・最大インスタンス数、依存先の容量、配信とGPUのquota・region・費用上限は別途確定し、[段階的な容量検証](technology-selection.md#同時視聴の容量検証計画)で達成を判断する。[Cloud Runのautoscaling](https://docs.cloud.google.com/run/docs/about-instance-autoscaling)
 
-## IaCの分割案
+## IaCの構成
 
-HCLとGoogle providerを候補とし、実装前にTerraformかOpenTofuの一方へ固定する。アプリの可搬性と、Google固有resourceを別クラウドへ移植する作業は区別する。
+HCL、Terraform 1.17.1、Google provider 8.10.0 に固定した。[infra/gcp](../infra/gcp/README.md) は state bootstrap、stg/main の独立 root、小さな GCP 専用 module で構成する。アプリの可搬性と、Google固有resourceを別クラウドへ移植する作業は区別する。
 
 - `stg`・`main`は別root・別state・別実行identityにする。CLI workspaceの切替だけで隔離しない。
 - stateは非公開の専用Storageに置き、lockとObject Versioningを使う。state用bucketの初期作成はbootstrapとして分ける。
-- CLI・providerの版を固定し、lock fileを管理する。最初から汎用クラウドmoduleを作らない。
-- CI認証はOIDC/WIFを候補とし、repositoryとrefを制限する。GPUジョブの実行は明示的な別操作にし、IaC適用で学習を起動しない。
+- CLI・providerの版と lock file を管理する。Cloud Run は Go+Web を維持し、別 media hostname を CDN の backend bucket へ割り当てる。`/` landing、`/demo/*`、root API は app へ渡し、版付き media の path を維持する。image は [PR #19](https://github.com/Hosi121/rangle/pull/19) と [PR #38](https://github.com/Hosi121/rangle/pull/38) の機能を含む必要がある。
+- 公開許諾済み media 専用 bucket、非公開 catalog、非公開入力、state を分離する。media origin は private bucket access と HTTPS-LB cache-fill SA で CDN から読み、匿名の直接 GCS 取得を許さない。署名 URL 不要の公開再生はこの IAM 接続を前提とする。
+- catalog は readonly GCS mount の内容 SHA256 を含む不変 path を revision に固定する。FUSE の制約から catalog bucket だけ Object Versioning を無効にする。初回は `application=null` で storage/media edge を作り、検証済み snapshot の配置後に Cloud Run を追加する。データ配置や publisher は IaC の実行に含めない。
+- CI認証はOIDC/WIFを候補とし、repositoryの数値 ID・owner ID と ref を制限する。WIF 作成、自動 apply、GPUジョブの実行は今回含めない。
 
-根拠: [Googleのroot-module指針](https://docs.cloud.google.com/docs/terraform/best-practices/root-modules)、[Terraform GCS backend](https://developer.hashicorp.com/terraform/language/backend/gcs)、[OpenTofu GCS backend](https://opentofu.org/docs/language/settings/backends/gcs/)、[CI向けWIF](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)。
+根拠: [Googleのroot-module指針](https://docs.cloud.google.com/docs/terraform/best-practices/root-modules)、[Terraform GCS backend](https://developer.hashicorp.com/terraform/language/backend/gcs)、[private bucket access](https://docs.cloud.google.com/cdn/docs/configure-private-bucket-access)、[Cloud Run GCS mount](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts)、[FUSE の制約](https://docs.cloud.google.com/storage/docs/cloud-storage-fuse/overview#limitations)、[CI向けWIF](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)。
 
 ## 実配備前に決めること
 
-project、region、quota、公開する資産、費用・GPU時間・ジョブ並列数の上限、stateと実行権限の管理者を決める。容量検証の実行予算と中止条件も別途定める。ローカルでのコンテナ起動と、Cloud Runでの起動可否、配信性能、GPU互換性、費用の検証は区別する。Cloud Runでの動作と大規模配信性能は未検証として扱う。
+実 project、region、quota、公開する資産、費用・GPU時間・ジョブ並列数の上限、DNS・state・実行権限の管理者を決める。これらは必須入力と架空の例に分離しており、コード準備のために実環境値は必要ない。
+
+容量検証の実行予算と中止条件も別途定める。ローカルでのコンテナ起動と、Cloud Runでの起動可否、配信性能、GPU互換性、費用の検証は区別する。Cloud Runでの動作と大規模配信性能は未検証として扱う。
+
+静的検証と mock plan の結果・初回配備順・保持と復帰の条件は [IaC README](../infra/gcp/README.md#ローカル検証) に記録する。
