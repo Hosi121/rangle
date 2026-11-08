@@ -14,6 +14,7 @@ GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを
 - [Dockerでのビルドと起動](docs/docker.md)
 - [企画書 草案](docs/proposal.md)
 - [初期インフラ構成案](docs/infrastructure-design.md)
+- [現在のGCPクラウド構成図](docs/cloud-architecture.md)
 - [技術選定案](docs/technology-selection.md)
 - [ABRと配信最適化の調査](docs/streaming-research.md)
 - [配信部品の共通契約](docs/streaming-contract.md)
