@@ -172,7 +172,9 @@ resource "google_cloud_run_v2_service" "app" {
     percent = 100
   }
   lifecycle {
-    ignore_changes = [template[0].containers[0].image, traffic]
+    # gcloud owns release metadata, image, and traffic. Keep the template itself
+    # managed here so catalog, mount, and runtime changes still create revisions.
+    ignore_changes = [client, client_version, template[0].containers[0].image, traffic]
     precondition {
       condition     = timecmp(timestamp(), var.deadline) < 0
       error_message = "The presentation deadline has passed; do not recreate the stopped service."

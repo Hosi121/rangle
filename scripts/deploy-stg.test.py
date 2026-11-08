@@ -50,19 +50,33 @@ assert args[:2] == ['run', 'services']
 status = {'url': 'https://rangle-stg-test.run.app', 'latestReadyRevisionName': 'rangle-stg-old-a',
           'traffic': [{'revisionName': 'rangle-stg-old-a', 'percent': 80}, {'revisionName': 'rangle-stg-old-b', 'percent': 20}]}
 if (root / 'deployed').exists():
-    status['traffic'].append({'tag': 'candidate-123-1', 'revisionName': 'rangle-stg-git-aaaaaaaaaaaa-123-1',
+    status['latestCreatedRevisionName'] = 'rangle-stg-00003-abc'
+if (root / 'tagged').exists():
+    status['traffic'].append({'tag': 'candidate-123-1', 'revisionName': 'rangle-stg-00003-abc',
                              'url': 'https://candidate-123-1---rangle-stg-test.run.app'})
 doc = {'status': status, 'spec': {'template': {'spec': {'containers': [{'args': [
     '-ui-root', '/app/web', '-catalog', '/mnt/catalog/snapshots/hash.json',
-    '-asset-origin', 'https://media.replay.example.test']}]}}}}
+    '-asset-origin', 'https://media.replay.example.test'], 'image': os.environ['STG_IMAGE']}]}}}}
 if os.environ.get('BAD_RUNTIME'):
     doc['spec']['template']['spec']['containers'][0]['args'] = []
 if args[2] == 'update':
-    assert '--no-traffic' in args and '--tag=candidate-123-1' in args
+    assert '--no-traffic' in args
+    assert not any(x.startswith(('--tag=', '--revision-suffix=')) for x in args)
     assert not any(x.startswith(('--args', '--set-env-vars', '--service-account', '--clear-', '--allow-unauthenticated')) for x in args)
     (root / 'deployed').touch()
+    status['latestCreatedRevisionName'] = 'rangle-stg-00003-abc'
+    if os.environ.get('WRONG_IMAGE'):
+        doc['spec']['template']['spec']['containers'][0]['image'] = 'unexpected:latest'
+    if os.environ.get('MISSING_REVISION'):
+        status.pop('latestCreatedRevisionName')
 elif args[2] == 'update-traffic':
-    if '--to-revisions=rangle-stg-git-aaaaaaaaaaaa-123-1=100' in args and os.environ.get('FAIL_PROMOTION'):
+    if '--update-tags=candidate-123-1=rangle-stg-00003-abc' in args:
+        (root / 'tagged').touch()
+        if os.environ.get('FAIL_TAG'):
+            sys.exit(1)
+        status['traffic'].append({'tag': 'candidate-123-1', 'revisionName': 'rangle-stg-00003-abc',
+                                 'url': 'https://candidate-123-1---rangle-stg-test.run.app'})
+    if '--to-revisions=rangle-stg-00003-abc=100' in args and os.environ.get('FAIL_PROMOTION'):
         sys.exit(1)
 print(json.dumps(doc))
 '''
@@ -100,8 +114,9 @@ class Deployment(unittest.TestCase):
     def test_success_updates_only_image_then_promotes_and_removes_own_tag(self):
         result, calls = self.run_case()
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-git-aaaaaaaaaaaa-123-1=100'])
+        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100'])
         self.assertEqual(sum(call[1:4] == ['run', 'services', 'update'] for call in calls), 1)
+        self.assertTrue(any('--update-tags=candidate-123-1=rangle-stg-00003-abc' in call for call in calls))
         self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
         probed_urls = [call[-1] for call in calls if call[0] == 'curl']
         self.assertIn('https://rangle-stg-test.run.app/health', probed_urls)
@@ -116,13 +131,26 @@ class Deployment(unittest.TestCase):
     def test_post_promotion_failure_restores_exact_previous_split(self):
         result, calls = self.run_case({'FAIL_POST': '1'})
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-git-aaaaaaaaaaaa-123-1=100',
+        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100',
                                              '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20'])
 
     def test_partial_promotion_error_also_rolls_back(self):
         result, calls = self.run_case({'FAIL_PROMOTION': '1'})
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.traffic(calls)[-1], '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20')
+
+    def test_partial_tag_failure_cleans_only_own_tag_without_promotion(self):
+        result, calls = self.run_case({'FAIL_TAG': '1'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.traffic(calls), [])
+        self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+
+    def test_unexpected_candidate_cannot_be_tagged_or_promoted(self):
+        for change in ({'WRONG_IMAGE': '1'}, {'MISSING_REVISION': '1'}):
+            with self.subTest(change=change):
+                result, calls = self.run_case(change)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(call[1:4] == ['run', 'services', 'update-traffic'] for call in calls))
 
     def test_deadline_blocks_before_any_cloud_call(self):
         result, calls = self.run_case({'EXPIRE_AT': '1'})
@@ -173,7 +201,7 @@ class Deployment(unittest.TestCase):
     def test_canonical_tls_failure_after_promotion_restores_previous_split(self):
         result, calls = self.run_case({'FAIL_CANONICAL_TLS': '1'})
         self.assertNotEqual(result.returncode, 0)
-        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-git-aaaaaaaaaaaa-123-1=100',
+        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100',
                                              '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20'])
         self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
 

@@ -49,8 +49,6 @@ readonly app_origin media_origin
   echo 'A complete commit SHA and GitHub run identity are required.' >&2; exit 1;
 }
 readonly tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-readonly revision="${service}-git-${GITHUB_SHA:0:12}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
-readonly suffix=${revision#"$service"-}
 work=$(mktemp -d)
 promotion_attempted=false
 candidate_created=false
@@ -117,11 +115,25 @@ PY
 readonly service_url=${before[0]}
 previous_traffic=${before[1]}
 check_deadline
+# Let Cloud Run name the revision. A tag on this update makes gcloud persist an
+# explicit template revision, causing drift on the next Terraform runtime edit.
+cloud_run services update "$service" --image="$STG_IMAGE" --no-traffic --format=json > "$work/candidate.json"
+revision=$(python3 - "$work/candidate.json" "$service" "$STG_IMAGE" <<'PY'
+import json, re, sys
+doc = json.load(open(sys.argv[1]))
+revision = doc.get('status', {}).get('latestCreatedRevisionName', '')
+containers = doc.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [])
+if not re.fullmatch(re.escape(sys.argv[2]) + r'-[a-z0-9-]+', revision) or len(revision) > 63:
+    raise SystemExit('The update did not return a valid candidate revision.')
+if len(containers) != 1 or containers[0].get('image') != sys.argv[3]:
+    raise SystemExit('The candidate image does not match the requested digest.')
+print(revision)
+PY
+)
+readonly revision
 # Set before the call: an interrupted request might have created the tag.
 candidate_created=true
-cloud_run services update "$service" --image="$STG_IMAGE" --revision-suffix="$suffix" \
-  --no-traffic --tag="$tag" --format=json > "$work/candidate.json"
-cloud_run services describe "$service" --format=json > "$work/ready.json"
+cloud_run services update-traffic "$service" --update-tags="$tag=$revision" --format=json > "$work/ready.json"
 candidate_url=$(python3 - "$work/ready.json" "$tag" "$revision" <<'PY'
 import json, sys
 from urllib.parse import urlsplit

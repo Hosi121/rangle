@@ -33,4 +33,6 @@ Go＋Flutter Webをマルチステージで1つの非root imageにまとめ、di
 
 CIはimageとtrafficを更新する。インフラ・IAM・catalog・メディアの管理はIaCと公開工程が担当する。配信先は `app.<domain>` と `media.<domain>`。
 
+revision名はCloud Runに生成させ、候補tagを別操作で付ける。同時指定するとTerraformにrevisionの差分が残る [providerの既知問題](https://github.com/hashicorp/terraform-provider-google/issues/17218) を避け、IaCによるruntime設定の変更を維持する。
+
 新規build・配備・昇格の期限は **2026-11-15 00:00 JST**。稼働資源の停止・予算監視は別のジョブが担当する。構成・権限・停止条件は [stg配備手順](stg-deployment.md) を参照。
