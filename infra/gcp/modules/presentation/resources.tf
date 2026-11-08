@@ -1,6 +1,10 @@
 locals {
   prefix       = "rangle-stg"
-  media_origin = "https://${var.hosting_site_id}.web.app"
+  app_enabled  = var.application != null && var.base_domain != null
+  app_host     = var.base_domain == null ? null : "app.${var.base_domain}"
+  media_host   = var.base_domain == null ? null : "media.${var.base_domain}"
+  app_origin   = var.base_domain == null ? null : "https://${local.app_host}"
+  media_origin = var.base_domain == null ? null : "https://${local.media_host}"
   service_name = "projects/${var.project_id}/locations/${var.region}/services/${local.prefix}"
   job_name     = "projects/${var.project_id}/locations/${var.region}/jobs/${local.prefix}-guard"
   labels       = { application = "rangle", environment = "presentation-stg" }
@@ -15,7 +19,7 @@ resource "google_project_service" "required" {
   for_each = toset([
     "artifactregistry.googleapis.com", "run.googleapis.com", "storage.googleapis.com",
     "iam.googleapis.com", "iamcredentials.googleapis.com", "sts.googleapis.com",
-    "firebase.googleapis.com", "firebasehosting.googleapis.com", "pubsub.googleapis.com",
+    "compute.googleapis.com", "pubsub.googleapis.com",
     "workflows.googleapis.com", "workflowexecutions.googleapis.com", "cloudscheduler.googleapis.com", "billingbudgets.googleapis.com"
   ])
   project            = var.project_id
@@ -36,6 +40,15 @@ resource "google_storage_bucket" "private" {
   # Catalog is mounted through FUSE, which does not support Object Versioning.
   versioning { enabled = each.key != "catalog" }
   soft_delete_policy { retention_duration_seconds = 604800 }
+  dynamic "cors" {
+    for_each = each.key == "media" ? [1] : []
+    content {
+      origin          = ["*"]
+      method          = ["GET", "HEAD"]
+      response_header = ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Cache-Control", "Last-Modified"]
+      max_age_seconds = 3600
+    }
+  }
   lifecycle { prevent_destroy = true }
   depends_on = [google_project_service.required]
 }
@@ -103,23 +116,8 @@ resource "google_service_account_iam_member" "runtime_act_as" {
   }
 }
 
-resource "google_firebase_project" "presentation" {
-  provider = google-beta
-  count    = var.initialize_firebase ? 1 : 0
-  project  = var.project_id
-  lifecycle { prevent_destroy = true }
-  depends_on = [google_project_service.required]
-}
-resource "google_firebase_hosting_site" "media" {
-  provider        = google-beta
-  project         = var.project_id
-  site_id         = var.hosting_site_id
-  deletion_policy = "PREVENT"
-  depends_on      = [google_project_service.required, google_firebase_project.presentation]
-}
-
 resource "google_cloud_run_v2_service" "app" {
-  count                = var.application == null ? 0 : 1
+  count                = local.app_enabled ? 1 : 0
   project              = var.project_id
   name                 = local.prefix
   location             = var.region
@@ -180,10 +178,10 @@ resource "google_cloud_run_v2_service" "app" {
       error_message = "The presentation deadline has passed; do not recreate the stopped service."
     }
   }
-  depends_on = [google_storage_bucket_iam_member.catalog_reader, google_firebase_hosting_site.media, google_cloud_scheduler_job.guard]
+  depends_on = [google_storage_bucket_iam_member.catalog_reader, google_cloud_scheduler_job.guard]
 }
 resource "google_cloud_run_v2_service_iam_member" "deployer" {
-  count    = var.application == null ? 0 : 1
+  count    = local.app_enabled ? 1 : 0
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.app[0].name

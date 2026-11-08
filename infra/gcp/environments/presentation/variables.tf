@@ -13,17 +13,15 @@ variable "region" {
     error_message = "This bounded presentation deployment is restricted to Tokyo."
   }
 }
-variable "hosting_site_id" {
-  type = string
+variable "base_domain" {
+  description = "Purchased and confirmed DNS domain. Null prepares only the CDN origin and static IP."
+  type        = string
+  default     = null
+  nullable    = true
   validation {
-    condition     = can(regex("^[a-z0-9][a-z0-9-]{1,28}[a-z0-9]$", var.hosting_site_id))
-    error_message = "Use a new dedicated Hosting site ID, 3-30 characters."
+    condition     = var.base_domain == null ? true : can(regex("^([a-z0-9]([a-z0-9-]*[a-z0-9])?\\.)+[a-z]{2,}$", var.base_domain))
+    error_message = "Use a lowercase DNS domain without scheme, path or wildcard."
   }
-}
-variable "initialize_firebase" {
-  description = "True only if Firebase is absent from the existing project. Adding Firebase cannot be undone."
-  type        = bool
-  default     = false
 }
 variable "deadline" {
   type    = string

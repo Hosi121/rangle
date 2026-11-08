@@ -74,21 +74,25 @@ main:
             - record_deployer_error:
                 assign:
                   - errors: $${list.concat(errors, error)}
-    - disable_hosting:
-        try:
-          call: http.post
-          args:
-            url: "https://firebasehosting.googleapis.com/v1beta1/sites/${site}/releases"
-            auth: {type: OAuth2}
-            body:
-              type: "SITE_DISABLE"
-              message: "Presentation deadline or budget stop"
-        except:
-          as: error
+    - delete_owned_edge:
+        for:
+          value: resource_path
+          in:
+            - "projects/${project_id}/global/forwardingRules/${edge_prefix}-http"
+            - "projects/${project_id}/global/forwardingRules/${edge_prefix}-https"
+            - "projects/${project_id}/global/addresses/${edge_prefix}-edge"
           steps:
-            - record_hosting_error:
-                assign:
-                  - errors: $${list.concat(errors, error)}
+            - delete_edge_resource:
+                try:
+                  call: delete_compute_resource
+                  args:
+                    resource_path: $${resource_path}
+                except:
+                  as: error
+                  steps:
+                    - record_edge_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
     - inspect_before_delete:
         call: service_is_absent
         args:
@@ -161,7 +165,7 @@ main:
               ifGenerationMatch: "0"
             auth: {type: OAuth2}
             headers: {Content-Type: "application/json"}
-            body: '$${json.encode_to_string({"reason": reason, "observed_cost": observed_cost, "currency": "${budget_currency}", "time": time.format(sys.now()), "site": "${site}", "service": "${service}"})}'
+            body: '$${json.encode_to_string({"reason": reason, "observed_cost": observed_cost, "currency": "${budget_currency}", "time": time.format(sys.now()), "edge": "${edge_prefix}-edge", "service": "${service}"})}'
         except:
           as: error
           steps:
@@ -302,3 +306,89 @@ wait_until_operation_done:
         call: sys.sleep
         args: {seconds: 5}
         next: inspect
+
+delete_compute_resource:
+  params: [resource_path]
+  steps:
+    - validate_target:
+        switch:
+          - condition: $${not (resource_path in ["projects/${project_id}/global/forwardingRules/${edge_prefix}-http", "projects/${project_id}/global/forwardingRules/${edge_prefix}-https", "projects/${project_id}/global/addresses/${edge_prefix}-edge"])}
+            steps:
+              - foreign_target:
+                  raise: "Unexpected Compute shutdown target"
+    - inspect:
+        try:
+          call: http.get
+          args:
+            url: $${"https://compute.googleapis.com/compute/v1/" + resource_path}
+            auth: {type: OAuth2}
+        except:
+          as: error
+          steps:
+            - missing:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent:
+                          return: "absent"
+            - inspect_failed:
+                raise: $${error}
+    - request_delete:
+        try:
+          call: http.delete
+          args:
+            url: $${"https://compute.googleapis.com/compute/v1/" + resource_path}
+            auth: {type: OAuth2}
+          result: deletion
+        except:
+          as: error
+          steps:
+            - missing_after_inspect:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - already_deleted:
+                          return: "absent"
+            - delete_failed:
+                raise: $${error}
+    - initialize:
+        assign:
+          - operation_name: $${deletion.body.name}
+          - attempts: 0
+    - validate_operation:
+        switch:
+          - condition: $${not text.match_regex(operation_name, "^[A-Za-z0-9_-]+$")}
+            steps:
+              - invalid_operation:
+                  raise: "Unexpected Compute global operation name"
+    - inspect_operation:
+        call: http.get
+        args:
+          url: $${"https://compute.googleapis.com/compute/v1/projects/${project_id}/global/operations/" + operation_name}
+          auth: {type: OAuth2}
+        result: operation
+    - done:
+        switch:
+          - condition: $${operation.body.status == "DONE"}
+            steps:
+              - verify_result:
+                  switch:
+                    - condition: $${map.get(operation.body, "error") != null}
+                      steps:
+                        - operation_failed:
+                            raise: $${operation.body.error}
+              - complete:
+                  return: "deleted"
+    - increment:
+        assign:
+          - attempts: $${attempts + 1}
+    - bounded_wait:
+        switch:
+          - condition: $${attempts >= 60}
+            steps:
+              - timed_out:
+                  raise: "Compute global deletion operation timed out"
+    - wait:
+        call: sys.sleep
+        args: {seconds: 5}
+        next: inspect_operation

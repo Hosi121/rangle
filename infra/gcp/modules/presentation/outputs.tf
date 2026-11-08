@@ -4,18 +4,24 @@ output "deployment" {
     project_number             = var.project_number
     region                     = var.region
     service                    = local.prefix
-    app_uri                    = var.application == null ? null : google_cloud_run_v2_service.app[0].uri
+    app_uri                    = local.app_enabled ? google_cloud_run_v2_service.app[0].uri : null
     artifact_image_base        = "${var.region}-docker.pkg.dev/${var.project_id}/${local.prefix}/server"
     runtime_service_account    = google_service_account.runtime.email
     deploy_service_account     = google_service_account.deployer.email
     workload_identity_provider = google_iam_workload_identity_pool_provider.github.name
-    hosting_site               = google_firebase_hosting_site.media.site_id
-    media_origin               = local.media_origin
-    catalog_bucket             = google_storage_bucket.private["catalog"].name
-    media_mirror_bucket        = google_storage_bucket.private["media"].name
-    inputs_bucket              = google_storage_bucket.private["inputs"].name
-    catalog_object             = var.application == null ? null : "snapshots/${var.application.catalog_sha256}.json"
-    deadline                   = var.deadline
+    base_domain                = var.base_domain
+    edge_ip                    = google_compute_global_address.edge.address
+    app_origin                 = local.app_origin
+    dns_records = var.base_domain == null ? [] : [
+      { type = "A", name = local.app_host, value = google_compute_global_address.edge.address, proxied = false },
+      { type = "A", name = local.media_host, value = google_compute_global_address.edge.address, proxied = false }
+    ]
+    media_origin        = local.media_origin
+    catalog_bucket      = google_storage_bucket.private["catalog"].name
+    media_mirror_bucket = google_storage_bucket.private["media"].name
+    inputs_bucket       = google_storage_bucket.private["inputs"].name
+    catalog_object      = var.application == null ? null : "snapshots/${var.application.catalog_sha256}.json"
+    deadline            = var.deadline
   }
 }
 output "budget_guard" {

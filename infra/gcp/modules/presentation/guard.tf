@@ -39,14 +39,6 @@ resource "google_pubsub_subscription_iam_member" "guard" {
   role         = "roles/pubsub.subscriber"
   member       = "serviceAccount:${google_service_account.guard.email}"
 }
-# Hosting does not support custom roles/site-scoped IAM. This is the narrowest
-# available predefined write role; the immutable workflow targets only our site.
-# CI deployer has no Hosting role.
-resource "google_project_iam_member" "hosting_guard" {
-  project = var.project_id
-  role    = "roles/firebasehosting.admin"
-  member  = "serviceAccount:${google_service_account.guard.email}"
-}
 resource "google_project_iam_custom_role" "disable_deployer" {
   project     = var.project_id
   role_id     = "rangleStgDisableDeployer"
@@ -65,7 +57,7 @@ resource "google_project_iam_custom_role" "stop_run" {
   permissions = ["run.services.get", "run.services.delete"]
 }
 resource "google_cloud_run_v2_service_iam_member" "stop_run" {
-  count    = var.application == null ? 0 : 1
+  count    = local.app_enabled ? 1 : 0
   project  = var.project_id
   location = var.region
   name     = google_cloud_run_v2_service.app[0].name
@@ -102,14 +94,15 @@ resource "google_workflows_workflow" "guard" {
     budget_display_name = var.budget_display_name
     budget_currency     = var.budget_currency
     stop_amount         = var.budget_stop_amount
-    site                = var.hosting_site_id
+    project_id          = var.project_id
+    edge_prefix         = local.prefix
     service             = local.service_name
     operation_prefix    = "projects/${var.project_id}/locations/${var.region}/operations/"
     deployer            = "projects/${var.project_id}/serviceAccounts/${local.prefix}-deploy@${var.project_id}.iam.gserviceaccount.com"
     receipt_bucket      = google_storage_bucket.private["inputs"].name
     scheduler           = local.job_name
   })
-  depends_on = [google_project_service.required, google_project_iam_member.hosting_guard, google_service_account_iam_member.disable_deployer, google_project_iam_member.pause_guard, google_pubsub_subscription_iam_member.guard, google_storage_bucket_iam_member.guard_receipt, google_firebase_hosting_site.media, google_project_iam_member.run_operations, google_project_iam_member.inspect_run]
+  depends_on = [google_project_service.required, google_service_account_iam_member.disable_deployer, google_project_iam_member.pause_guard, google_pubsub_subscription_iam_member.guard, google_storage_bucket_iam_member.guard_receipt, google_project_iam_member.run_operations, google_project_iam_member.inspect_run, google_project_iam_member.edge_reader, google_project_iam_member.stop_forwarding_rules, google_project_iam_member.release_address]
 }
 resource "google_project_iam_custom_role" "invoke_guard" {
   project     = var.project_id
@@ -181,5 +174,50 @@ resource "google_project_iam_custom_role" "inspect_run" {
 resource "google_project_iam_member" "inspect_run" {
   project = var.project_id
   role    = google_project_iam_custom_role.inspect_run.name
+  member  = "serviceAccount:${google_service_account.guard.email}"
+}
+
+# Official IAM resource attributes list global forwarding rules by this exact
+# relative resource.name; addresses are absent from that supported table.
+resource "google_project_iam_custom_role" "stop_forwarding_rules" {
+  project     = var.project_id
+  role_id     = "rangleStgStopForwardingRules"
+  title       = "Delete presentation forwarding rules"
+  permissions = ["compute.globalForwardingRules.delete"]
+  depends_on  = [google_project_service.required]
+}
+resource "google_project_iam_member" "stop_forwarding_rules" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.stop_forwarding_rules.name
+  member  = "serviceAccount:${google_service_account.guard.email}"
+  condition {
+    title      = "only_presentation_forwarding_rules"
+    expression = "resource.name in ['projects/${var.project_id}/global/forwardingRules/${local.prefix}-http', 'projects/${var.project_id}/global/forwardingRules/${local.prefix}-https']"
+  }
+}
+resource "google_project_iam_custom_role" "release_address" {
+  project     = var.project_id
+  role_id     = "rangleStgReleaseAddress"
+  title       = "Release presentation external address"
+  permissions = ["compute.globalAddresses.delete"]
+  depends_on  = [google_project_service.required]
+}
+# No false per-address scope claim: the supported resource.name table omits
+# global addresses. The only mutating code target is rangle-stg-edge.
+resource "google_project_iam_member" "release_address" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.release_address.name
+  member  = "serviceAccount:${google_service_account.guard.email}"
+}
+resource "google_project_iam_custom_role" "edge_reader" {
+  project     = var.project_id
+  role_id     = "rangleStgEdgeReader"
+  title       = "Read edge absence and global deletion operations"
+  permissions = ["compute.globalForwardingRules.get", "compute.globalAddresses.get", "compute.globalOperations.get"]
+  depends_on  = [google_project_service.required]
+}
+resource "google_project_iam_member" "edge_reader" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.edge_reader.name
   member  = "serviceAccount:${google_service_account.guard.email}"
 }

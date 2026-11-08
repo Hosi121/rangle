@@ -1,9 +1,8 @@
-# Fake project and site, with an illustrative USD early-stop guard.
+# Fake project, no assumed purchased domain, illustrative USD early-stop guard.
 project_id = "rangle-example"
 project_number = "123456789012"
 region = "asia-northeast1"
-hosting_site_id = "rangle-example-stg-media"
-initialize_firebase = false
+base_domain = null
 budget_currency = "USD"
 budget_stop_amount = 150
 application = null

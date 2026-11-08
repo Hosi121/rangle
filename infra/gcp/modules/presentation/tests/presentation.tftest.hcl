@@ -1,93 +1,78 @@
 mock_provider "google" {
-  mock_data "google_artifact_registry_repository" {
-    defaults = { format = "DOCKER" }
-  }
+  mock_data "google_artifact_registry_repository" { defaults = { format = "DOCKER" } }
 }
-mock_provider "google-beta" {}
-
 variables {
   project_id         = "rangle-example"
   project_number     = "123456789012"
   region             = "asia-northeast1"
-  hosting_site_id    = "rangle-example-stg-media"
   budget_currency    = "JPY"
   budget_stop_amount = 15000
 }
-
-run "foundation_without_dummy_app" {
+run "domain_pending_private_foundation" {
   command = plan
   assert {
-    condition     = length(google_cloud_run_v2_service.app) == 0 && length(google_artifact_registry_repository.images) == 0
-    error_message = "An absent catalog must not start a dummy app or alter the existing artifact repository."
+    condition     = length(google_cloud_run_v2_service.app) == 0 && length(google_compute_target_https_proxy.edge) == 0 && length(google_compute_global_forwarding_rule.https) == 0 && length(google_compute_managed_ssl_certificate.edge) == 0 && output.deployment.app_origin == null && output.deployment.media_origin == null
+    error_message = "No invented domain, certificate, route, or dummy application may be published while the domain is pending."
   }
   assert {
-    condition     = alltrue([for bucket in google_storage_bucket.private : bucket.public_access_prevention == "enforced"]) && !google_storage_bucket.private["catalog"].versioning[0].enabled
-    error_message = "All stored data must stay private and FUSE catalog versioning must remain off."
+    condition     = alltrue([for bucket in google_storage_bucket.private : bucket.public_access_prevention == "enforced"]) && !google_storage_bucket.private["catalog"].versioning[0].enabled && google_storage_bucket_iam_member.cache_fill.member == "serviceAccount:service-123456789012@https-lb.iam.gserviceaccount.com"
+    error_message = "Private buckets and the correct private CDN cache-fill identity must be preserved."
   }
   assert {
-    condition     = strcontains(google_iam_workload_identity_pool_provider.github.attribute_condition, "assertion.repository_id == '1448803636'") && strcontains(google_iam_workload_identity_pool_provider.github.attribute_condition, "assertion.repository_owner_id == '128687243'") && strcontains(google_iam_workload_identity_pool_provider.github.attribute_condition, "deploy-stg.yml@refs/heads/stg") && strcontains(google_iam_workload_identity_pool_provider.github.attribute_condition, "['push', 'workflow_dispatch']")
-    error_message = "WIF must pin the numeric repository/owner, branch, workflow path, and allowed event types."
+    condition     = google_compute_backend_bucket.media.enable_cdn && !google_compute_backend_bucket.media.cdn_policy[0].negative_caching && google_compute_backend_bucket.media.compression_mode == "DISABLED" && contains(google_storage_bucket.private["media"].cors[0].origin, "*")
+    error_message = "Anonymous public media must retain CDN/CORS without payload transformation or stale missing-object cache."
   }
   assert {
-    condition     = strcontains(google_service_account_iam_member.github_deployer.condition[0].expression, "2026-11-14T15:00:00Z") && google_cloud_scheduler_job.guard.schedule == "*/15 * * * *"
-    error_message = "Federation must expire and the budget/deadline guard must poll every 15 minutes."
+    condition     = google_pubsub_topic_iam_member.billing_publisher.member == "serviceAccount:billing-budget-alert@system.gserviceaccount.com" && length(google_artifact_registry_repository_iam_member.image_writer.condition) == 0 && length(google_artifact_registry_repository.images) == 0
+    error_message = "Keep the live-verified Billing publisher and existing scoped Artifact Registry policy."
   }
   assert {
-    condition     = google_pubsub_topic_iam_member.billing_publisher.member == "serviceAccount:billing-budget-alert@system.gserviceaccount.com" && google_pubsub_topic_iam_member.billing_publisher.role == "roles/pubsub.publisher" && google_pubsub_topic_iam_member.billing_publisher.topic == "rangle-stg-budget"
-    error_message = "Only the official Cloud Billing budget alert identity may publish to the dedicated budget topic."
-  }
-  assert {
-    condition     = google_artifact_registry_repository_iam_member.image_writer.repository == "rangle-stg" && google_artifact_registry_repository_iam_member.image_writer.role == "roles/artifactregistry.writer" && length(google_artifact_registry_repository_iam_member.image_writer.condition) == 0
-    error_message = "Keep writer permission on the dedicated repository without its unsupported conditional policy."
-  }
-  assert {
-    condition     = strcontains(google_workflows_workflow.guard.source_contents, "SITE_DISABLE") && strcontains(google_workflows_workflow.guard.source_contents, "observed_cost >= 15000") && strcontains(google_workflows_workflow.guard.source_contents, "Budget currency mismatch")
-    error_message = "The fixed-site stop must check the budget amount and exact configured currency."
-  }
-  assert {
-    condition     = contains(keys(yamldecode(google_workflows_workflow.guard.source_contents)), "main") && contains(keys(yamldecode(google_workflows_workflow.guard.source_contents)), "wait_until_absent")
-    error_message = "The rendered workflow must be valid YAML with both entrypoint and bounded service verification."
+    condition     = contains(keys(yamldecode(google_workflows_workflow.guard.source_contents)), "delete_compute_resource") && !strcontains(google_workflows_workflow.guard.source_contents, "firebasehosting") && strcontains(google_workflows_workflow.guard.source_contents, "observed_cost >= 15000") && strcontains(google_workflows_workflow.guard.source_contents, "global/addresses/rangle-stg-edge")
+    error_message = "Budget/deadline shutdown must remove owned Compute ingress without Firebase operations."
   }
 }
-
-run "public_app_is_bounded" {
+run "configured_domain_media_and_budget" {
   command = plan
   variables {
+    base_domain = "presentation.example.com"
+    budget      = { billing_account_id = "000000-000000-000000", amount = 30000, start_date = "2026-11-08", end_date = "2026-11-15" }
+  }
+  assert {
+    condition     = length(google_compute_global_forwarding_rule.https) == 1 && length(google_compute_global_forwarding_rule.http) == 1 && length(google_cloud_run_v2_service.app) == 0 && output.deployment.media_origin == "https://media.presentation.example.com" && length(output.deployment.dns_records) == 2
+    error_message = "The supplied domain enables edge DNS/HTTPS, while an absent verified image/catalog leaves the app uncreated."
+  }
+  assert {
+    condition     = !google_compute_url_map.https[0].default_url_redirect[0].https_redirect && google_compute_url_map.http_redirect[0].default_url_redirect[0].https_redirect && google_compute_ssl_policy.edge[0].min_tls_version == "TLS_1_2"
+    error_message = "HTTPS must retain its scheme; only HTTP redirects to HTTPS with TLS 1.2 minimum."
+  }
+  assert {
+    condition     = google_billing_budget.presentation[0].ownership_scope == "ALL_USERS" && google_billing_budget.presentation[0].budget_filter[0].projects == toset(["projects/123456789012"]) && google_billing_budget.presentation[0].amount[0].specified_amount[0].currency_code == "JPY"
+    error_message = "Keep the optional budget project-scoped in the verified currency."
+  }
+}
+run "configured_domain_bounded_app" {
+  command = plan
+  variables {
+    base_domain = "presentation.example.com"
     application = {
       image_digest   = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
       catalog_sha256 = "1111111111111111111111111111111111111111111111111111111111111111"
     }
   }
   assert {
-    condition     = google_cloud_run_v2_service.app[0].ingress == "INGRESS_TRAFFIC_ALL" && !google_cloud_run_v2_service.app[0].default_uri_disabled && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1 && google_cloud_run_v2_service.app[0].scaling[0].min_instance_count == 0
-    error_message = "Use free run.app HTTPS with one maximum instance and no idle minimum."
+    condition     = google_cloud_run_v2_service.app[0].ingress == "INGRESS_TRAFFIC_ALL" && !google_cloud_run_v2_service.app[0].default_uri_disabled && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1 && google_cloud_run_v2_service.app[0].scaling[0].min_instance_count == 0 && google_cloud_run_v2_service.app[0].template[0].max_instance_request_concurrency == 40
+    error_message = "Presentation Run URLs stay probeable with bounded request-based scaling."
   }
   assert {
-    condition     = google_cloud_run_v2_service.app[0].template[0].max_instance_request_concurrency == 40 && google_cloud_run_v2_service.app[0].template[0].containers[0].resources[0].cpu_idle && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "https://rangle-example-stg-media.web.app")
-    error_message = "Keep request billing, bounded concurrency and direct Hosting media URLs."
+    condition     = google_cloud_run_v2_service.app[0].template[0].volumes[0].gcs[0].read_only && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "https://media.presentation.example.com") && google_cloud_run_v2_service.app[0].template[0].containers[0].startup_probe[0].http_get[0].path == "/healthz"
+    error_message = "The app must pin readonly catalog, advertise the chosen media origin and verify its HTTP startup probe."
   }
   assert {
-    condition     = google_cloud_run_v2_service.app[0].template[0].volumes[0].gcs[0].read_only && google_cloud_run_v2_service_iam_member.stop_run[0].name == google_cloud_run_v2_service.app[0].name
-    error_message = "Keep a read-only catalog and scope shutdown permission to the owned service."
+    condition     = !google_compute_backend_service.app[0].enable_cdn && google_compute_backend_service.app[0].health_checks == null && length(google_compute_url_map.https[0].host_rule) == 2 && google_compute_region_network_endpoint_group.app[0].network_endpoint_type == "SERVERLESS"
+    error_message = "Route the uncached application via a serverless NEG, which does not use Compute health checks."
   }
   assert {
-    condition     = google_cloud_run_v2_service.app[0].traffic[0].type == "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST" && google_cloud_run_v2_service.app[0].traffic[0].percent == 100
-    error_message = "Initialize one revision at 100%; subsequent image/traffic changes belong to the release workflow."
-  }
-}
-
-run "optional_project_budget" {
-  command = plan
-  variables {
-    budget = {
-      billing_account_id = "000000-000000-000000"
-      amount             = 30000
-      start_date         = "2026-11-08"
-      end_date           = "2026-11-15"
-    }
-  }
-  assert {
-    condition     = google_billing_budget.presentation[0].ownership_scope == "ALL_USERS" && google_billing_budget.presentation[0].budget_filter[0].projects == toset(["projects/123456789012"]) && google_billing_budget.presentation[0].amount[0].specified_amount[0].currency_code == "JPY"
-    error_message = "Our optional budget must be project-scoped and use verified account currency."
+    condition     = strcontains(google_service_account_iam_member.github_deployer.condition[0].expression, "2026-11-14T15:00:00Z") && strcontains(google_iam_workload_identity_pool_provider.github.attribute_condition, "assertion.repository_id == '1448803636'") && strcontains(google_project_iam_member.stop_forwarding_rules.condition[0].expression, "global/forwardingRules/rangle-stg-https")
+    error_message = "Preserve exact WIF/expiry and restrict forwarding-rule mutation to owned names."
   }
 }
