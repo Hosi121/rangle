@@ -55,6 +55,7 @@ scan_owned_generation_jobs:
           - page_token: ""
           - pages: 0
           - active: 0
+          - empty_labels: {}
     - check_bound:
         switch:
           - condition: $${sys.now() >= cutoff or pages >= 20}
@@ -86,7 +87,7 @@ scan_owned_generation_jobs:
                           raise: "Vertex job cancellation exceeded its bounded shutdown window"
             - classify_job:
                 assign:
-                  - labels: $${default(map.get(job, "labels"), {})}
+                  - labels: $${default(map.get(job, "labels"), empty_labels)}
                   - owned_environment: $${map.get(labels, "application") == "rangle" and map.get(labels, "environment") == "presentation-stg"}
                   - valid_job_id: $${text.match_regex(default(map.get(labels, "rangle_job"), ""), "^[0-9a-f]{32}$")}
                   - valid_resource_name: $${text.match_regex(default(map.get(job, "name"), ""), "^projects/(${project_id}|${project_number})/locations/${region}/customJobs/[A-Za-z0-9_-]+$")}

@@ -34,6 +34,6 @@ Go の CustomJob request と immutable config が **Tokyo / SPOT T4×1 / n1-stan
 
 終了の確認には listing visibility / cancellation latency の実検証が必要で、GPU 停止時刻や費用の厳密な hard cap は未実証。mock は IAM 宣言、既定 off、config SHA、実 render YAML の順序・filter・有限性を確認した。ローカルの Workflow subset stub では ownership 除外、pagination、4回の empty scan、300秒 / 20 pages の打切り、API 失敗の伝播を確認した。これらは実 compiler / IAM / quota / worker 成果品質を証明しない。
 
-所有判定は環境・job ID・resource name・terminal state の短い各式へ分割する。mock は render 済み YAML に含まれる全式を調べ、区切り込み400文字以内かも確認する。[Workflows expression limit](https://docs.cloud.google.com/workflows/quotas#resource_limits)
+所有判定は環境・job ID・resource name・terminal state の短い各式へ分割する。label がない job は YAML で定義した独立の空 map へ戻し、直前 job の label を再利用しない。mock は render 済み YAML に含まれる全式を調べ、区切り込み400文字以内かも確認する。[Workflows expression limit](https://docs.cloud.google.com/workflows/quotas#resource_limits)
 
 公開 Workflows v1 / v1beta API の create / patch には `validateOnly` や compiler 検証専用 method がなく、非デプロイの server-side compile は確認できない。公式 REST 仕様、公開 Discovery JSON、Cloud SDK の request 定義でも確認した。SDK 内の `ValidateWorkflow` は初回 source の有無を調べる処理で、compiler ではない。実 compiler 検証は後続の配備工程に残し、本番 guard へ未定義の `validateOnly` を付けて PATCH する検証は行わない。[Create API](https://docs.cloud.google.com/workflows/docs/reference/rest/v1/projects.locations.workflows/create)、[Patch API](https://docs.cloud.google.com/workflows/docs/reference/rest/v1/projects.locations.workflows/patch)、[公開 API 定義](https://github.com/googleapis/googleapis/blob/master/google/cloud/workflows/v1/workflows.proto)

@@ -67,6 +67,10 @@ run "generation_uses_private_config_and_separate_trainer" {
     condition     = alltrue([for expression in regexall("\\$\\{[^\\n]*\\}", google_workflows_workflow.guard.source_contents) : length(expression) <= 400]) && length(regexall("\\$\\{[^\\n]*\\}", google_workflows_workflow.guard.source_contents)) == length(regexall("\\$\\{", google_workflows_workflow.guard.source_contents))
     error_message = "Every rendered Workflow expression, including its delimiters, must fit the compiler's 400-character limit."
   }
+  assert {
+    condition     = one([for assignment in one([for step in yamldecode(google_workflows_workflow.guard.source_contents).scan_owned_generation_jobs.steps : step.initialize if can(step.initialize)]).assign : assignment.empty_labels if can(assignment.empty_labels)]) == {} && strcontains(google_workflows_workflow.guard.source_contents, "default(map.get(job, \"labels\"), empty_labels)")
+    error_message = "Missing job labels must fall back to a native empty map, never the previous job's labels or a map literal inside an expression."
+  }
 }
 run "reject_unversioned_generation_config" {
   command = plan
