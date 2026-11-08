@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../models/clip.dart';
 import '../community/account_controller.dart';
@@ -224,13 +225,16 @@ class _ClipCardState extends State<ClipCard> {
               right: compact ? 72 : 8,
               top: compact ? 64 : null,
               bottom: compact ? null : constraints.maxHeight * .36,
-              child: ClipActions(
-                clip: clip,
-                active: active,
-                account: widget.account,
-                share: widget.shareAction,
-                compact: compact,
-                sheetWidth: constraints.maxWidth,
+              child: PointerInterceptor(
+                intercepting: _freeView,
+                child: ClipActions(
+                  clip: clip,
+                  active: active,
+                  account: widget.account,
+                  share: widget.shareAction,
+                  compact: compact,
+                  sheetWidth: constraints.maxWidth,
+                ),
               ),
             ),
             Positioned(
@@ -279,49 +283,42 @@ class _ClipCardState extends State<ClipCard> {
                     ),
                   ),
                   if (!compact && clip.tags.isNotEmpty)
-                    Wrap(
-                      spacing: 4,
-                      children: clip.tags
-                          .take(2)
-                          .map(
-                            (tag) => TextButton(
-                              style: TextButton.styleFrom(
-                                minimumSize: const Size(48, 48),
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 8,
+                    PointerInterceptor(
+                      intercepting: _freeView,
+                      child: Wrap(
+                        spacing: 4,
+                        children: clip.tags
+                            .take(2)
+                            .map(
+                              (tag) => TextButton(
+                                style: TextButton.styleFrom(
+                                  minimumSize: const Size(48, 48),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 8,
+                                  ),
+                                  backgroundColor: Colors.black.withValues(
+                                    alpha: .55,
+                                  ),
                                 ),
-                                backgroundColor: Colors.black.withValues(
-                                  alpha: .55,
+                                onPressed: () => widget.onTag?.call(tag),
+                                child: Text(
+                                  '#$tag',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              onPressed: () => widget.onTag?.call(tag),
-                              child: Text(
-                                '#$tag',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ),
-                          )
-                          .toList(),
+                            )
+                            .toList(),
+                      ),
                     ),
                   const SizedBox(height: 8),
-                  Row(
-                    children: [
-                      if (compact)
-                        IconButton.filledTonal(
-                          tooltip: _modeAction,
-                          onPressed: clip.sceneUrl == null ? null : _toggleMode,
-                          icon: Icon(
-                            _pendingScene
-                                ? Icons.hourglass_top
-                                : _freeView
-                                ? Icons.movie_outlined
-                                : Icons.threed_rotation,
-                          ),
-                        )
-                      else
-                        Flexible(
-                          child: FilledButton.tonalIcon(
+                  PointerInterceptor(
+                    intercepting: _freeView,
+                    child: Row(
+                      children: [
+                        if (compact)
+                          IconButton.filledTonal(
+                            tooltip: _modeAction,
                             onPressed: clip.sceneUrl == null
                                 ? null
                                 : _toggleMode,
@@ -331,18 +328,33 @@ class _ClipCardState extends State<ClipCard> {
                                   : _freeView
                                   ? Icons.movie_outlined
                                   : Icons.threed_rotation,
-                              size: 18,
                             ),
-                            label: Text(_modeAction),
+                          )
+                        else
+                          Flexible(
+                            child: FilledButton.tonalIcon(
+                              onPressed: clip.sceneUrl == null
+                                  ? null
+                                  : _toggleMode,
+                              icon: Icon(
+                                _pendingScene
+                                    ? Icons.hourglass_top
+                                    : _freeView
+                                    ? Icons.movie_outlined
+                                    : Icons.threed_rotation,
+                                size: 18,
+                              ),
+                              label: Text(_modeAction),
+                            ),
                           ),
+                        const SizedBox(width: 8),
+                        IconButton.filledTonal(
+                          tooltip: '出典・詳細',
+                          onPressed: () => _showDetails(constraints.maxWidth),
+                          icon: const Icon(Icons.info_outline),
                         ),
-                      const SizedBox(width: 8),
-                      IconButton.filledTonal(
-                        tooltip: '出典・詳細',
-                        onPressed: () => _showDetails(constraints.maxWidth),
-                        icon: const Icon(Icons.info_outline),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
                 ],
               ),

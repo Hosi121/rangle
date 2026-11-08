@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import 'data/clip_repository.dart';
 import 'community/community_api.dart';
@@ -315,24 +316,32 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                               ),
                             ),
                           ),
-                          IconButton(
-                            tooltip: '検索',
-                            onPressed: widget.onSearch,
-                            icon: const Icon(Icons.search),
+                          PointerInterceptor(
+                            intercepting: _freeView,
+                            child: IconButton(
+                              tooltip: '検索',
+                              onPressed: widget.onSearch,
+                              icon: const Icon(Icons.search),
+                            ),
                           ),
                           if (widget.account != null)
-                            ListenableBuilder(
-                              listenable: widget.account!,
-                              builder: (context, _) => IconButton(
-                                tooltip: widget.account!.user == null
-                                    ? 'ログイン'
-                                    : 'アカウント',
-                                onPressed: () =>
-                                    showAccountDialog(context, widget.account),
-                                icon: Icon(
-                                  widget.account!.user == null
-                                      ? Icons.person_outline
-                                      : Icons.account_circle,
+                            PointerInterceptor(
+                              intercepting: _freeView,
+                              child: ListenableBuilder(
+                                listenable: widget.account!,
+                                builder: (context, _) => IconButton(
+                                  tooltip: widget.account!.user == null
+                                      ? 'ログイン'
+                                      : 'アカウント',
+                                  onPressed: () => showAccountDialog(
+                                    context,
+                                    widget.account,
+                                  ),
+                                  icon: Icon(
+                                    widget.account!.user == null
+                                        ? Icons.person_outline
+                                        : Icons.account_circle,
+                                  ),
                                 ),
                               ),
                             ),
@@ -359,10 +368,13 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
-                              IconButton(
-                                tooltip: '絞り込み解除',
-                                onPressed: widget.onClearSearch,
-                                icon: const Icon(Icons.close, size: 18),
+                              PointerInterceptor(
+                                intercepting: _freeView,
+                                child: IconButton(
+                                  tooltip: '絞り込み解除',
+                                  onPressed: widget.onClearSearch,
+                                  icon: const Icon(Icons.close, size: 18),
+                                ),
                               ),
                             ],
                           ),
@@ -375,24 +387,27 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           : widget.filterLabel.isEmpty
                           ? 76
                           : 132,
-                      child: Column(
-                        children: [
-                          IconButton.filledTonal(
-                            tooltip: '前のハイライト',
-                            onPressed: _selected > 0
-                                ? () => _select(_selected - 1)
-                                : null,
-                            icon: const Icon(Icons.keyboard_arrow_up),
-                          ),
-                          const SizedBox(height: 8),
-                          IconButton.filledTonal(
-                            tooltip: '次のハイライト',
-                            onPressed: _selected < widget.clips.length - 1
-                                ? () => _select(_selected + 1)
-                                : null,
-                            icon: const Icon(Icons.keyboard_arrow_down),
-                          ),
-                        ],
+                      child: PointerInterceptor(
+                        intercepting: _freeView,
+                        child: Column(
+                          children: [
+                            IconButton.filledTonal(
+                              tooltip: '前のハイライト',
+                              onPressed: _selected > 0
+                                  ? () => _select(_selected - 1)
+                                  : null,
+                              icon: const Icon(Icons.keyboard_arrow_up),
+                            ),
+                            const SizedBox(height: 8),
+                            IconButton.filledTonal(
+                              tooltip: '次のハイライト',
+                              onPressed: _selected < widget.clips.length - 1
+                                  ? () => _select(_selected + 1)
+                                  : null,
+                              icon: const Icon(Icons.keyboard_arrow_down),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ],

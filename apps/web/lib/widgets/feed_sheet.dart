@@ -1,15 +1,15 @@
 import 'package:flutter/material.dart';
 
+import 'viewer_modal.dart';
+
 /// Keeps feed panels within the player's width, including on desktop.
 Future<void> showFeedSheet(
   BuildContext context, {
   required String title,
   required double width,
   required WidgetBuilder builder,
-}) => showModalBottomSheet<void>(
+}) => showViewerBottomSheet<void>(
   context: context,
-  useSafeArea: true,
-  isScrollControlled: true,
   constraints: BoxConstraints(maxWidth: width),
   backgroundColor: Theme.of(context).colorScheme.surfaceContainer,
   clipBehavior: Clip.antiAlias,

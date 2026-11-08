@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../widgets/viewer_modal.dart';
+
 import 'account_controller.dart';
 import 'community_api.dart';
 
@@ -12,7 +14,7 @@ Future<bool> showAccountDialog(
         .showSnackBar(const SnackBar(content: Text('現在ログインを利用できません。')));
     return false;
   }
-  await showDialog<void>(
+  await showViewerDialog<void>(
     context: context,
     builder: (_) => _AccountDialog(account: account),
   );
