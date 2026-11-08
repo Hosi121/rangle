@@ -4,7 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import 'thumbnail_source.dart';
 
-/// Coalesces hover movement into one decoder job and one latest pending frame.
+/// Throttles hover movement into one decoder job and one latest pending frame.
 /// At most 16 small JPEGs are retained, at the requested source timestamps.
 class ThumbnailPreview extends ChangeNotifier {
   ThumbnailPreview(this._createSource);
@@ -12,10 +12,11 @@ class ThumbnailPreview extends ChangeNotifier {
   final ThumbnailSource Function() _createSource;
   final _cache = <int, Uint8List?>{};
   ThumbnailSource? _source;
-  Timer? _debounce;
+  Timer? _throttle;
   int? _requested;
   int? _pending;
   bool _busy = false;
+  bool _readyToDecode = false;
   bool _disposed = false;
   Uint8List? image;
 
@@ -24,17 +25,18 @@ class ThumbnailPreview extends ChangeNotifier {
     final key = position.inMilliseconds;
     if (_requested == key) return;
     _requested = key;
-    _pending = null;
-    _debounce?.cancel();
     image = null;
     if (_cache.containsKey(key)) {
+      _pending = null;
       image = _cache.remove(key);
       _cache[key] = image;
     } else {
-      _debounce = Timer(const Duration(milliseconds: 80), () {
-        _pending = key;
+      _pending = key;
+      if (_readyToDecode) {
         unawaited(_drain());
-      });
+      } else {
+        _schedule();
+      }
     }
     notifyListeners();
   }
@@ -42,18 +44,31 @@ class ThumbnailPreview extends ChangeNotifier {
   void hide() {
     _requested = null;
     _pending = null;
-    _debounce?.cancel();
+    _throttle?.cancel();
+    _throttle = null;
+    _readyToDecode = false;
     image = null;
     // The widget hiding the preview already rebuilds; do not notify on dispose.
+  }
+
+  void _schedule() {
+    // Movement updates the pending timestamp without restarting this interval.
+    _throttle ??= Timer(const Duration(milliseconds: 80), () {
+      _throttle = null;
+      _readyToDecode = true;
+      unawaited(_drain());
+    });
   }
 
   Future<void> _drain() async {
     if (_busy || _disposed) return;
     _busy = true;
     try {
-      while (_pending != null && !_disposed) {
+      while (_pending != null && _readyToDecode && !_disposed) {
         final key = _pending!;
         _pending = null;
+        _readyToDecode = false;
+        _schedule();
         Uint8List? bytes;
         try {
           bytes = await (_source ??= _createSource()).frame(

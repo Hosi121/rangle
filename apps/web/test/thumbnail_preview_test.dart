@@ -28,6 +28,27 @@ class _Source implements ThumbnailSource {
 }
 
 void main() {
+  testWidgets('continuous hover movement decodes latest frames every 80ms', (
+    tester,
+  ) async {
+    final source = _Source();
+    final preview = ThumbnailPreview(() => source);
+    try {
+      for (var i = 0; i < 30; i++) {
+        preview.preview(Duration(milliseconds: i * 16));
+        await tester.pump(const Duration(milliseconds: 16));
+        // Check progress during movement, before any idle time is allowed.
+        expect(source.requests.length, (i + 1) ~/ 5);
+      }
+      expect(source.requests, [
+        for (var i = 0; i < 6; i++) Duration(milliseconds: 64 + i * 80),
+      ]);
+      expect(preview.image, [4]);
+    } finally {
+      preview.dispose();
+    }
+  });
+
   testWidgets('thumbnail decoding is lazy and coalesces fast hover movement', (
     tester,
   ) async {
