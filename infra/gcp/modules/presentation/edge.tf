@@ -7,9 +7,9 @@ resource "google_compute_backend_bucket" "media" {
   cdn_policy {
     # Private origin access uses the HTTPS load-balancer cache-fill identity.
     # Everything here is public, immutable media; never place private inputs here.
-    cache_mode         = "FORCE_CACHE_ALL"
+    cache_mode = "FORCE_CACHE_ALL"
+    # FORCE_CACHE_ALL uses default_ttl; the API omits max_ttl in this mode.
     default_ttl        = 86400
-    max_ttl            = 86400
     client_ttl         = 86400
     negative_caching   = false
     serve_while_stale  = 0
