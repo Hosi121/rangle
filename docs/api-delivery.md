@@ -4,7 +4,7 @@
 
 ## 構成
 
-APIは起動時に読み込んだcatalogを公開する。永続的な視聴者セッションを持たず、同じcatalogを複数のAPIプロセスに配布できる。初期版のcatalog更新は再起動で反映し、動的な編集や推薦は後続とする。
+カタログAPIは起動時に読み込んだcatalogを公開する。利用者ごとの状態を持たず、同じcatalogを複数のAPIプロセスに配布できる。初期版のcatalog更新は再起動で反映し、動的な編集や推薦は後続とする。[アカウント・いいね・コメント](accounts.md) は別APIと保存先を使う。
 
 各clipのJSONとETagは起動時に生成し、詳細応答で再利用する。一覧は指定ページのJSONを結合し、その応答内容からETagを計算する。ページごとに蓄積するキャッシュは持たず、保持量はcatalogのメタデータ量に比例する。[実装状況と計測](backend-status.md) を参照。
 
@@ -28,10 +28,13 @@ APIは起動時に読み込んだcatalogを公開する。永続的な視聴者�
 | --- | --- |
 | `GET /api/v1/clips?limit=10` | `clips` 配列と、次ページがあれば `next_cursor` |
 | `GET /api/v1/clips?limit=10&cursor=...` | 同じcatalog snapshotの続き |
+| `GET /api/v1/clips?q=slam&tag=basketball` | カタログ全体を検索し、結果をページ送り |
 | `GET /api/v1/clips/{id}` | 1件のメタデータ。存在しなければ404 |
 | `HEAD` | GETと同じヘッダー、bodyなし |
 
 `limit` は既定10、上限50。cursorは不透明な値として扱い、加工しない。catalogや取得先originの更新でcursorが無効になったら400を返すため、先頭から取り直す。無効・重複・未定義のクエリも400にする。初期版は全利用者に同じ公開フィードを返し、`public, max-age=15, stale-while-revalidate=30` と応答内容由来のETagを付ける。エラーは `no-store` とする。
+
+`q` はtitle・sport・description・tagsの大文字小文字を区別しない部分一致。空白区切りの全語を含む結果を返す（最大256bytes・8語）。`tag` は `#` を含めない完全一致。検索条件もcursorに結び付ける。catalogの `tags` は省略可・最大10個で、各tagは文字・数字・結合文字・`_`の32文字以内。未指定の場合、sportがtagとして使える形なら応答に補う。
 
 クリップには `id`、`revision`、`title`、`sport`、`description`、`codec`、`manifest_url` を返す。通常動画の `preview_url` と描画用の `scene_url` は任意。`manifest_url` は配信契約のmanifestを指し、動画プレイヤーへ直接渡すURLではない。Flutterは `RANGLE_API_URL=/api/v1/clips` で先頭ページとmedia URLを読み込み、動画・自由視点・時刻シークを行う。[Webの起動手順](../apps/web/README.md#apiから動画自由視点を開く)を参照。ABR制御への接続は次の段階とする。
 

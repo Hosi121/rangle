@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"path"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/Hosi121/rangle/internal/stream"
 )
@@ -21,6 +23,7 @@ type clip struct {
 	Title       string          `json:"title"`
 	Sport       string          `json:"sport"`
 	Description string          `json:"description"`
+	Tags        []string        `json:"tags,omitempty"`
 	PreviewURL  string          `json:"preview_url,omitempty"`
 	SceneURL    string          `json:"scene_url,omitempty"`
 	Manifest    stream.Manifest `json:"manifest"`
@@ -64,6 +67,17 @@ func Load(source io.Reader) (*Catalog, error) {
 			len(entry.Description) > 4096 || len(entry.Manifest.Codec) > 128 {
 			return nil, fmt.Errorf("clip %d has missing or oversized metadata", i)
 		}
+		if len(entry.Tags) > 10 {
+			return nil, fmt.Errorf("clip %d has too many tags", i)
+		}
+		tags := make(map[string]bool, len(entry.Tags))
+		for _, tag := range entry.Tags {
+			key := strings.ToLower(tag)
+			if !validTag(tag) || tags[key] {
+				return nil, fmt.Errorf("clip %d has an invalid or duplicate tag", i)
+			}
+			tags[key] = true
+		}
 		if err := entry.Manifest.Validate(); err != nil {
 			return nil, fmt.Errorf("clip %d manifest: %w", i, err)
 		}
@@ -85,6 +99,18 @@ func Load(source io.Reader) (*Catalog, error) {
 	}
 	sum := sha256.Sum256(canonical)
 	return &Catalog{clips: document.Clips, snapshot: hex.EncodeToString(sum[:])}, nil
+}
+
+func validTag(value string) bool {
+	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 32 {
+		return false
+	}
+	for _, c := range value {
+		if !unicode.IsLetter(c) && !unicode.IsNumber(c) && !unicode.IsMark(c) && c != '_' {
+			return false
+		}
+	}
+	return true
 }
 
 // Manifests returns independent copies for constructing delivery handlers.

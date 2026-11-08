@@ -17,21 +17,23 @@ import (
 const feedPath = "/api/v1/clips"
 
 type clipView struct {
-	ID          string `json:"id"`
-	Revision    string `json:"revision"`
-	Title       string `json:"title"`
-	Sport       string `json:"sport"`
-	Description string `json:"description"`
-	Codec       string `json:"codec"`
-	ManifestURL string `json:"manifest_url"`
-	PreviewURL  string `json:"preview_url,omitempty"`
-	SceneURL    string `json:"scene_url,omitempty"`
+	ID          string   `json:"id"`
+	Revision    string   `json:"revision"`
+	Title       string   `json:"title"`
+	Sport       string   `json:"sport"`
+	Description string   `json:"description"`
+	Tags        []string `json:"tags,omitempty"`
+	Codec       string   `json:"codec"`
+	ManifestURL string   `json:"manifest_url"`
+	PreviewURL  string   `json:"preview_url,omitempty"`
+	SceneURL    string   `json:"scene_url,omitempty"`
 }
 
 type handler struct {
 	clips    []jsonDocument
 	byID     map[string]int
 	snapshot string
+	search   []searchEntry
 }
 
 type jsonDocument struct {
@@ -64,11 +66,16 @@ func NewHandler(c *Catalog, assetOrigin string) (http.Handler, error) {
 	snapshot := sha256.Sum256([]byte(c.snapshot + "\n" + assetOrigin))
 	h.snapshot = hex.EncodeToString(snapshot[:])
 	for i, entry := range c.clips {
+		tags := append([]string(nil), entry.Tags...)
+		if len(tags) == 0 && validTag(entry.Sport) {
+			tags = []string{strings.ToLower(entry.Sport)}
+		}
 		view := clipView{
 			ID: entry.Manifest.ClipID, Revision: entry.Manifest.Revision,
 			Title: entry.Title, Sport: entry.Sport, Description: entry.Description,
 			Codec: entry.Manifest.Codec, ManifestURL: resolve(entry.Manifest.URL()),
 			PreviewURL: resolve(entry.PreviewURL), SceneURL: resolve(entry.SceneURL),
+			Tags: tags,
 		}
 		data, err := json.Marshal(view)
 		if err != nil {
@@ -76,6 +83,7 @@ func NewHandler(c *Catalog, assetOrigin string) (http.Handler, error) {
 		}
 		h.clips[i] = newJSONDocument(data)
 		h.byID[entry.Manifest.ClipID] = i
+		h.search = append(h.search, newSearchEntry(view))
 	}
 	return h, nil
 }
@@ -96,13 +104,18 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.URL.EscapedPath() == feedPath:
-		limit, start, err := h.page(query)
+		selection, snapshot, err := h.selectClips(query)
+		if err != nil {
+			writeError(w, r, http.StatusBadRequest, "invalid_query")
+			return
+		}
+		limit, start, err := h.page(query, snapshot, len(selection))
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_pagination")
 			return
 		}
-		end := min(start+limit, len(h.clips))
-		writeDocument(w, r, h.feed(start, end))
+		end := min(start+limit, len(selection))
+		writeDocument(w, r, h.feed(selection, snapshot, start, end))
 	case strings.HasPrefix(r.URL.EscapedPath(), feedPath+"/"):
 		id := strings.TrimPrefix(r.URL.EscapedPath(), feedPath+"/")
 		i, ok := h.byID[id]
@@ -122,19 +135,19 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Reuse the startup JSON without caching arbitrary page/limit combinations.
 // Memory stays proportional to catalog metadata, rather than request history.
-func (h *handler) feed(start, end int) jsonDocument {
+func (h *handler) feed(clips []jsonDocument, snapshot string, start, end int) jsonDocument {
 	cursor := ""
 	size := len(`{"clips":[]}`) + max(0, end-start-1)
-	for _, clip := range h.clips[start:end] {
+	for _, clip := range clips[start:end] {
 		size += len(clip.data)
 	}
-	if end < len(h.clips) {
-		cursor = base64.RawURLEncoding.EncodeToString([]byte(h.snapshot + ":" + strconv.Itoa(end)))
+	if end < len(clips) {
+		cursor = base64.RawURLEncoding.EncodeToString([]byte(snapshot + ":" + strconv.Itoa(end)))
 		size += len(`,"next_cursor":""`) + len(cursor)
 	}
 	data := make([]byte, 0, size)
 	data = append(data, `{"clips":[`...)
-	for i, clip := range h.clips[start:end] {
+	for i, clip := range clips[start:end] {
 		if i > 0 {
 			data = append(data, ',')
 		}
@@ -151,10 +164,10 @@ func (h *handler) feed(start, end int) jsonDocument {
 	return newJSONDocument(data)
 }
 
-func (h *handler) page(query url.Values) (limit, start int, err error) {
+func (h *handler) page(query url.Values, snapshot string, count int) (limit, start int, err error) {
 	limit = 10
 	for key, values := range query {
-		if (key != "limit" && key != "cursor") || len(values) != 1 || values[0] == "" {
+		if (key != "limit" && key != "cursor" && key != "q" && key != "tag") || len(values) != 1 || values[0] == "" {
 			return 0, 0, fmt.Errorf("invalid pagination query")
 		}
 	}
@@ -172,9 +185,9 @@ func (h *handler) page(query url.Values) (limit, start int, err error) {
 		if err != nil {
 			return 0, 0, fmt.Errorf("invalid cursor")
 		}
-		snapshot, offset, ok := strings.Cut(string(decoded), ":")
+		cursorSnapshot, offset, ok := strings.Cut(string(decoded), ":")
 		start, err = strconv.Atoi(offset)
-		if !ok || snapshot != h.snapshot || err != nil || start < 1 || start >= len(h.clips) {
+		if !ok || cursorSnapshot != snapshot || err != nil || start < 1 || start >= count {
 			return 0, 0, fmt.Errorf("invalid or stale cursor")
 		}
 	}
