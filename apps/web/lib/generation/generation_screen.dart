@@ -1,0 +1,473 @@
+import 'dart:async';
+
+import 'package:flutter/material.dart';
+
+import '../community/account_controller.dart';
+import '../community/account_dialog.dart';
+import '../community/community_api.dart';
+import '../widgets/viewer_modal.dart';
+import 'generation_api.dart';
+
+class GenerationScreen extends StatefulWidget {
+  const GenerationScreen({
+    required this.account,
+    required this.onOpenResult,
+    this.api,
+    super.key,
+  });
+  final AccountController? account;
+  final GenerationApi? api;
+  final ValueChanged<Uri> onOpenResult;
+
+  @override
+  State<GenerationScreen> createState() => _GenerationScreenState();
+}
+
+class _GenerationScreenState extends State<GenerationScreen>
+    with WidgetsBindingObserver {
+  late final GenerationApi _api;
+  GenerationCatalog? _catalog;
+  List<GenerationJob> _jobs = [];
+  String? _owner,
+      _preset,
+      _requestId,
+      _requestPreset,
+      _error,
+      _submitError,
+      _busyJob;
+  final _jobErrors = <String, String>{};
+  bool _loading = true, _submitting = false, _accepted = false;
+  bool _foreground = true, _covered = false;
+  int _epoch = 0;
+  Timer? _poll;
+
+  bool get _visible => _foreground && !_covered;
+  bool get _signedIn => widget.account?.user != null;
+  bool get _active => _jobs.any((job) => job.active);
+  bool get _busy => _submitting || _busyJob != null;
+
+  @override
+  void initState() {
+    super.initState();
+    _api =
+        widget.api ??
+        GenerationApi(
+          endpoint:
+              widget.account?.api.endpoint ?? Uri.base.resolve('/api/v1/'),
+        );
+    _owner = widget.account?.user?.id;
+    widget.account?.addListener(_accountChanged);
+    WidgetsBinding.instance.addObserver(this);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    if (_foreground) unawaited(_load());
+  }
+
+  void _accountChanged() {
+    if (!mounted) return;
+    final owner = widget.account?.user?.id;
+    if (owner != _owner) {
+      _owner = owner;
+      _pause();
+      setState(() {
+        _jobs = [];
+        _requestId = _requestPreset = _submitError = _busyJob = null;
+        _jobErrors.clear();
+        _accepted = _submitting = false;
+      });
+      if (_visible) unawaited(_load());
+    } else {
+      setState(() {});
+    }
+  }
+
+  void _pause() {
+    _epoch++;
+    _poll?.cancel();
+    _poll = null;
+    _api.cancelPending();
+  }
+
+  void _schedule([Duration delay = const Duration(seconds: 4)]) {
+    _poll?.cancel();
+    if (!_visible || !_signedIn || !_active || !mounted) return;
+    _poll = Timer(delay, _refreshActive);
+  }
+
+  Future<void> _load() async {
+    _pause();
+    final epoch = _epoch;
+    setState(() {
+      _loading = true;
+      _submitting = false;
+      _busyJob = null;
+      _catalog = null;
+      _error = null;
+    });
+    try {
+      final catalog = await _api.presets();
+      if (!mounted || epoch != _epoch) return;
+      _catalog = catalog;
+      if (!catalog.available || catalog.presets.isEmpty) {
+        throw const GenerationFailure('generation_unavailable');
+      }
+      if (!catalog.presets.any((preset) => preset.id == _preset)) {
+        _preset = catalog.presets.first.id;
+      }
+      if (_signedIn) {
+        final jobs = await _api.jobs();
+        if (!mounted || epoch != _epoch) return;
+        _jobs = jobs..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      }
+    } catch (error) {
+      if (mounted && epoch == _epoch && _visible) _error = _message(error);
+    } finally {
+      if (mounted && epoch == _epoch) {
+        setState(() => _loading = false);
+        _schedule();
+      }
+    }
+  }
+
+  String _message(Object error) {
+    if (error is GenerationFailure) {
+      if (error.code == 'not_authenticated') widget.account?.expired();
+      return error.message;
+    }
+    return const GenerationFailure('network_error').message;
+  }
+
+  void _updateJob(GenerationJob job) {
+    _jobs.removeWhere((item) => item.id == job.id);
+    _jobs.add(job);
+    _jobs.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+  }
+
+  Future<void> _refreshActive() async {
+    if (!_visible || !_signedIn || !_active || _busy) {
+      _schedule();
+      return;
+    }
+    final epoch = _epoch;
+    var delay = const Duration(seconds: 4);
+    final id = _jobs.firstWhere((job) => job.active).id;
+    try {
+      final job = await _api.get(id);
+      if (!mounted || epoch != _epoch || !_visible) return;
+      setState(() {
+        _updateJob(job);
+        _error = null;
+      });
+    } catch (error) {
+      if (!mounted || epoch != _epoch || !_visible) return;
+      setState(() => _error = _message(error));
+      delay =
+          error is GenerationFailure &&
+              error.retryAfter != null &&
+              error.retryAfter! > const Duration(seconds: 4)
+          ? error.retryAfter!
+          : const Duration(seconds: 8);
+    } finally {
+      if (mounted && epoch == _epoch) _schedule(delay);
+    }
+  }
+
+  Future<void> _signIn() async {
+    if (_covered) return;
+    _covered = true;
+    _pause();
+    await showAccountDialog(context, widget.account);
+    if (!mounted) return;
+    _covered = false;
+    if (_foreground) await _load();
+  }
+
+  Future<void> _submit() async {
+    if (_busy || _active || !_signedIn || _preset == null) return;
+    if (_accepted) {
+      _requestId = _requestPreset = null;
+      _accepted = false;
+    }
+    _requestId ??= CommunityApi.requestId();
+    _requestPreset ??= _preset;
+    final epoch = _epoch;
+    _poll?.cancel();
+    setState(() {
+      _submitting = true;
+      _submitError = null;
+    });
+    try {
+      final job = await _api.create(_requestPreset!, _requestId!);
+      if (!mounted || epoch != _epoch) return;
+      setState(() {
+        _accepted = true;
+        _updateJob(job);
+      });
+    } catch (error) {
+      if (mounted && epoch == _epoch && _visible) {
+        setState(() => _submitError = _message(error));
+      }
+    } finally {
+      if (mounted && epoch == _epoch) {
+        setState(() => _submitting = false);
+        _schedule();
+      }
+    }
+  }
+
+  Future<void> _cancel(GenerationJob job) async {
+    if (_busy || _loading || _covered) return;
+    _covered = true;
+    _pause();
+    final confirmed = await showViewerDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('生成を中止しますか？'),
+        content: const Text('途中までの生成結果は表示されません。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('続ける'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('中止する'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    _covered = false;
+    if (confirmed != true) {
+      _schedule();
+      return;
+    }
+    await _jobAction(job, () => _api.cancel(job.id));
+  }
+
+  Future<void> _open(GenerationJob job) => _jobAction(job, () async {
+    final result = job.viewerUrl == null ? await _api.get(job.id) : job;
+    if (result.viewerUrl == null) throw const GenerationFailure('not_found');
+    return result;
+  }, open: true);
+
+  Future<void> _jobAction(
+    GenerationJob job,
+    Future<GenerationJob> Function() action, {
+    bool open = false,
+  }) async {
+    if (_busy || _loading || !_signedIn) return;
+    final epoch = _epoch;
+    _poll?.cancel();
+    setState(() {
+      _busyJob = job.id;
+      _jobErrors.remove(job.id);
+    });
+    try {
+      final result = await action();
+      if (!mounted || epoch != _epoch) return;
+      setState(() => _updateJob(result));
+      if (open && _visible) widget.onOpenResult(result.viewerUrl!);
+    } catch (error) {
+      if (mounted && epoch == _epoch && _visible) {
+        setState(() => _jobErrors[job.id] = _message(error));
+      }
+    } finally {
+      if (mounted && epoch == _epoch) {
+        setState(() => _busyJob = null);
+        _schedule();
+      }
+    }
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
+    if (_foreground && !_covered) {
+      unawaited(_load());
+    } else {
+      _pause();
+    }
+  }
+
+  @override
+  void dispose() {
+    _pause();
+    if (widget.api == null) _api.close();
+    widget.account?.removeListener(_accountChanged);
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Widget _errorText(String message) => Padding(
+    padding: const EdgeInsets.only(top: 8),
+    child: Semantics(
+      liveRegion: true,
+      child: Text(
+        message,
+        style: TextStyle(color: Theme.of(context).colorScheme.error),
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('3DGSを生成'),
+      actions: [
+        IconButton(
+          tooltip: '状態を再読み込み',
+          onPressed: _loading || _busy ? null : _load,
+          icon: const Icon(Icons.refresh),
+        ),
+      ],
+    ),
+    body: SafeArea(
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 600),
+          child: ListView(
+            padding: const EdgeInsets.all(20),
+            children: [
+              Text(
+                '公開データから3Dシーンを作る',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 8),
+              const Text('確認済みのデータを使い、1時刻の静的な3DGSを生成します。動く4D動画の生成には対応していません。'),
+              const SizedBox(height: 24),
+              if (_loading) const Text('生成の受付状況を確認しています'),
+              if (_error != null) ...[
+                _errorText(_error!),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: OutlinedButton(
+                    onPressed: _loading || _busy ? null : _load,
+                    child: const Text('再読み込み'),
+                  ),
+                ),
+              ],
+              if (_catalog?.available == true &&
+                  _catalog!.presets.isNotEmpty) ...[
+                DropdownButtonFormField<String>(
+                  key: ValueKey(_preset),
+                  initialValue: _preset,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: '生成に使うデータ'),
+                  items: _catalog!.presets
+                      .map(
+                        (preset) => DropdownMenuItem(
+                          value: preset.id,
+                          child: Text(
+                            preset.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged:
+                      _busy || _active || (_requestId != null && !_accepted)
+                      ? null
+                      : (value) => setState(() => _preset = value),
+                ),
+                if (_preset != null) ...[
+                  const SizedBox(height: 12),
+                  for (final preset in _catalog!.presets.where(
+                    (item) => item.id == _preset,
+                  )) ...[
+                    Text(preset.sport),
+                    const SizedBox(height: 4),
+                    Text(preset.description),
+                    const SizedBox(height: 8),
+                    Text(
+                      '出典：${preset.source}\n${preset.license}',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ],
+                const SizedBox(height: 20),
+                if (!_signedIn) ...[
+                  const Text('生成するにはログインしてください。'),
+                  const SizedBox(height: 8),
+                  FilledButton(
+                    onPressed: widget.account == null || widget.account!.loading
+                        ? null
+                        : _signIn,
+                    child: const Text('ログインして生成する'),
+                  ),
+                ] else ...[
+                  FilledButton(
+                    onPressed: _loading || _busy || _active ? null : _submit,
+                    child: Text(
+                      _submitting
+                          ? '依頼を送信しています'
+                          : _requestId != null && !_accepted
+                          ? '同じ依頼で再試行'
+                          : '生成を開始',
+                    ),
+                  ),
+                  if (_submitError != null) _errorText(_submitError!),
+                  if (_active)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text('画面を閉じても生成は続きます。状態はこの画面で確認できます。'),
+                    ),
+                ],
+              ],
+              if (_signedIn) ...[
+                const SizedBox(height: 28),
+                Text('自分の生成', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                if (!_loading && _jobs.isEmpty) const Text('まだ生成の依頼はありません。'),
+                for (final job in _jobs.take(10))
+                  Card(
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            _catalog?.presets
+                                    .where((preset) => preset.id == job.preset)
+                                    .firstOrNull
+                                    ?.title ??
+                                '3DGSの生成',
+                            style: Theme.of(context).textTheme.titleSmall,
+                          ),
+                          const SizedBox(height: 4),
+                          Semantics(
+                            liveRegion: true,
+                            child: Text(job.stateLabel),
+                          ),
+                          if (job.active && job.state != 'cancelling')
+                            Align(
+                              alignment: Alignment.centerLeft,
+                              child: TextButton(
+                                onPressed: _busy || _loading
+                                    ? null
+                                    : () => _cancel(job),
+                                child: const Text('生成を中止'),
+                              ),
+                            ),
+                          if (job.state == 'succeeded')
+                            FilledButton.tonal(
+                              onPressed: _busy || _loading
+                                  ? null
+                                  : () => _open(job),
+                              child: const Text('結果を見る'),
+                            ),
+                          if (_jobErrors[job.id] != null)
+                            _errorText(_jobErrors[job.id]!),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
