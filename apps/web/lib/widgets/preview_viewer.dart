@@ -1,17 +1,19 @@
 import 'dart:async';
 import 'dart:ui' show SemanticsHitTestBehavior;
 
-import 'package:flutter/cupertino.dart' show CupertinoSlider;
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../viewer/viewer_adapter.dart';
+import 'edge_seek_bar.dart';
 
 class PreviewViewer extends StatefulWidget {
   const PreviewViewer({
     required this.source,
     required this.factory,
     this.freeView = false,
+    this.thumbnailSource,
     this.visible = true,
     this.onReady,
     this.onStatusChanged,
@@ -21,6 +23,7 @@ class PreviewViewer extends StatefulWidget {
   final Uri source;
   final ViewerFactory factory;
   final bool freeView;
+  final Uri? thumbnailSource;
 
   /// Retains layout while pausing rendering and excluding hidden controls.
   /// The host paints its visible content above this surface when false.
@@ -35,6 +38,7 @@ class PreviewViewer extends StatefulWidget {
 class _PreviewViewerState extends State<PreviewViewer>
     with WidgetsBindingObserver {
   late ViewerAdapter _adapter;
+  final _playbackFocus = FocusNode();
   bool _hasReadyFrame = false;
   bool _readyNotified = false;
   bool _appVisible = true;
@@ -113,6 +117,7 @@ class _PreviewViewerState extends State<PreviewViewer>
     WidgetsBinding.instance.removeObserver(this);
     _adapter.removeListener(_reportStatus);
     _adapter.dispose();
+    _playbackFocus.dispose();
     super.dispose();
   }
 
@@ -128,212 +133,155 @@ class _PreviewViewerState extends State<PreviewViewer>
     ),
   );
 
+  void _togglePlayback() => unawaited(_adapter.togglePlayback());
+
   Widget _buildViewer(BuildContext context) => ListenableBuilder(
     listenable: _adapter,
     builder: (context, _) {
       final value = _adapter.value;
       final ready = value.status == ViewerStatus.ready;
-      final showPlayback = !widget.freeView || value.canPlay;
-      final touchHint = value.canPlay ? 'ドラッグで視点操作、ダブルタップで再生・停止' : 'ドラッグで視点操作';
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          widget.freeView
-              ? Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    Semantics(
-                      label: 'ドラッグで視点を回転できる3Dシーン',
-                      hint: value.canPlay ? 'ダブルタップで再生・停止' : null,
-                      hitTestBehavior: SemanticsHitTestBehavior.transparent,
-                      child: _adapter.buildView(),
-                    ),
-                    if (value.status == ViewerStatus.error ||
-                        (!_hasReadyFrame && !ready))
-                      PointerInterceptor(
-                        intercepting: widget.visible,
-                        child: ColoredBox(
-                          color: Theme.of(context).colorScheme.surfaceContainer,
-                          child: ViewerMessage(
-                            icon: value.status == ViewerStatus.error
-                                ? Icons.error_outline
-                                : Icons.threed_rotation,
-                            title: value.status == ViewerStatus.error
-                                ? '自由視点を表示できませんでした'
-                                : '自由視点を読み込んでいます',
-                            description: '接続状況やシーンの公開状態をご確認ください。',
-                            action: value.status == ViewerStatus.error
-                                ? OutlinedButton.icon(
-                                    onPressed: _retry,
-                                    icon: const Icon(Icons.refresh),
-                                    label: const Text('再試行'),
-                                  )
-                                : null,
-                          ),
-                        ),
-                      ),
-                  ],
-                )
-              : switch (value.status) {
-                  ViewerStatus.loading => const ViewerMessage(
-                    icon: Icons.video_library_outlined,
-                    title: '映像を読み込んでいます',
-                    description: 'まもなくプレビューを表示します。',
-                  ),
-                  ViewerStatus.error => ViewerMessage(
-                    icon: Icons.error_outline,
-                    title: '映像を再生できませんでした',
-                    description: '接続状況や映像の公開状態をご確認ください。',
-                    action: OutlinedButton.icon(
-                      onPressed: _retry,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('再試行'),
+      final canPlay = ready && value.canPlay;
+      final playbackLabel = value.playing ? '一時停止' : '再生';
+      return Focus(
+        key: const Key('media-playback'),
+        focusNode: _playbackFocus,
+        canRequestFocus: canPlay,
+        onKeyEvent: (_, event) {
+          if (canPlay &&
+              event is KeyDownEvent &&
+              (event.logicalKey == LogicalKeyboardKey.space ||
+                  event.logicalKey == LogicalKeyboardKey.enter)) {
+            _togglePlayback();
+            return KeyEventResult.handled;
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (widget.freeView) ...[
+              Semantics(
+                label: 'ドラッグで視点を回転できる3Dシーン',
+                hint: value.canPlay ? 'ダブルタップで再生・停止。キーボードではスペースキー' : null,
+                hitTestBehavior: SemanticsHitTestBehavior.transparent,
+                child: _adapter.buildView(),
+              ),
+              if (value.status == ViewerStatus.error ||
+                  (!_hasReadyFrame && !ready))
+                PointerInterceptor(
+                  intercepting: widget.visible,
+                  child: ColoredBox(
+                    color: Theme.of(context).colorScheme.surfaceContainer,
+                    child: ViewerMessage(
+                      icon: value.status == ViewerStatus.error
+                          ? Icons.error_outline
+                          : Icons.threed_rotation,
+                      title: value.status == ViewerStatus.error
+                          ? '自由視点を表示できませんでした'
+                          : '自由視点を読み込んでいます',
+                      description: '接続状況やシーンの公開状態をご確認ください。',
+                      action: value.status == ViewerStatus.error
+                          ? OutlinedButton.icon(
+                              onPressed: _retry,
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('再試行'),
+                            )
+                          : null,
                     ),
                   ),
-                  ViewerStatus.ready => Semantics(
-                    label: '通常動画のプレビュー',
-                    child: _adapter.buildView(),
+                ),
+            ] else ...[
+              switch (value.status) {
+                ViewerStatus.loading => const ViewerMessage(
+                  icon: Icons.video_library_outlined,
+                  title: '映像を読み込んでいます',
+                  description: 'まもなくプレビューを表示します。',
+                ),
+                ViewerStatus.error => ViewerMessage(
+                  icon: Icons.error_outline,
+                  title: '映像を再生できませんでした',
+                  description: '接続状況や映像の公開状態をご確認ください。',
+                  action: OutlinedButton.icon(
+                    onPressed: _retry,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('再試行'),
                   ),
-                },
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: PointerInterceptor(
-              intercepting: widget.freeView && widget.visible,
-              child: ColoredBox(
-                color: Colors.black.withValues(alpha: .78),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
-                  child: Column(
-                    children: [
-                      if (ready && value.buffering && !widget.freeView)
-                        const Text('映像を読み込んでいます'),
-                      Semantics(
-                        label: widget.freeView ? 'シーンの時刻' : '再生位置',
-                        // Material Slider's value-indicator semantics overlay blocks
-                        // this embedded viewer on Flutter 3.47.
-                        child: widget.freeView
-                            ? SizedBox(
-                                width: double.infinity,
-                                child: CupertinoSlider(
-                                  key: const Key('media-scrubber'),
-                                  activeColor: Theme.of(context)
-                                      .colorScheme
-                                      .primary,
-                                  value: ready
-                                      ? value.position.inMilliseconds
-                                            .toDouble()
-                                            .clamp(
-                                              0,
-                                              value.duration.inMilliseconds
-                                                  .toDouble(),
-                                            )
-                                      : 0,
-                                  max: value.duration.inMilliseconds > 0
-                                      ? value.duration.inMilliseconds.toDouble()
-                                      : 1,
-                                  onChanged:
-                                      ready && value.duration > Duration.zero
-                                      ? (value) => unawaited(
-                                          _adapter.seek(
-                                            Duration(
-                                              milliseconds: value.round(),
-                                            ),
-                                          ),
-                                        )
-                                      : null,
-                                ),
+                ),
+                ViewerStatus.ready => _adapter.buildView(),
+              },
+              if (ready)
+                Positioned.fill(
+                  child: PointerInterceptor(
+                    child: Semantics(
+                      label: '通常動画のプレビュー。$playbackLabel',
+                      hint: 'タップまたはスペースキーで再生・停止',
+                      button: canPlay,
+                      onTap: canPlay ? _togglePlayback : null,
+                      child: GestureDetector(
+                        key: const Key('video-playback-surface'),
+                        behavior: HitTestBehavior.opaque,
+                        excludeFromSemantics: true,
+                        onTap: canPlay
+                            ? () {
+                                _playbackFocus.requestFocus();
+                                _togglePlayback();
+                              }
+                            : null,
+                        child: !value.playing
+                            ? const Center(
+                                child: IgnorePointer(child: Text('タップで再生')),
                               )
-                            : Slider(
-                                key: const Key('media-scrubber'),
-                                value: ready
-                                    ? value.position.inMilliseconds
-                                          .toDouble()
-                                          .clamp(
-                                            0,
-                                            value.duration.inMilliseconds
-                                                .toDouble(),
-                                          )
-                                    : 0,
-                                max: value.duration.inMilliseconds > 0
-                                    ? value.duration.inMilliseconds.toDouble()
-                                    : 1,
-                                onChanged:
-                                    ready && value.duration > Duration.zero
-                                    ? (value) => unawaited(
-                                        _adapter.seek(
-                                          Duration(milliseconds: value.round()),
-                                        ),
-                                      )
-                                    : null,
-                                semanticFormatterCallback: (value) =>
-                                    _formatTime(
-                                      Duration(milliseconds: value.round()),
-                                    ),
-                              ),
+                            : const SizedBox.expand(),
                       ),
-                      Row(
-                        children: [
-                          if (showPlayback)
-                            IconButton.filledTonal(
-                              tooltip: value.playing ? '一時停止' : '再生',
-                              onPressed: ready && value.canPlay
-                                  ? () => unawaited(_adapter.togglePlayback())
-                                  : null,
-                              icon: Icon(
-                                value.playing ? Icons.pause : Icons.play_arrow,
-                              ),
-                            ),
-                          if (showPlayback) const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              '${_formatTime(value.position)} / ${_formatTime(value.duration)}',
-                              style: const TextStyle(
-                                fontFeatures: [FontFeature.tabularFigures()],
-                              ),
-                            ),
-                          ),
-                          if (widget.freeView)
-                            Tooltip(
-                              message: touchHint,
-                              child: Icon(
-                                Icons.touch_app_outlined,
-                                semanticLabel: touchHint,
-                              ),
-                            ),
-                          if (!widget.freeView)
-                            IconButton(
-                              tooltip: value.muted ? 'ミュート解除' : 'ミュート',
-                              onPressed: ready
-                                  ? () => unawaited(_adapter.toggleMute())
-                                  : null,
-                              icon: Icon(
-                                value.muted
-                                    ? Icons.volume_off
-                                    : Icons.volume_up,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
+                    ),
+                  ),
+                ),
+              if (ready && value.buffering)
+                const Positioned(
+                  top: 64,
+                  left: 16,
+                  child: IgnorePointer(child: Text('映像を読み込んでいます')),
+                ),
+              Positioned(
+                right: 8,
+                bottom: 52,
+                child: PointerInterceptor(
+                  child: IconButton.filledTonal(
+                    tooltip: value.muted ? 'ミュート解除' : 'ミュート',
+                    onPressed: ready
+                        ? () => unawaited(_adapter.toggleMute())
+                        : null,
+                    icon: Icon(
+                      value.muted ? Icons.volume_off : Icons.volume_up,
+                    ),
                   ),
                 ),
               ),
+            ],
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: EdgeSeekBar(
+                position: value.position,
+                duration: value.duration,
+                label: widget.freeView ? 'シーンの時刻' : '再生位置',
+                thumbnailSource: widget.visible
+                    ? (widget.thumbnailSource ??
+                          (widget.freeView ? null : widget.source))
+                    : null,
+                intercepting: widget.visible,
+                onSeek: ready && value.duration > Duration.zero
+                    ? (position) => unawaited(_adapter.seek(position))
+                    : null,
+                onTogglePlayback: canPlay ? _togglePlayback : null,
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       );
     },
   );
-}
-
-String _formatTime(Duration time) {
-  final seconds = time.inSeconds.clamp(0, 359999);
-  if (time.inMilliseconds < 1000) {
-    return '${(time.inMilliseconds.clamp(0, 999) / 1000).toStringAsFixed(2)}秒';
-  }
-  return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 }
 
 class ViewerMessage extends StatelessWidget {
