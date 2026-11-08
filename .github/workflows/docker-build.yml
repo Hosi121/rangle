@@ -1,0 +1,31 @@
+name: Docker Build
+
+on:
+  pull_request:
+    branches: [stg, main]
+
+permissions:
+  contents: read
+
+jobs:
+  docker:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: コードを取得
+        uses: actions/checkout@v4
+
+      - name: Dockerのビルド環境を準備
+        uses: docker/setup-buildx-action@v4
+
+      - name: Dockerイメージをビルド
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: rangle:ci
+          cache-from: type=gha,scope=rangle-docker
+          cache-to: type=gha,scope=rangle-docker,mode=max
