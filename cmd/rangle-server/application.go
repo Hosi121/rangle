@@ -1,23 +1,31 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/Hosi121/rangle/internal/appserver"
 	"github.com/Hosi121/rangle/internal/catalog"
+	"github.com/Hosi121/rangle/internal/community"
 	"github.com/Hosi121/rangle/internal/delivery"
 )
 
 type config struct {
-	Web         appserver.Config
-	CatalogFile string
-	AssetRoot   string
-	AssetOrigin string
+	Web               appserver.Config
+	CatalogFile       string
+	AssetRoot         string
+	AssetOrigin       string
+	CommunityStore    community.Store
+	CommunityMemory   bool
+	FirestoreProject  string
+	FirestoreDatabase string
+	SecureCookies     bool
 }
 
 type application struct {
@@ -35,6 +43,12 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	}
 	if cfg.CatalogFile != "" && cfg.AssetRoot == "" && cfg.AssetOrigin == "" {
 		return nil, fmt.Errorf("a catalog requires an asset root or external asset origin")
+	}
+	if cfg.CommunityMemory && cfg.FirestoreProject != "" {
+		return nil, fmt.Errorf("choose one community store")
+	}
+	if (cfg.CommunityMemory || cfg.FirestoreProject != "" || cfg.CommunityStore != nil) && cfg.CatalogFile == "" {
+		return nil, fmt.Errorf("community requires a clip catalog")
 	}
 	var clips *catalog.Catalog
 	if cfg.CatalogFile != "" {
@@ -57,6 +71,30 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			app = nil
 		}
 	}()
+	store := cfg.CommunityStore
+	if cfg.CommunityMemory {
+		store = community.NewMemoryStore()
+	}
+	if cfg.FirestoreProject != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		database, err := community.NewFirestoreStore(ctx, cfg.FirestoreProject, cfg.FirestoreDatabase)
+		cancel()
+		if err != nil {
+			return app, err
+		}
+		store = database
+		app.closers = append(app.closers, database)
+	}
+	clipIDs := map[string]bool{}
+	if clips != nil {
+		for _, m := range clips.Manifests() {
+			clipIDs[m.ClipID] = true
+		}
+	}
+	interactions := community.NewHandler(community.Config{Store: store, ClipIDs: clipIDs, SecureCookies: cfg.SecureCookies, Logger: logger})
+	for _, pattern := range []string{"/api/v1/auth/", "/api/v1/clips/{clip}/engagement", "/api/v1/clips/{clip}/likes", "/api/v1/clips/{clip}/comments", "/api/v1/clips/{clip}/comments/{comment}"} {
+		mux.Handle(pattern, interactions)
+	}
 	if cfg.Web.UIRoot != "" {
 		web, err := appserver.New(cfg.Web)
 		if err != nil {

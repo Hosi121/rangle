@@ -30,6 +30,10 @@ func main() {
 	catalogFile := flag.String("catalog", "", "version-1 clip catalog JSON")
 	assetRoot := flag.String("asset-root", "", "directory containing published assets at their URL paths")
 	assetOrigin := flag.String("asset-origin", "", "optional external HTTP(S) media origin advertised by the API")
+	communityMemory := flag.Bool("community-memory", false, "ephemeral community store for loopback-only local demos")
+	firestoreProject := flag.String("firestore-project", os.Getenv("RANGLE_FIRESTORE_PROJECT"), "project for the persistent community database")
+	firestoreDatabase := flag.String("firestore-database", "rangle-stg", "dedicated Firestore database ID")
+	insecureCookies := flag.Bool("insecure-local-cookies", false, "allow session cookies over HTTP on loopback only")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "rangle-server")
@@ -37,10 +41,14 @@ func main() {
 	defer stop()
 
 	cfg := config{
-		Web:         appserver.Config{UIRoot: *uiRoot, SceneDir: *sceneDir, SceneID: *sceneID},
-		CatalogFile: *catalogFile,
-		AssetRoot:   *assetRoot,
-		AssetOrigin: *assetOrigin,
+		Web:               appserver.Config{UIRoot: *uiRoot, SceneDir: *sceneDir, SceneID: *sceneID},
+		CatalogFile:       *catalogFile,
+		AssetRoot:         *assetRoot,
+		AssetOrigin:       *assetOrigin,
+		CommunityMemory:   *communityMemory,
+		FirestoreProject:  *firestoreProject,
+		FirestoreDatabase: *firestoreDatabase,
+		SecureCookies:     !*insecureCookies,
 	}
 
 	if err := run(ctx, *address, cfg, logger); err != nil {
@@ -54,6 +62,9 @@ func run(ctx context.Context, address string, cfg config, logger *slog.Logger) (
 	ip := net.ParseIP(host)
 	if err != nil || ip == nil || (!ip.IsLoopback() && !ip.IsUnspecified()) {
 		return fmt.Errorf("listen address must use a loopback or unspecified IP and port")
+	}
+	if !ip.IsLoopback() && (cfg.CommunityMemory || !cfg.SecureCookies && (cfg.CommunityStore != nil || cfg.FirestoreProject != "")) {
+		return fmt.Errorf("ephemeral community storage and insecure cookies require a loopback listener")
 	}
 
 	handler, err := newApplication(cfg, logger)
