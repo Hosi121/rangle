@@ -4,7 +4,8 @@ set -Eeuo pipefail
 readonly project=comin-up region=asia-northeast1 service=rangle-stg
 readonly deadline=2026-11-14T15:00:00Z
 readonly deploy_sa=rangle-stg-deploy@comin-up.iam.gserviceaccount.com
-readonly media_origin=https://rangle-stg-113704194486.web.app
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+readonly script_dir
 
 check_deadline() {
   if (( $(date -u +%s) >= $(date -u -d "$deadline" +%s) )); then
@@ -14,6 +15,10 @@ check_deadline() {
 }
 guard() {
   check_deadline
+  local origins
+  origins=$(bash "$script_dir/check-deployment.sh" origins) || return
+  app_origin=${origins%%$'\n'*}
+  media_origin=${origins#*$'\n'}
   [[ ${GITHUB_REPOSITORY:-} == Hosi121/rangle && ${GITHUB_REPOSITORY_ID:-} == 1448803636 && ${GITHUB_REPOSITORY_OWNER_ID:-} == 128687243 ]] || {
     echo 'Only the authorized GitHub repository may deploy.' >&2; return 1;
   }
@@ -36,6 +41,7 @@ case ${1:-} in
   deploy) guard ;;
   *) echo 'Usage: deploy-stg.sh guard|deadline|deploy' >&2; exit 2 ;;
 esac
+readonly app_origin media_origin
 [[ ${STG_IMAGE:-} =~ ^asia-northeast1-docker\.pkg\.dev/comin-up/rangle-stg/server@sha256:[0-9a-f]{64}$ ]] || {
   echo 'STG_IMAGE must be an immutable digest in the dedicated stg repository.' >&2; exit 1;
 }
@@ -132,13 +138,13 @@ else:
 PY
 )
 [[ -n $candidate_url ]] || { echo 'Candidate URL missing.' >&2; exit 1; }
-script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 bash "$script_dir/check-deployment.sh" "$candidate_url"
 check_deadline
 promotion_attempted=true
 cloud_run services update-traffic "$service" --to-revisions="$revision=100"
 bash "$script_dir/check-deployment.sh" "$service_url"
+bash "$script_dir/check-deployment.sh" "$app_origin"
 if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
-  printf 'Deployed %s\n\nRevision: %s\n\nURL: %s\n' "$STG_IMAGE" "$revision" "$service_url" >> "$GITHUB_STEP_SUMMARY"
+  printf 'Deployed %s\n\nRevision: %s\n\nURL: %s\n\nCanonical URL: %s\n' "$STG_IMAGE" "$revision" "$service_url" "$app_origin" >> "$GITHUB_STEP_SUMMARY"
 fi
-printf 'Verified stg revision %s at %s\n' "$revision" "$service_url"
+printf 'Verified stg revision %s at %s and %s\n' "$revision" "$service_url" "$app_origin"
