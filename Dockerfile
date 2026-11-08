@@ -1,49 +1,40 @@
-# Flutterの画面とJavaScript Viewerを作る環境
-FROM node:24-bookworm AS web-build
-
+# syntax=docker/dockerfile:1.7
+FROM node:24-bookworm AS web-toolchain
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl git unzip xz-utils libglu1-mesa \
     && rm -rf /var/lib/apt/lists/*
-
 RUN git clone --depth 1 --branch 3.47.9 \
     https://github.com/flutter/flutter.git /opt/flutter
-
 ENV PATH="/opt/flutter/bin:${PATH}"
-
 WORKDIR /src/apps/web
-COPY apps/web/ ./
 
-RUN npm ci --prefix viewer
-RUN npm run build --prefix viewer
-
+# Dependency layers survive source edits. Dart's cache stays in this layer:
+# GHA BuildKit cache export does not preserve cache mounts by default.
+FROM web-toolchain AS web-deps
+COPY apps/web/viewer/package.json apps/web/viewer/package-lock.json ./viewer/
+RUN --mount=type=cache,id=rangle-npm,target=/root/.npm \
+    npm ci --prefix viewer --no-audit --no-fund
+COPY apps/web/pubspec.yaml apps/web/pubspec.lock ./
 RUN flutter --suppress-analytics pub get --enforce-lockfile
-RUN flutter --suppress-analytics build web --no-web-resources-cdn
 
-# Goの実行ファイルを作る環境
+FROM web-deps AS web-build
+ARG RANGLE_API_URL=
+COPY apps/web/ ./
+RUN npm run build --prefix viewer \
+    && flutter --suppress-analytics build web --release --no-pub --no-web-resources-cdn \
+       --dart-define=RANGLE_API_URL="${RANGLE_API_URL}"
+
 FROM golang:1.27.3-bookworm AS go-build
-
-# コンテナ内の作業場所
 WORKDIR /src
-
-# ビルドに必要なコードをコピー
 COPY go.mod ./
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
+RUN --mount=type=cache,id=rangle-go-build,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/rangle-server ./cmd/rangle-server
 
-# Linuxで動くGoの実行ファイルを作る
-RUN CGO_ENABLED=0 GOOS=linux go build \
-    -trimpath \
-    -o /out/rangle-server \
-    ./cmd/rangle-server
-
-# アプリを動かすための最小限の環境
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
-
 WORKDIR /app
-
-# 完成したGoとWeb画面を持ってくる
 COPY --from=go-build /out/rangle-server /app/rangle-server
 COPY --from=web-build /src/apps/web/build/web /app/web
-
 ENTRYPOINT ["/app/rangle-server"]
 CMD ["-ui-root", "/app/web"]

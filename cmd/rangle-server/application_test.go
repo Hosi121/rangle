@@ -96,7 +96,7 @@ func TestApplicationExternalOriginNeedsNoLocalAssets(t *testing.T) {
 	if response.StatusCode != 404 {
 		t.Fatal("API unexpectedly served external media bytes")
 	}
-	response, body = fetch(t, server.URL+"/healthz", nil)
+	response, body = fetch(t, server.URL+"/health", nil)
 	if response.StatusCode != 200 || string(body) != "ok\n" {
 		t.Fatal("missing API-only health endpoint")
 	}

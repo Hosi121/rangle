@@ -39,6 +39,8 @@ func TestHTTPFilesAndConditionalRequests(t *testing.T) {
 		{"If-Range miss sends full file", "GET", "/samples/basketball/frames/000.splat", map[string]string{"Range": "bytes=2-5", "If-Range": testModified.Add(-time.Hour).Format(http.TimeFormat)}, 200, "0123456789", "no-cache"},
 		{"health", "GET", "/healthz", nil, 200, "ok\n", "no-cache"},
 		{"health HEAD", "HEAD", "/healthz", nil, 200, "", "no-cache"},
+		{"public health", "GET", "/health", nil, 200, "ok\n", "no-cache"},
+		{"public health HEAD", "HEAD", "/health", nil, 200, "", "no-cache"},
 		{"private benchmark", "GET", "/samples/basketball/benchmark.json", nil, 404, "", "no-store"},
 		{"private raw weights", "GET", "/samples/basketball/frames/raw.npz", nil, 404, "", "no-store"},
 		{"unlisted frame", "GET", "/samples/basketball/frames/secret.splat", nil, 404, "", "no-store"},

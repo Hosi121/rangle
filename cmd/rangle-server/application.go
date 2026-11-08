@@ -107,6 +107,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			return app, fmt.Errorf("local scene preview requires a UI root")
 		}
 		mux.HandleFunc("/healthz", health)
+		mux.HandleFunc("/health", health)
 		mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Cache-Control", "no-store")
 			http.NotFound(w, r)
