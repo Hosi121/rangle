@@ -33,6 +33,14 @@ run "foundation_without_dummy_app" {
     error_message = "Federation must expire and the budget/deadline guard must poll every 15 minutes."
   }
   assert {
+    condition     = google_pubsub_topic_iam_member.billing_publisher.member == "serviceAccount:billing-budget-alert@system.gserviceaccount.com" && google_pubsub_topic_iam_member.billing_publisher.role == "roles/pubsub.publisher" && google_pubsub_topic_iam_member.billing_publisher.topic == "rangle-stg-budget"
+    error_message = "Only the official Cloud Billing budget alert identity may publish to the dedicated budget topic."
+  }
+  assert {
+    condition     = google_artifact_registry_repository_iam_member.image_writer.repository == "rangle-stg" && google_artifact_registry_repository_iam_member.image_writer.role == "roles/artifactregistry.writer" && length(google_artifact_registry_repository_iam_member.image_writer.condition) == 0
+    error_message = "Keep writer permission on the dedicated repository without its unsupported conditional policy."
+  }
+  assert {
     condition     = strcontains(google_workflows_workflow.guard.source_contents, "SITE_DISABLE") && strcontains(google_workflows_workflow.guard.source_contents, "observed_cost >= 15000") && strcontains(google_workflows_workflow.guard.source_contents, "Budget currency mismatch")
     error_message = "The fixed-site stop must check the budget amount and exact configured currency."
   }

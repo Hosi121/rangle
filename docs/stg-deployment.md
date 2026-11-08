@@ -37,13 +37,15 @@ Terraform 1.17.1、google / google-beta 8.10.0 を固定。beta provider は Fir
 | 許可 workflow | `Hosi121/rangle/.github/workflows/deploy-stg.yml@refs/heads/stg` |
 | 許可 event | `push`、`workflow_dispatch` |
 
-標準 OIDC claim の `workflow_ref` を使い、reusable workflow 専用の `job_workflow_ref` を要求しない。WorkloadIdentityUser、runtime actAs、Run developer、AR writer に期限条件を付ける。CI は既存の当該 Run service の更新と当該 AR repo push に限り、project-wide Run developer、Terraform apply、Hosting 管理、IAM 変更は許可しない。operation の poll 用に `run.operations.get` の project read-only custom role だけを追加する。CI 自身も deadline を確認してから認証・push・deploy する。[WIF pipeline](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)
+標準 OIDC claim の `workflow_ref` を使い、reusable workflow 専用の `job_workflow_ref` を要求しない。WorkloadIdentityUser、runtime actAs、Run developer に期限条件を付ける。AR repository IAM は今回の実適用で条件付き policy を拒否したため、AR writer は専用 repo のみに条件なしで付け、WIF の期限条件と guard による deploy SA disable で制限する。CI は既存の当該 Run service の更新と当該 AR repo push に限り、project-wide Run developer、Terraform apply、Hosting 管理、IAM 変更は許可しない。operation の poll 用に `run.operations.get` の project read-only custom role だけを追加する。CI 自身も deadline を確認してから認証・push・deploy する。[WIF pipeline](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)
 
 ## 予算と停止 guard
 
 請求通貨は JPY。専用 budget は全 service・単一 project `projects/113704194486`、`ownership_scope=ALL_USERS`、custom period `2026-11-08`〜`2026-11-15`、credits 除外、30,000円、threshold 25/50/75%、project owner 通知を使い、既定 billing-account recipient は無効にする。`budget={billing_account_id,amount,start_date,end_date}` を設定すれば google_billing_budget で管理でき、billing account data source は参照しない。手動作成した場合は当該 budget だけを import する。
 
 既存の **Cloud Run 200円 spend cap** は変更・解除しない。アプリはその cap に先に止められる可能性がある。Cloud Run spend cap（service `152E-C115-5142`）は Firebase Hosting / GCS / AR を止めず、estimated cost の反映にも遅れがある。[公式 spend cap](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps)
+
+Budget 通知の publisher は Google 公式の `billing-budget-alert@system.gserviceaccount.com` に topic 単位の Pub/Sub Publisher を付与する。project 固有の service agent の新規作成は不要。[公式 principal 一覧](https://docs.cloud.google.com/organization-policy/restrict-domains)
 
 専用 `budget_guard` output は topic / subscription / workflow / scheduler / receipt path を返す。今回の通知先は `projects/comin-up/topics/rangle-stg-budget`、pull は `projects/comin-up/subscriptions/rangle-stg-budget-guard`。budget display name は `rangle-stg-presentation-20261114`、通貨 `JPY`、早期停止額 **15,000円** にする。15分ごとに Scheduler が OAuth で Workflow を実行し、subscription 内の本人 budget の `costAmount` を検査する。通貨不一致は失敗として扱い、勝手な換算はしない。期限前に入力引数だけで強制停止させる public handler は持たない。[Budget Pub/Sub](https://docs.cloud.google.com/billing/docs/how-to/budgets-programmatic-notifications)、[Scheduler OAuth](https://docs.cloud.google.com/scheduler/docs/http-target-auth)
 

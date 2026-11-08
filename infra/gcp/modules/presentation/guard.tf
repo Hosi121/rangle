@@ -8,7 +8,9 @@ resource "google_pubsub_topic_iam_member" "billing_publisher" {
   project = var.project_id
   topic   = google_pubsub_topic.budget.name
   role    = "roles/pubsub.publisher"
-  member  = "serviceAccount:billing-budget-pubsub@system.gserviceaccount.com"
+  # Official Cloud Billing budget notification identity (not a project agent).
+  # https://docs.cloud.google.com/organization-policy/restrict-domains
+  member = "serviceAccount:billing-budget-alert@system.gserviceaccount.com"
 }
 resource "google_pubsub_subscription" "budget" {
   project                    = var.project_id

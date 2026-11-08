@@ -89,10 +89,9 @@ resource "google_artifact_registry_repository_iam_member" "image_writer" {
   repository = local.prefix
   role       = "roles/artifactregistry.writer"
   member     = "serviceAccount:${google_service_account.deployer.email}"
-  condition {
-    title      = "presentation_not_expired"
-    expression = "request.time < timestamp('${var.deadline}')"
-  }
+  # Repository IAM rejected conditional policies in the live foundation apply.
+  # Keep the writer repository-scoped; WIF/SA expiry and the guard disable the
+  # deployment identity rather than widening this grant to project scope.
 }
 resource "google_service_account_iam_member" "runtime_act_as" {
   service_account_id = google_service_account.runtime.name
