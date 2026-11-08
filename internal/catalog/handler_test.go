@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -44,6 +45,7 @@ func TestResponseBytesMatchJSONEncoding(t *testing.T) {
 			Title: entry.Title, Sport: entry.Sport, Description: entry.Description,
 			Codec: entry.Manifest.Codec, ManifestURL: origin + entry.Manifest.URL(),
 			PreviewURL: preview, SceneURL: scene,
+			Tags: []string{strings.ToLower(entry.Sport)},
 		}
 	}
 	encoded, err := json.Marshal(source)
@@ -161,7 +163,7 @@ func TestFeedPaginationAndConditionalRequests(t *testing.T) {
 	}
 	detail, data := request(t, h, "GET", feedPath+"/clip-0", nil)
 	var found clipView
-	if err := json.Unmarshal(data, &found); err != nil || detail.StatusCode != 200 || found != first.Clips[0] {
+	if err := json.Unmarshal(data, &found); err != nil || detail.StatusCode != 200 || !reflect.DeepEqual(found, first.Clips[0]) {
 		t.Fatalf("detail: %+v error=%v", found, err)
 	}
 

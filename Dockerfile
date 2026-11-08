@@ -26,11 +26,12 @@ RUN npm run build --prefix viewer \
 
 FROM golang:1.27.3-bookworm AS go-build
 WORKDIR /src
-COPY go.mod ./
+COPY go.mod go.sum ./
+RUN go mod download
 COPY cmd/ ./cmd/
 COPY internal/ ./internal/
 RUN --mount=type=cache,id=rangle-go-build,target=/root/.cache/go-build \
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -o /out/rangle-server ./cmd/rangle-server
+    CGO_ENABLED=0 GOOS=linux go build -mod=readonly -trimpath -o /out/rangle-server ./cmd/rangle-server
 
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 WORKDIR /app
