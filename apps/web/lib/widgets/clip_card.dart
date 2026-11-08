@@ -147,104 +147,97 @@ class _ClipCardState extends State<ClipCard> {
     );
   }
 
+  void _showDetails() {
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * .8,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '出典・詳細',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '閉じる',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(clip.title, style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text(clip.sport),
+              const SizedBox(height: 16),
+              SelectableText(
+                clip.description,
+                semanticsLabel: clip.description,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
+      final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.4;
       final compact =
-          constraints.maxHeight < 400 ||
-          MediaQuery.textScalerOf(context).scale(1) > 1.4;
-      final colors = Theme.of(context).colorScheme;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: colors.surfaceContainer,
-                border: Border.all(color: colors.outlineVariant),
-                borderRadius: BorderRadius.circular(20),
+          constraints.maxHeight < 500 ||
+          constraints.maxWidth < 360 ||
+          largeText;
+      return ColoredBox(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_sceneRequested && active && clip.sceneUrl != null)
+              PreviewViewer(
+                key: ValueKey('${clip.id}-scene'),
+                source: clip.sceneUrl!,
+                factory: widget.sceneFactory,
+                freeView: true,
+                visible: _freeView,
+                onReady: _onSceneReady,
+                onStatusChanged: _onSceneStatus,
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: Column(
-                  children: [
-                    if (!compact) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.sports_basketball_outlined,
-                              size: 18,
-                              color: colors.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                clip.sport,
-                                style: Theme.of(context).textTheme.labelLarge,
-                              ),
-                            ),
-                            Flexible(
-                              child: Semantics(
-                                liveRegion: true,
-                                child: Text(
-                                  _modeLabel,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelSmall,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Divider(height: 1),
-                    ],
-                    Expanded(
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: [
-                          if (_sceneRequested &&
-                              active &&
-                              clip.sceneUrl != null)
-                            PreviewViewer(
-                              key: ValueKey('${clip.id}-scene'),
-                              source: clip.sceneUrl!,
-                              factory: widget.sceneFactory,
-                              freeView: true,
-                              visible: _freeView,
-                              onReady: _onSceneReady,
-                              onStatusChanged: _onSceneStatus,
-                            ),
-                          if (!_freeView)
-                            ColoredBox(
-                              key: ValueKey('${clip.id}-video-layer'),
-                              color: colors.surfaceContainer,
-                              child: _ordinaryView(compact),
-                            ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
+            if (!_freeView)
+              ColoredBox(
+                key: ValueKey('${clip.id}-video-layer'),
+                color: Colors.black,
+                child: _ordinaryView(compact),
               ),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              4,
-              compact ? 4 : 16,
-              4,
-              compact ? 0 : 12,
-            ),
-            child: compact
-                ? Row(
-                    children: [
-                      Expanded(
+            Positioned(
+              left: 16,
+              right: 72,
+              bottom: largeText ? 152 : 112,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: .72),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
@@ -253,15 +246,17 @@ class _ClipCardState extends State<ClipCard> {
                               header: true,
                               child: Text(
                                 clip.title,
-                                maxLines: 2,
+                                maxLines: compact ? 1 : 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
                               ),
                             ),
+                            const SizedBox(height: 4),
                             Semantics(
                               liveRegion: true,
                               child: Text(
-                                _modeLabel,
+                                '${clip.sport} · $_modeLabel',
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: Theme.of(context).textTheme.labelSmall,
@@ -270,42 +265,14 @@ class _ClipCardState extends State<ClipCard> {
                           ],
                         ),
                       ),
-                      IconButton(
-                        tooltip: _modeAction,
-                        onPressed: clip.sceneUrl == null ? null : _toggleMode,
-                        icon: Icon(
-                          _pendingScene
-                              ? Icons.hourglass_top
-                              : _freeView
-                              ? Icons.movie_outlined
-                              : Icons.threed_rotation,
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
                     children: [
-                      Semantics(
-                        header: true,
-                        child: Text(
-                          clip.title,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        clip.description,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          height: 1.6,
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
+                      if (compact)
+                        IconButton.filledTonal(
+                          tooltip: _modeAction,
                           onPressed: clip.sceneUrl == null ? null : _toggleMode,
                           icon: Icon(
                             _pendingScene
@@ -313,15 +280,38 @@ class _ClipCardState extends State<ClipCard> {
                                 : _freeView
                                 ? Icons.movie_outlined
                                 : Icons.threed_rotation,
-                            size: 18,
                           ),
-                          label: Text(_modeAction),
+                        )
+                      else
+                        Flexible(
+                          child: FilledButton.tonalIcon(
+                            onPressed: clip.sceneUrl == null
+                                ? null
+                                : _toggleMode,
+                            icon: Icon(
+                              _pendingScene
+                                  ? Icons.hourglass_top
+                                  : _freeView
+                                  ? Icons.movie_outlined
+                                  : Icons.threed_rotation,
+                              size: 18,
+                            ),
+                            label: Text(_modeAction),
+                          ),
                         ),
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        tooltip: '出典・詳細',
+                        onPressed: _showDetails,
+                        icon: const Icon(Icons.info_outline),
                       ),
                     ],
                   ),
-          ),
-        ],
+                ],
+              ),
+            ),
+          ],
+        ),
       );
     },
   );

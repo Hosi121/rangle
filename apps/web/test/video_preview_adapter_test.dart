@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rangle_web/viewer/viewer_adapter.dart';
 import 'package:video_player/video_player.dart';
@@ -13,6 +14,34 @@ class ControlledVideoController extends VideoPlayerController {
   final released = Completer<void>();
   int disposeCount = 0;
   int pauseCount = 0;
+  final commands = <String>[];
+  Object? playFailure;
+  String? playStreamFailure;
+  bool muteFailure = false;
+
+  @override
+  Future<void> setVolume(double volume) async {
+    commands.add('volume:$volume');
+    if (muteFailure) throw StateError('Muting unavailable');
+    value = value.copyWith(volume: volume);
+  }
+
+  @override
+  Future<void> setLooping(bool looping) async {
+    commands.add('loop:$looping');
+    value = value.copyWith(isLooping: looping);
+  }
+
+  @override
+  Future<void> play() async {
+    commands.add('play');
+    if (playFailure != null) throw playFailure!;
+    if (playStreamFailure != null) {
+      value = VideoPlayerValue.erroneous(playStreamFailure!);
+    } else {
+      value = value.copyWith(isPlaying: true);
+    }
+  }
 
   @override
   Future<void> initialize() => initialized.future;
@@ -20,6 +49,7 @@ class ControlledVideoController extends VideoPlayerController {
   @override
   Future<void> pause() async {
     pauseCount++;
+    value = value.copyWith(isPlaying: false);
   }
 
   @override
@@ -39,6 +69,126 @@ class ControlledVideoController extends VideoPlayerController {
 }
 
 void main() {
+  testWidgets('autoplay confirms mute and looping before starting', (
+    tester,
+  ) async {
+    final controller = ControlledVideoController();
+    final adapter = VideoPreviewAdapter.withController(controller);
+    final initialization = adapter.initialize();
+    controller.becomeReady();
+    await initialization;
+    expect(controller.commands, ['volume:0.0', 'loop:true', 'play']);
+    expect(adapter.value.status, ViewerStatus.ready);
+    expect(adapter.value.muted, isTrue);
+    expect(adapter.value.playing, isTrue);
+    adapter.dispose();
+  });
+
+  testWidgets('policy rejection recreates a muted manual player', (
+    tester,
+  ) async {
+    final blocked = ControlledVideoController()
+      ..playFailure = PlatformException(
+        code: 'NotAllowedError',
+        message: 'Policy blocked play',
+      );
+    final manual = ControlledVideoController();
+    var replacements = 0;
+    final adapter = VideoPreviewAdapter.withController(
+      blocked,
+      retryController: () {
+        replacements++;
+        return manual;
+      },
+    );
+    final initialization = adapter.initialize();
+    blocked.becomeReady();
+    await tester.pump();
+    expect(replacements, 1);
+    expect(blocked.disposeCount, 1);
+    manual.becomeReady();
+    await initialization;
+    expect(adapter.value.status, ViewerStatus.ready);
+    expect(adapter.value.muted, isTrue);
+    expect(adapter.value.playing, isFalse);
+    expect(manual.commands, ['volume:0.0', 'loop:true']);
+    await adapter.togglePlayback();
+    expect(adapter.value.playing, isTrue);
+    adapter.dispose();
+  });
+
+  testWidgets(
+    'muting failure prevents autoplay and preserves manual controls',
+    (tester) async {
+      final controller = ControlledVideoController()..muteFailure = true;
+      final adapter = VideoPreviewAdapter.withController(controller);
+      final initialization = adapter.initialize();
+      controller.becomeReady();
+      await initialization;
+      expect(controller.commands, ['volume:0.0']);
+      expect(adapter.value.status, ViewerStatus.ready);
+      expect(adapter.value.playing, isFalse);
+      await adapter.togglePlayback();
+      expect(adapter.value.playing, isTrue);
+      adapter.dispose();
+    },
+  );
+
+  testWidgets(
+    'web policy stream error also falls back without hiding media failures',
+    (tester) async {
+      final blocked = ControlledVideoController()
+        ..playStreamFailure =
+            "play() failed because the user didn't interact with the document first.";
+      final manual = ControlledVideoController();
+      final adapter = VideoPreviewAdapter.withController(
+        blocked,
+        retryController: () => manual,
+      );
+      final initialization = adapter.initialize();
+      blocked.becomeReady();
+      await initialization;
+      manual.becomeReady();
+      await tester.pump();
+      expect(adapter.value.status, ViewerStatus.ready);
+      expect(adapter.value.playing, isFalse);
+      expect(manual.commands, isNot(contains('play')));
+      manual.value = const VideoPlayerValue.erroneous(
+        'Network or decoding failed',
+      );
+      await tester.pump();
+      expect(adapter.value.status, ViewerStatus.error);
+      expect(manual.disposeCount, 1);
+      adapter.dispose();
+    },
+  );
+
+  testWidgets('non-policy autoplay failure remains a real media error', (
+    tester,
+  ) async {
+    final controller = ControlledVideoController()
+      ..playFailure = PlatformException(
+        code: 'NetworkError',
+        message: 'Network unavailable',
+      );
+    var replacements = 0;
+    final adapter = VideoPreviewAdapter.withController(
+      controller,
+      retryController: () {
+        replacements++;
+        return ControlledVideoController();
+      },
+    );
+    final initialization = adapter.initialize();
+    controller.becomeReady();
+    await initialization;
+    expect(adapter.value.status, ViewerStatus.error);
+    expect(replacements, 0);
+    await tester.pump();
+    expect(controller.disposeCount, 1);
+    adapter.dispose();
+  });
+
   testWidgets(
     'timeout releases media once and late readiness cannot restore it',
     (tester) async {
