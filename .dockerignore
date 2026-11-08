@@ -1,0 +1,14 @@
+.git
+.local
+.env
+.env.*
+**/node_modules
+**/.dart_tool
+**/build
+**/__pycache__
+**/.venv
+**/*.pem
+**/*.key
+**/service-account*.json
+**/credentials*.json
+**/gha-creds-*.json

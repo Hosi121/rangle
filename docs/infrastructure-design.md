@@ -1,6 +1,6 @@
 # インフラ構成案
 
-配信構成の設計と [Terraform のコード準備](../infra/gcp/README.md) を行う段階。将来の目標は 10 万同時視聴（CCU）だが、クラウド資源の作成・起動、容量・quota・費用の検証は未実施である。[課題一覧](https://github.com/Hosi121/rangle/issues/20)
+配信構成の設計と [Terraform のコード準備](../infra/gcp/README.md) を行う段階。将来の目標は 10 万同時視聴（CCU）。GoとFlutter WebをまとめたDockerイメージのローカル起動は確認したが、Terraformによる実環境の作成、Cloud Runへの実配備、容量・quota・費用の検証は未実施である。[課題一覧](https://github.com/Hosi121/rangle/issues/20)
 
 ## 推奨する構成
 
@@ -19,7 +19,7 @@ flowchart LR
     GPU -->|評価後に公開| Assets
 ```
 
-ローカル/MVPではアプリを1サービスに抑え、Storage直接取得で成立を確認してよい。本番のGo APIは単一インスタンスへ状態を閉じず水平分散し、資産の全バイトを中継しない。UIの独立したリリースが必要になったら配信先を分ける。現在の `rangle-server` はWeb・フィードAPI・版付き資産をローカルで提供し、取得先originの設定で大容量配信を分離できる。クラウド用の待受けとコンテナ化・実配備は後続とする。[APIと配信の契約](api-delivery.md)
+ローカル/MVPではアプリを1サービスに抑え、Storage直接取得で成立を確認してよい。本番のGo APIは単一インスタンスへ状態を閉じず水平分散し、資産の全バイトを中継しない。UIの独立したリリースが必要になったら配信先を分ける。現在の `rangle-server` はWeb・フィードAPI・版付き資産を提供し、取得先originの設定で大容量配信を分離できる。PORT環境変数による待受けとGo・Flutter Webのコンテナ化に対応し、内蔵デモのローカル起動を確認した。Cloud Runへの実配備は後続とする。[APIと配信の契約](api-delivery.md)、[Dockerの手順](docker.md)
 
 ## 可搬性の境界
 
@@ -52,4 +52,8 @@ HCL、Terraform 1.17.1、Google provider 8.10.0 に固定した。[infra/gcp](..
 
 ## 実配備前に決めること
 
-実 project、region、quota、公開する資産、費用・GPU時間・ジョブ並列数の上限、DNS・state・実行権限の管理者を決める。これらは必須入力と架空の例に分離しており、コード準備のために実環境値は必要ない。容量検証の実行予算と中止条件も別途定め、現在は起動可否、配信性能、GPU互換性、費用を未検証として扱う。静的検証と mock plan の結果・初回配備順・保持と復帰の条件は [IaC README](../infra/gcp/README.md#ローカル検証) に記録する。
+実 project、region、quota、公開する資産、費用・GPU時間・ジョブ並列数の上限、DNS・state・実行権限の管理者を決める。これらは必須入力と架空の例に分離しており、コード準備のために実環境値は必要ない。
+
+容量検証の実行予算と中止条件も別途定める。ローカルでのコンテナ起動と、Cloud Runでの起動可否、配信性能、GPU互換性、費用の検証は区別する。Cloud Runでの動作と大規模配信性能は未検証として扱う。
+
+静的検証と mock plan の結果・初回配備順・保持と復帰の条件は [IaC README](../infra/gcp/README.md#ローカル検証) に記録する。

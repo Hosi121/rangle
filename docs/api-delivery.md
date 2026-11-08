@@ -93,4 +93,4 @@ curl -i -H 'Range: bytes=1-2' http://127.0.0.1:4174/assets/example/v1/low/000.bi
 
 Cloud CDN等へ移す際は、同じ版付きpathと公開bytesを配置し、Content-Type・Cache-Control・CORSを配信先に設定する。Rangeと強いETagを使う資産では動的圧縮による変換を避ける。`no-transform` はこの条件を守るために付ける。[Cloud CDNのキャッシュ](https://docs.cloud.google.com/cdn/docs/caching)、[動的圧縮の制約](https://docs.cloud.google.com/cdn/docs/dynamic-compression)
 
-現在のサーバーはループバック専用で、CDNやGoogle Cloud資源の作成は行わない。数千〜数万人の同時視聴への耐性は、CDNのwarm/cold状態、originへの集中、APIの水平分散を含めた別の容量検証で判断する。
+サーバーの既定はループバック待受けで、PORT環境変数がある場合は `0.0.0.0:PORT` で待ち受ける。明示した `-listen` 引数があればそちらを優先する。サーバー自体はCDNやGoogle Cloud資源を作成しない。Dockerでのビルドと起動は [Dockerの手順](docker.md) を参照。数千〜数万人の同時視聴への耐性は、CDNのwarm/cold状態、originへの集中、APIの水平分散を含めた別の容量検証で判断する。

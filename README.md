@@ -11,6 +11,7 @@ GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを
 ## 資料
 
 - [Webアプリの実行方法](apps/web/README.md)
+- [Dockerでのビルドと起動](docs/docker.md)
 - [企画書 草案](docs/proposal.md)
 - [初期インフラ構成案](docs/infrastructure-design.md)
 - [技術選定案](docs/technology-selection.md)
@@ -69,7 +70,7 @@ curl -I http://127.0.0.1:4174/samples/basketball/scene.json
 curl -i -H 'Range: bytes=0-15' http://127.0.0.1:4174/samples/basketball/frames/000.splat
 ```
 
-この入口はループバックIPだけを受け付け、`PORT` 環境変数は読みません。実回線の性能や大規模配信を検証するものではなく、本番の大容量資産はCDN・object storageから直接配信する方針を維持します。
+`rangle-server` は、`PORT` 環境変数がなければ従来どおり `127.0.0.1:4174` で待ち受けます。`PORT` がある場合は `0.0.0.0:PORT` で待ち受け、明示した `-listen` 引数があればそちらを優先します。外部から接続を受け付ける場合は、配信対象と実行環境側の認証・アクセス範囲を確認してください。実回線の性能や大規模配信を検証するものではなく、本番の大容量資産はCDN・object storageから直接配信する方針を維持します。Dockerでの起動方法は [Dockerでのビルドと起動](docs/docker.md) を参照してください。
 
 ## フィードAPIと版付き資産
 
