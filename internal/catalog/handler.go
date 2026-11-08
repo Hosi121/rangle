@@ -29,9 +29,14 @@ type clipView struct {
 }
 
 type handler struct {
-	clips    []clipView
+	clips    []jsonDocument
 	byID     map[string]int
 	snapshot string
+}
+
+type jsonDocument struct {
+	data []byte
+	etag string
 }
 
 // NewHandler serves a public, read-only feed and clip details. assetOrigin is an
@@ -55,16 +60,21 @@ func NewHandler(c *Catalog, assetOrigin string) (http.Handler, error) {
 		}
 		return value
 	}
-	h := &handler{clips: make([]clipView, len(c.clips)), byID: make(map[string]int, len(c.clips))}
+	h := &handler{clips: make([]jsonDocument, len(c.clips)), byID: make(map[string]int, len(c.clips))}
 	snapshot := sha256.Sum256([]byte(c.snapshot + "\n" + assetOrigin))
 	h.snapshot = hex.EncodeToString(snapshot[:])
 	for i, entry := range c.clips {
-		h.clips[i] = clipView{
+		view := clipView{
 			ID: entry.Manifest.ClipID, Revision: entry.Manifest.Revision,
 			Title: entry.Title, Sport: entry.Sport, Description: entry.Description,
 			Codec: entry.Manifest.Codec, ManifestURL: resolve(entry.Manifest.URL()),
 			PreviewURL: resolve(entry.PreviewURL), SceneURL: resolve(entry.SceneURL),
 		}
+		data, err := json.Marshal(view)
+		if err != nil {
+			return nil, fmt.Errorf("encode clip %q: %w", entry.Manifest.ClipID, err)
+		}
+		h.clips[i] = newJSONDocument(data)
 		h.byID[entry.Manifest.ClipID] = i
 	}
 	return h, nil
@@ -92,14 +102,7 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		end := min(start+limit, len(h.clips))
-		page := struct {
-			Clips      []clipView `json:"clips"`
-			NextCursor string     `json:"next_cursor,omitempty"`
-		}{Clips: h.clips[start:end]}
-		if end < len(h.clips) {
-			page.NextCursor = base64.RawURLEncoding.EncodeToString([]byte(h.snapshot + ":" + strconv.Itoa(end)))
-		}
-		writeJSON(w, r, page)
+		writeDocument(w, r, h.feed(start, end))
 	case strings.HasPrefix(r.URL.EscapedPath(), feedPath+"/"):
 		id := strings.TrimPrefix(r.URL.EscapedPath(), feedPath+"/")
 		i, ok := h.byID[id]
@@ -111,10 +114,41 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusBadRequest, "invalid_query")
 			return
 		}
-		writeJSON(w, r, h.clips[i])
+		writeDocument(w, r, h.clips[i])
 	default:
 		writeError(w, r, http.StatusNotFound, "not_found")
 	}
+}
+
+// Reuse the startup JSON without caching arbitrary page/limit combinations.
+// Memory stays proportional to catalog metadata, rather than request history.
+func (h *handler) feed(start, end int) jsonDocument {
+	cursor := ""
+	size := len(`{"clips":[]}`) + max(0, end-start-1)
+	for _, clip := range h.clips[start:end] {
+		size += len(clip.data)
+	}
+	if end < len(h.clips) {
+		cursor = base64.RawURLEncoding.EncodeToString([]byte(h.snapshot + ":" + strconv.Itoa(end)))
+		size += len(`,"next_cursor":""`) + len(cursor)
+	}
+	data := make([]byte, 0, size)
+	data = append(data, `{"clips":[`...)
+	for i, clip := range h.clips[start:end] {
+		if i > 0 {
+			data = append(data, ',')
+		}
+		data = append(data, clip.data...)
+	}
+	data = append(data, ']')
+	if cursor != "" {
+		data = append(data, `,"next_cursor":"`...)
+		// RawURL base64 contains no characters that require JSON escaping.
+		data = append(data, cursor...)
+		data = append(data, '"')
+	}
+	data = append(data, '}')
+	return newJSONDocument(data)
 }
 
 func (h *handler) page(query url.Values) (limit, start int, err error) {
@@ -147,16 +181,14 @@ func (h *handler) page(query url.Values) (limit, start int, err error) {
 	return limit, start, nil
 }
 
-func writeJSON(w http.ResponseWriter, r *http.Request, value any) {
-	// The validated snapshot contains only JSON-safe values and bounded strings.
-	data, err := json.Marshal(value)
-	if err != nil {
-		writeError(w, r, http.StatusInternalServerError, "encode_failed")
-		return
-	}
+func newJSONDocument(data []byte) jsonDocument {
 	sum := sha256.Sum256(data)
-	w.Header().Set("ETag", `"sha256-`+hex.EncodeToString(sum[:])+`"`)
-	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(data))
+	return jsonDocument{data: data, etag: `"sha256-` + hex.EncodeToString(sum[:]) + `"`}
+}
+
+func writeDocument(w http.ResponseWriter, r *http.Request, document jsonDocument) {
+	w.Header().Set("ETag", document.etag)
+	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(document.data))
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, status int, code string) {

@@ -6,7 +6,7 @@ rangleは、実写から再構成したスポーツのハイライトを縦型�
 
 既存の多視点データセットを使い、クラウドでの動的Gaussian Splattingの再構成、モバイル向けの圧縮・分割配信、端末での復号・GPU描画を一つの流れにつなぐ構成を検討しています。Go、ML処理、モバイルアプリをモノレポで管理します。
 
-GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを実装しています。Webでは再構成サンプルの動画再生、Gaussian資産の視点操作と時刻シークに対応します。Gaussianの連続再生とABR配信の接続は今後の実装です。
+GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを実装しています。Webでは再構成サンプルの動画再生、Gaussian資産の視点操作・時刻シーク・連続再生に対応します。実Gaussianの分割配信とABR再生の接続は今後の実装です。
 
 ## 資料
 
@@ -17,6 +17,7 @@ GoによるABR制御・HTTP区間配信と、Flutter Webの縦型フィードを
 - [技術選定案](docs/technology-selection.md)
 - [ABRと配信最適化の調査](docs/streaming-research.md)
 - [配信部品の共通契約](docs/streaming-contract.md)
+- [Goサーバーの現状と次の作業](docs/backend-status.md)
 - [Gaussian再構成の画質と描画条件](docs/gaussian-quality.md)
 - [ログ方針](docs/logging.md)
 - [DevFest提出用リポジトリの案内](docs/submission.md)

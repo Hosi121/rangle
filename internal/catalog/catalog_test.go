@@ -62,7 +62,7 @@ func TestLocalPreviewPathsAreIndependentAndExcludeExternalURLs(t *testing.T) {
 	}
 }
 
-func fixtureJSON(t *testing.T, count int) string {
+func fixtureJSON(t testing.TB, count int) string {
 	t.Helper()
 	entries := make([]clip, count)
 	for i := range entries {
@@ -88,7 +88,7 @@ func fixtureJSON(t *testing.T, count int) string {
 	return string(data)
 }
 
-func mustCatalog(t *testing.T, data string) *Catalog {
+func mustCatalog(t testing.TB, data string) *Catalog {
 	t.Helper()
 	c, err := Load(strings.NewReader(data))
 	if err != nil {
