@@ -67,6 +67,8 @@ JPY30000 は日本銀行2026-11-06中心相場157.69円/USDで参考約190ドル
 
 ローカルでは fmt、init `-backend=false`、validate、mock provider の3 plan（domain未定、domain確定＋media/budget、domain確定＋app）と rendered Workflow YAML を確認する。serverless NEG は Compute health check / backend timeout を設定せず、アプリ startup probe は `/healthz`。実 Google API の compiler、IAM 実効、TLS、Range/CORS/hash、quota・費用・停止完了は別の実環境確認で判断する。特に、期限・予算到達時の破壊的な削除分岐とその実 IAM は未検証で、無断の停止 drill は実行していない。
 
-既存 foundation の一部は先行適用済み。2026-11-08 の実配備では、専用 static IPv4、CDN backend bucket と private origin IAM、Scheduler/Workflow を適用済み。Workflow compiler と guard SA の Pub/Sub pull は実行成功し、期限前の結果 `stopped=false / reason=not_due` を確認した。GCS PAP/UBLA と public IAM 不在、cache-fill viewer、TTL86400秒、project 全 service の JPY30000 budget と通知先もAPIで確認した。
+2026-11-08 に Cloud Run・NEG・LB・CDN・private GCS を構築した。Cloud Run URL の health/UI/API、media の HTTPS・Range・CORS・ETag・実ファイルのハッシュ一致と、private origin の匿名アクセス拒否を確認済み。app の Google-managed certificate 発行と GitHub WIF 経由の初回配備は確認中。
 
-API が省略する ownership scope を明示すると永久差分になるため、公式に `ALL_USERS` と同義の未指定を使う。[Budget API](https://docs.cloud.google.com/billing/docs/reference/budget/rest/v1/billingAccounts.budgets#OwnershipScope)。実ドメイン、DNS、HTTPS、公開UI/API、GitHub WIFによる配備と、破壊的停止分岐の実IAMは未検証。Scheduler の OAuth 起動と Workflow の正常終了も実環境で確認済み。専用topicへの費用0円の検証通知も、decode・閾値判定・ackまで成功した。検証通知の値を実請求額とは扱わない。
+Workflow compiler、Scheduler の OAuth 起動、期限前の `stopped=false / reason=not_due`、費用0円の検証通知の decode・閾値判定・ack を確認済み。GCS PAP/UBLA・public IAM 不在、cache-fill viewer、TTL86400秒、project 全 service の JPY30000 budget と通知先も API で確認した。検証通知の値は実請求額を表さない。
+
+API が省略する ownership scope は、`ALL_USERS` と同義の未指定を使い永久差分を避ける。[Budget API](https://docs.cloud.google.com/billing/docs/reference/budget/rest/v1/billingAccounts.budgets#OwnershipScope)。gcloud による image 更新と候補 tag の付与を分け、実環境の Terraform plan が差分ゼロになることも確認した。

@@ -133,7 +133,8 @@ PY
 readonly revision
 # Set before the call: an interrupted request might have created the tag.
 candidate_created=true
-cloud_run services update-traffic "$service" --update-tags="$tag=$revision" --format=json > "$work/ready.json"
+cloud_run services update-traffic "$service" --update-tags="$tag=$revision" --format=json > /dev/null
+cloud_run services describe "$service" --format=json > "$work/ready.json"
 candidate_url=$(python3 - "$work/ready.json" "$tag" "$revision" <<'PY'
 import json, sys
 from urllib.parse import urlsplit

@@ -78,7 +78,7 @@ elif args[2] == 'update-traffic':
                                  'url': 'https://candidate-123-1---rangle-stg-test.run.app'})
     if '--to-revisions=rangle-stg-00003-abc=100' in args and os.environ.get('FAIL_PROMOTION'):
         sys.exit(1)
-print(json.dumps(doc))
+print(json.dumps(status['traffic'] if args[2] == 'update-traffic' else doc))
 '''
 
 
