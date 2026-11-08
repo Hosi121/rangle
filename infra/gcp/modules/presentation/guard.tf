@@ -101,8 +101,14 @@ resource "google_workflows_workflow" "guard" {
     deployer            = "projects/${var.project_id}/serviceAccounts/${local.prefix}-deploy@${var.project_id}.iam.gserviceaccount.com"
     receipt_bucket      = google_storage_bucket.private["inputs"].name
     scheduler           = local.job_name
+    generation_enabled  = local.generation_enabled
+    generation_functions = templatefile("${path.module}/generation-shutdown.yaml.tftpl", {
+      project_id     = var.project_id
+      project_number = var.project_number
+      region         = var.region
+    })
   })
-  depends_on = [google_project_service.required, google_service_account_iam_member.disable_deployer, google_project_iam_member.pause_guard, google_pubsub_subscription_iam_member.guard, google_storage_bucket_iam_member.guard_receipt, google_project_iam_member.run_operations, google_project_iam_member.inspect_run, google_project_iam_member.edge_reader, google_project_iam_member.stop_forwarding_rules, google_project_iam_member.release_address]
+  depends_on = [google_project_service.required, google_service_account_iam_member.disable_deployer, google_project_iam_member.pause_guard, google_pubsub_subscription_iam_member.guard, google_storage_bucket_iam_member.guard_receipt, google_project_iam_member.run_operations, google_project_iam_member.inspect_run, google_project_iam_member.edge_reader, google_project_iam_member.stop_forwarding_rules, google_project_iam_member.release_address, google_project_iam_member.generation_guard]
 }
 resource "google_project_iam_custom_role" "invoke_guard" {
   project     = var.project_id

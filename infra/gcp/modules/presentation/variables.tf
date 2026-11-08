@@ -54,15 +54,22 @@ variable "budget_display_name" {
 variable "application" {
   description = "Null until a real catalog snapshot and OCI image have been published and verified."
   type = object({
-    image_digest      = string
-    catalog_sha256    = string
-    community_enabled = optional(bool, false)
+    image_digest             = string
+    catalog_sha256           = string
+    community_enabled        = optional(bool, false)
+    generation_config_sha256 = optional(string, null)
   })
   default  = null
   nullable = true
   validation {
     condition     = var.application == null ? true : can(regex("^[^@[:space:]]+@sha256:[0-9a-f]{64}$", var.application.image_digest)) && can(regex("^[0-9a-f]{64}$", var.application.catalog_sha256))
     error_message = "Use an immutable image digest and catalog content SHA256."
+  }
+  validation {
+    condition = var.application == null ? true : (
+      var.application.generation_config_sha256 == null ? true : can(regex("^[0-9a-f]{64}$", var.application.generation_config_sha256))
+    )
+    error_message = "Generation config must be null or the lowercase SHA256 of a reviewed immutable private JSON file."
   }
 }
 

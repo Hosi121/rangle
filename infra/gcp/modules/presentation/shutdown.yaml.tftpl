@@ -9,6 +9,7 @@ main:
           - errors: []
           - observed_cost: null
           - operation_name: null
+          - generation_result: null
     - deadline:
         switch:
           - condition: $${sys.now() >= time.parse("${deadline}")}
@@ -148,10 +149,51 @@ main:
               - deletion_failed:
                   assign:
                     - errors: $${list.concat(errors, "Service deletion was not confirmed")}
+    - cancel_owned_generation:
+        switch:
+          - condition: ${generation_enabled}
+            steps:
+              - cancel_jobs:
+                  try:
+                    call: cancel_generation_jobs
+                    result: generation_result
+                  except:
+                    as: error
+                    steps:
+                      - record_generation_error:
+                          assign:
+                            - errors: $${list.concat(errors, error)}
     - check_shutdown:
         switch:
           - condition: $${len(errors) > 0}
             steps:
+              - prepare_failure_receipt:
+                  assign:
+                    - failure_receipt:
+                        reason: $${reason}
+                        observed_cost: $${observed_cost}
+                        currency: "${budget_currency}"
+                        time: $${time.format(sys.now())}
+                        errors: $${errors}
+                        generation: $${generation_result}
+              - persist_failure_receipt:
+                  try:
+                    call: http.post
+                    args:
+                      url: "https://storage.googleapis.com/upload/storage/v1/b/${receipt_bucket}/o"
+                      query:
+                        uploadType: "media"
+                        name: $${"guard/failures/" + sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID") + ".json"}
+                        ifGenerationMatch: "0"
+                      auth: {type: OAuth2}
+                      headers: {Content-Type: "application/json"}
+                      body: $${json.encode_to_string(failure_receipt)}
+                  except:
+                    as: receipt_error
+                    steps:
+                      - record_receipt_error:
+                          assign:
+                            - errors: $${list.concat(errors, "Failure receipt could not be stored")}
               - shutdown_failed:
                   raise: $${json.encode_to_string(errors)}
     - prepare_receipt:
@@ -163,6 +205,7 @@ main:
               time: $${time.format(sys.now())}
               edge: "${edge_prefix}-edge"
               service: "${service}"
+              generation: $${generation_result}
     - persist_receipt:
         try:
           call: http.post
@@ -404,3 +447,5 @@ delete_compute_resource:
         call: sys.sleep
         args: {seconds: 5}
         next: inspect_operation
+
+${generation_functions}

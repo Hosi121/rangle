@@ -1,0 +1,73 @@
+mock_provider "google" {
+  mock_data "google_artifact_registry_repository" { defaults = { format = "DOCKER" } }
+}
+variables {
+  project_id         = "rangle-example"
+  project_number     = "123456789012"
+  region             = "asia-northeast1"
+  base_domain        = "presentation.example.com"
+  budget_currency    = "JPY"
+  budget_stop_amount = 15000
+  application = {
+    image_digest      = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+    catalog_sha256    = "1111111111111111111111111111111111111111111111111111111111111111"
+    community_enabled = true
+  }
+}
+run "generation_is_disabled_for_existing_application" {
+  command = plan
+  assert {
+    condition     = length(google_project_service.generation) == 0 && length(google_service_account.trainer) == 0 && length(google_project_iam_member.generation_runtime) == 0 && length(google_project_iam_member.generation_guard) == 0 && output.deployment.generation == null
+    error_message = "An existing application must gain no Vertex API changes, trainer or generation permissions."
+  }
+  assert {
+    condition     = !contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-generation-config") && !one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.cancel_owned_generation if can(step.cancel_owned_generation)]).switch[0].condition
+    error_message = "Default-off generation must not pass a new CLI flag or call Vertex during shutdown."
+  }
+}
+run "generation_uses_private_config_and_separate_trainer" {
+  command = plan
+  variables {
+    application = {
+      image_digest             = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      catalog_sha256           = "1111111111111111111111111111111111111111111111111111111111111111"
+      community_enabled        = true
+      generation_config_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  }
+  assert {
+    condition     = google_service_account.trainer[0].account_id == "rangle-stg-trainer" && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "/mnt/catalog/generation/2222222222222222222222222222222222222222222222222222222222222222.json") && google_service_account_iam_member.trainer_act_as[0].role == "roles/iam.serviceAccountUser"
+    error_message = "Use the dedicated trainer through the one immutable, readonly-mounted generation config flag."
+  }
+  assert {
+    condition     = google_project_iam_custom_role.generation_runtime[0].permissions == toset(["aiplatform.customJobs.create", "aiplatform.customJobs.get", "aiplatform.customJobs.list", "aiplatform.customJobs.cancel"]) && google_project_iam_custom_role.generation_guard[0].permissions == toset(["aiplatform.customJobs.list", "aiplatform.customJobs.cancel"]) && strcontains(google_project_iam_member.generation_runtime[0].condition[0].expression, "2026-11-14T15:00:00Z")
+    error_message = "Separate deadline-bound job submission from the guard's two-operation cancellation role."
+  }
+  assert {
+    condition     = google_project_iam_custom_role.trainer_input[0].permissions == toset(["storage.objects.get"]) && strcontains(google_storage_bucket_iam_member.trainer_input[0].condition[0].expression, "projects/_/buckets/rangle-stg-123456789012-inputs/objects/datasets/") && google_storage_bucket_iam_member.trainer_output[0].role == "roles/storage.objectCreator" && strcontains(google_storage_bucket_iam_member.trainer_output[0].condition[0].expression, "projects/_/buckets/rangle-stg-123456789012-media/objects/generated/")
+    error_message = "Trainer input is exact-object get, and append-only output stays inside generated media."
+  }
+  assert {
+    condition     = index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "verify_service_absent") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "cancel_owned_generation") && index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "cancel_owned_generation") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "check_shutdown")
+    error_message = "Always attempt existing ingress/service shutdown before bounded GPU cancellation and final error handling."
+  }
+  assert {
+    condition     = can(one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.cancel_owned_generation if can(step.cancel_owned_generation)]).switch[0].steps[0].cancel_jobs.except.steps[0].record_generation_error) && strcontains(google_workflows_workflow.guard.source_contents, "guard/failures/")
+    error_message = "GPU API failures must enter the shared shutdown error path and leave a private failure receipt."
+  }
+  assert {
+    condition     = one([for step in yamldecode(google_workflows_workflow.guard.source_contents).scan_owned_generation_jobs.steps : step.list_jobs if can(step.list_jobs)]).args.query.filter == "labels.application=\"rangle\" AND labels.environment=\"presentation-stg\" AND labels.rangle_job:*" && strcontains(google_workflows_workflow.guard.source_contents, "^[0-9a-f]{32}$") && strcontains(google_workflows_workflow.guard.source_contents, "^projects/(rangle-example|123456789012)/locations/asia-northeast1/customJobs/") && strcontains(google_workflows_workflow.guard.source_contents, "nextPageToken") && strcontains(google_workflows_workflow.guard.source_contents, "sys.now() + 300")
+    error_message = "Guard must paginate the exact environment, recheck owned names/labels, and stop polling within a finite window."
+  }
+}
+run "reject_unversioned_generation_config" {
+  command = plan
+  variables {
+    application = {
+      image_digest             = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      catalog_sha256           = "1111111111111111111111111111111111111111111111111111111111111111"
+      generation_config_sha256 = "latest"
+    }
+  }
+  expect_failures = [var.application]
+}
