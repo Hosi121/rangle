@@ -1,0 +1,14 @@
+# Fictional values only. Supply existing project and administration identities.
+project_id                = "rangle-example-state"
+region                    = "us-central1"
+bootstrap_service_account = "infra-admin@rangle-example-state.iam.gserviceaccount.com"
+environments = {
+  stg = {
+    state_bucket_name         = "rangle-example-tfstate-stg"
+    terraform_service_account = "terraform-stg@rangle-example-stg.iam.gserviceaccount.com"
+  }
+  main = {
+    state_bucket_name         = "rangle-example-tfstate-main"
+    terraform_service_account = "terraform-main@rangle-example-main.iam.gserviceaccount.com"
+  }
+}

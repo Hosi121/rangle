@@ -18,6 +18,7 @@ import (
 func TestRunServesWebAndSceneAndStops(t *testing.T) {
 	ui, scene := t.TempDir(), t.TempDir()
 	for name, data := range map[string]string{
+		filepath.Join(ui, "landing.html"):   "product entry",
 		filepath.Join(ui, "index.html"):     "local Web app",
 		filepath.Join(scene, "scene.json"):  `{"version":1,"frameRate":25,"frames":["frame.splat"]}`,
 		filepath.Join(scene, "frame.splat"): "0123456789",
@@ -107,7 +108,8 @@ func TestRunServesWebAndSceneAndStops(t *testing.T) {
 
 	client := &http.Client{Timeout: time.Second}
 	for target, want := range map[string]string{
-		"/":                               "local Web app",
+		"/":                               "product entry",
+		"/demo/":                          "local Web app",
 		"/healthz":                        "ok\n",
 		"/samples/basketball/frame.splat": "0123456789",
 	} {
@@ -151,12 +153,17 @@ func TestRunRejectsUnsupportedAndMalformedAddresses(t *testing.T) {
 
 func TestRunAllowsContainerAddress(t *testing.T) {
 	ui := t.TempDir()
-	if err := os.WriteFile(
-		filepath.Join(ui, "index.html"),
-		[]byte("test page"),
-		0600,
-	); err != nil {
-		t.Fatal(err)
+	for name, data := range map[string]string{
+		"landing.html": "product entry",
+		"index.html":   "test page",
+	} {
+		if err := os.WriteFile(
+			filepath.Join(ui, name),
+			[]byte(data),
+			0600,
+		); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

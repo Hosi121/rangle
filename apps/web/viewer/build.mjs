@@ -10,7 +10,8 @@ const notices = await Promise.all([
   ['three 0.160.0', 'node_modules/three/LICENSE'],
 ].map(async ([name, path]) => `${name}\n\n${await readFile(new URL(path, import.meta.url), 'utf8')}`));
 await build({
-  entryPoints: { viewer: 'src/index.js', 'frame-worker': 'src/frame-worker.js' },
+  entryPoints: { viewer: 'src/index.js', 'frame-worker': 'src/frame-worker.js',
+    'temporal-worker': 'src/temporal-worker.js' },
   bundle: true, format: 'esm', minify: true,
   legalComments: 'eof', outdir: '../web/viewer',
   plugins: [{

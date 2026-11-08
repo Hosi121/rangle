@@ -25,8 +25,10 @@ func TestHTTPFilesAndConditionalRequests(t *testing.T) {
 		status               int
 		body, cache          string
 	}{
-		{"UI index", "GET", "/", nil, 200, "<html>app</html>", "no-cache"},
-		{"UI JavaScript", "GET", "/assets/app.js", nil, 200, "console.log('app');", "no-cache"},
+		{"product entry", "GET", "/", nil, 200, "<html>rangle product</html>", "no-cache"},
+		{"demo index", "GET", "/demo/", nil, 200, "<html>app</html>", "no-cache"},
+		{"demo HEAD", "HEAD", "/demo/", nil, 200, "", "no-cache"},
+		{"UI JavaScript", "GET", "/demo/assets/app.js", nil, 200, "console.log('app');", "no-cache"},
 		{"UI HEAD", "HEAD", "/", nil, 200, "", "no-cache"},
 		{"frame", "GET", "/samples/basketball/frames/000.splat", nil, 200, "0123456789", "no-cache"},
 		{"frame HEAD", "HEAD", "/samples/basketball/frames/000.splat", nil, 200, "", "no-cache"},
@@ -41,11 +43,11 @@ func TestHTTPFilesAndConditionalRequests(t *testing.T) {
 		{"private raw weights", "GET", "/samples/basketball/frames/raw.npz", nil, 404, "", "no-store"},
 		{"unlisted frame", "GET", "/samples/basketball/frames/secret.splat", nil, 404, "", "no-store"},
 		{"unknown scene", "GET", "/samples/other/scene.json", nil, 404, "", "no-store"},
-		{"hidden UI file", "GET", "/.env", nil, 404, "", "no-store"},
-		{"hidden UI directory", "GET", "/.private/key", nil, 404, "", "no-store"},
-		{"local UI notes", "GET", "/README.local.md", nil, 404, "", "no-store"},
-		{"private UI notes", "GET", "/assets/review.private.md", nil, 404, "", "no-store"},
-		{"UI directory listing", "GET", "/assets/", nil, 404, "", "no-store"},
+		{"hidden UI file", "GET", "/demo/.env", nil, 404, "", "no-store"},
+		{"hidden UI directory", "GET", "/demo/.private/key", nil, 404, "", "no-store"},
+		{"local UI notes", "GET", "/demo/README.local.md", nil, 404, "", "no-store"},
+		{"private UI notes", "GET", "/demo/assets/review.private.md", nil, 404, "", "no-store"},
+		{"UI directory listing", "GET", "/demo/assets/", nil, 404, "", "no-store"},
 		{"sample directory listing", "GET", "/samples/basketball/frames/", nil, 404, "", "no-store"},
 		{"UI samples cannot bypass scene allowlist", "GET", "/samples/private.txt", nil, 404, "", "no-store"},
 		{"traversal", "GET", "/samples/basketball/../benchmark.json", nil, 404, "", "no-store"},
@@ -135,6 +137,80 @@ func TestMutableFileRevalidationAndPinnedAllowlist(t *testing.T) {
 	}
 }
 
+func TestDemoRoutesAndDeclaredPreviewAliases(t *testing.T) {
+	config := fixture(t)
+	for _, relative := range []string{"main.dart.js", "flutter_bootstrap.js", "viewer/viewer.js", "viewer/temporal-worker.js", "assets/fonts/font.woff2", "canvaskit/canvaskit.js", "quality-previews/unlisted.webm"} {
+		write(t, filepath.Join(config.UIRoot, relative), "demo resource")
+	}
+	write(t, filepath.Join(config.UIRoot, "quality-previews/clip.webm"), "0123456789")
+	config.PreviewPaths = []string{"/quality-previews/clip.webm", "/quality-previews/later.webm", "/main.dart.js"}
+	h, err := New(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer h.Close()
+	for _, method := range []string{http.MethodGet, http.MethodHead} {
+		for _, query := range []string{"", "?", "?clip=one&next=%2Fviewer%2F"} {
+			r, _ := sentResponse(t, h, httptest.NewRequest(method, "/demo"+query, nil))
+			if r.StatusCode != http.StatusPermanentRedirect || r.Header.Get("Location") != "/demo/"+query {
+				t.Fatalf("%s redirect %q: status=%d location=%q", method, query, r.StatusCode, r.Header.Get("Location"))
+			}
+		}
+		for _, target := range []string{"/demo/main.dart.js", "/demo/viewer/viewer.js", "/demo/assets/fonts/font.woff2", "/quality-previews/clip.webm"} {
+			r, body := sentResponse(t, h, httptest.NewRequest(method, target, nil))
+			if r.StatusCode != 200 || method == http.MethodHead && body != "" {
+				t.Fatalf("%s %s: %d %q", method, target, r.StatusCode, body)
+			}
+		}
+	}
+	for _, target := range []string{"/index.html", "/landing.html", "/demo/landing.html", "/main.dart.js", "/flutter_bootstrap.js", "/viewer/viewer.js", "/viewer/temporal-worker.js", "/assets/fonts/font.woff2", "/canvaskit/canvaskit.js", "/quality-previews/unlisted.webm", "/demo/healthz", "/demo/samples/private.txt", "/demo/../main.dart.js", "/demo/%2e%2e/main.dart.js"} {
+		r, _ := sentResponse(t, h, httptest.NewRequest(http.MethodGet, target, nil))
+		if r.StatusCode != 404 || r.Header.Get("Cache-Control") != "no-store" {
+			t.Fatalf("unexpected static alias %s: %d %v", target, r.StatusCode, r.Header)
+		}
+	}
+	rangeRequest := httptest.NewRequest(http.MethodGet, "/quality-previews/clip.webm", nil)
+	rangeRequest.Header.Set("Range", "bytes=2-5")
+	r, body := sentResponse(t, h, rangeRequest)
+	if r.StatusCode != 206 || body != "2345" || r.Header.Get("Content-Type") != "video/webm" || r.Header.Get("Content-Range") != "bytes 2-5/10" {
+		t.Fatalf("preview Range: %d %q %v", r.StatusCode, body, r.Header)
+	}
+	// A new file cannot become public until restart, even if its URL was declared.
+	write(t, filepath.Join(config.UIRoot, "quality-previews/later.webm"), "later media")
+	for _, target := range []string{"/quality-previews/later.webm", "/demo/quality-previews/later.webm"} {
+		r, _ := sentResponse(t, h, httptest.NewRequest(http.MethodGet, target, nil))
+		if r.StatusCode != 404 {
+			t.Fatalf("new file escaped startup allowlist: %s", target)
+		}
+	}
+	// In-place updates retain the original permitted descriptor.
+	write(t, filepath.Join(config.UIRoot, "main.dart.js"), "updated in place")
+	request := httptest.NewRequest(http.MethodGet, "/demo/main.dart.js", nil)
+	_, body = sentResponse(t, h, request)
+	if body != "updated in place" {
+		t.Fatalf("demo revalidation: %q", body)
+	}
+}
+
+func TestUIRequiresLandingAndValidPreviewPaths(t *testing.T) {
+	config := fixture(t)
+	if err := os.Remove(filepath.Join(config.UIRoot, "landing.html")); err != nil {
+		t.Fatal(err)
+	}
+	if h, err := New(config); err == nil {
+		h.Close()
+		t.Fatal("accepted UI without a product entry")
+	}
+	for _, target := range []string{"https://media.example.test/clip.webm", "//media.example.test/clip.webm", "/clip.webm?token=example", "/clip%2ewebm", "/a/../clip.webm"} {
+		config := fixture(t)
+		config.PreviewPaths = []string{target}
+		if h, err := New(config); err == nil {
+			h.Close()
+			t.Fatalf("accepted invalid local preview path %q", target)
+		}
+	}
+}
+
 func TestRejectInvalidSceneAndSymlinkPaths(t *testing.T) {
 	for _, frame := range []string{"../secret.splat", "/secret.splat", "frames/../secret.splat", ".hidden.splat", "frames/.private/a.splat", "frames/a%2fsplat.splat", "https://example.test/a.splat", "frames\\a.splat", "frames/a.splat?secret", "frames/a.npz"} {
 		t.Run(frame, func(t *testing.T) {
@@ -183,7 +259,7 @@ func TestRejectInvalidSceneAndSymlinkPaths(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer handler.Close()
-	response, _ := sentResponse(t, handler, httptest.NewRequest("GET", "/linked/scene.json", nil))
+	response, _ := sentResponse(t, handler, httptest.NewRequest("GET", "/demo/linked/scene.json", nil))
 	if response.StatusCode != 404 {
 		t.Fatal("UI symlink exposed scene root")
 	}
@@ -271,7 +347,7 @@ func sentResponse(t *testing.T, handler *Handler, request *http.Request) (*http.
 func fixture(t *testing.T) Config {
 	t.Helper()
 	ui, scene := t.TempDir(), t.TempDir()
-	for name, data := range map[string]string{"index.html": "<html>app</html>", "assets/app.js": "console.log('app');", ".env": "private UI secret", ".private/key": "private key", "samples/private.txt": "not a published sample", "README.local.md": "private local notes", "assets/review.private.md": "private review notes"} {
+	for name, data := range map[string]string{"landing.html": "<html>rangle product</html>", "index.html": "<html>app</html>", "assets/app.js": "console.log('app');", ".env": "private UI secret", ".private/key": "private key", "samples/private.txt": "not a published sample", "README.local.md": "private local notes", "assets/review.private.md": "private review notes"} {
 		write(t, filepath.Join(ui, name), data)
 	}
 	write(t, filepath.Join(scene, "scene.json"), `{"version":1,"frameRate":25,"frames":["frames/000.splat"]}`)

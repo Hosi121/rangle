@@ -73,7 +73,9 @@ catalogはAPIからそのまま公開しない設定用JSONで、最大16MiB。v
 }
 ```
 
-このJSONを `.local/catalog.json` に保存し、次のように起動する。`-ui-root` を追加すれば既存Webビルドも同じ入口に載せられる。Flutter自身の `/assets/` と衝突させないため、公開clipのrevision prefixだけを配信handlerへ割り当てる。
+このJSONを `.local/catalog.json` に保存し、次のように起動する。`-ui-root` を追加すると `/` は製品入口、`/demo/` は既存Webビルドになる。Flutter自身の静的ファイルは `/demo/assets/` 等へ移り、フィードAPI・manifest・公開clipの版付き資産URLは変わらない。
+
+カタログの `preview_url` が `/quality-previews/clip.webm` 等のローカル動画を参照し、そのファイルがUI root内の同じ相対pathにある場合は、宣言された動画だけを従来のroot側URLでも配信する。絶対HTTP(S) URLをローカルaliasへ変換せず、JavaScript・フォント等のUI資産は `/demo/` 配下に限定する。公開対象は起動時に固定され、未宣言動画のroot側aliasは作られない。
 
 ```bash
 mkdir -p .local/published/assets/example/v1/low

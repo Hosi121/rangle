@@ -27,6 +27,10 @@ class ClipCard extends StatefulWidget {
 
 class _ClipCardState extends State<ClipCard> {
   bool _freeView = false;
+  bool _sceneRequested = false;
+  bool _sceneReady = false;
+  bool _pendingScene = false;
+  bool _sceneError = false;
   Clip get clip => widget.clip;
   bool get active => widget.active;
   VoidCallback? get onNext => widget.onNext;
@@ -34,131 +38,206 @@ class _ClipCardState extends State<ClipCard> {
   @override
   void didUpdateWidget(ClipCard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!active) _freeView = false;
+    if (!active ||
+        oldWidget.clip.id != clip.id ||
+        oldWidget.clip.sceneUrl != clip.sceneUrl) {
+      _freeView = false;
+      _sceneRequested = false;
+      _sceneReady = false;
+      _pendingScene = false;
+      _sceneError = false;
+    }
   }
 
   void _toggleMode() {
-    setState(() => _freeView = !_freeView);
+    setState(() {
+      if (_freeView) {
+        _freeView = false;
+      } else if (_pendingScene) {
+        _pendingScene = false;
+        _sceneRequested = false;
+        _sceneReady = false;
+      } else {
+        _sceneRequested = true;
+        _sceneError = false;
+        _freeView = _sceneReady;
+        _pendingScene = !_sceneReady;
+      }
+    });
     widget.onFreeViewChanged(_freeView);
+  }
+
+  void _onSceneReady() {
+    if (!active || !_sceneRequested) return;
+    final reveal = _pendingScene;
+    setState(() {
+      _sceneReady = true;
+      _pendingScene = false;
+      _freeView = reveal;
+    });
+    if (reveal) widget.onFreeViewChanged(true);
+  }
+
+  void _onSceneStatus(ViewerStatus status) {
+    if (!active || !_sceneRequested || status != ViewerStatus.error) return;
+    final wasFreeView = _freeView;
+    setState(() {
+      _sceneRequested = false;
+      _sceneReady = false;
+      _pendingScene = false;
+      _freeView = false;
+      _sceneError = true;
+    });
+    if (wasFreeView) widget.onFreeViewChanged(false);
+  }
+
+  String get _modeLabel => _sceneError
+      ? '自由視点を表示できませんでした'
+      : _pendingScene
+      ? '通常動画・自由視点準備中'
+      : _freeView
+      ? '自由視点'
+      : clip.previewUrl == null
+      ? '映像準備中'
+      : '通常動画';
+
+  String get _modeAction => clip.sceneUrl == null
+      ? '自由視点は準備中'
+      : _freeView
+      ? '動画に戻る'
+      : _pendingScene
+      ? '自由視点の準備をキャンセル'
+      : _sceneError
+      ? '自由視点を再試行'
+      : '自由視点で見る';
+
+  Widget _ordinaryView(bool compact) {
+    if (clip.previewUrl != null && active) {
+      return PreviewViewer(
+        key: ValueKey('${clip.id}-video'),
+        source: clip.previewUrl!,
+        factory: widget.viewerFactory,
+      );
+    }
+    return Column(
+      children: [
+        Expanded(
+          child: compact
+              ? Center(
+                  child: Text(
+                    '映像を準備しています',
+                    style: Theme.of(context).textTheme.titleSmall,
+                  ),
+                )
+              : ViewerMessage(
+                  icon: Icons.video_library_outlined,
+                  title: '映像を準備しています',
+                  description: '公開されたハイライトが\nここに表示されます。',
+                  action: onNext == null
+                      ? null
+                      : OutlinedButton.icon(
+                          onPressed: onNext,
+                          icon: const Icon(Icons.arrow_downward, size: 18),
+                          label: const Text('次の項目を見る'),
+                        ),
+                ),
+        ),
+        if (!compact) const _PendingControls(),
+      ],
+    );
+  }
+
+  void _showDetails() {
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (context) => ConstrainedBox(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.sizeOf(context).height * .8,
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 12, 24, 32),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      '出典・詳細',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '閉じる',
+                    onPressed: () => Navigator.pop(context),
+                    icon: const Icon(Icons.close),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(clip.title, style: Theme.of(context).textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text(clip.sport),
+              const SizedBox(height: 16),
+              SelectableText(
+                clip.description,
+                semanticsLabel: clip.description,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
+      final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.4;
       final compact =
-          constraints.maxHeight < 400 ||
-          MediaQuery.textScalerOf(context).scale(1) > 1.4;
-      final colors = Theme.of(context).colorScheme;
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: colors.surfaceContainer,
-                border: Border.all(color: colors.outlineVariant),
-                borderRadius: BorderRadius.circular(20),
+          constraints.maxHeight < 500 ||
+          constraints.maxWidth < 360 ||
+          largeText;
+      return ColoredBox(
+        color: Colors.black,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (_sceneRequested && active && clip.sceneUrl != null)
+              PreviewViewer(
+                key: ValueKey('${clip.id}-scene'),
+                source: clip.sceneUrl!,
+                factory: widget.sceneFactory,
+                freeView: true,
+                visible: _freeView,
+                onReady: _onSceneReady,
+                onStatusChanged: _onSceneStatus,
               ),
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(20),
-                child: Column(
-                  children: [
-                    if (!compact) ...[
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              Icons.sports_basketball_outlined,
-                              size: 18,
-                              color: colors.onSurfaceVariant,
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                clip.sport,
-                                style: Theme.of(context).textTheme.labelLarge,
-                              ),
-                            ),
-                            Text(
-                              _freeView
-                                  ? '自由視点'
-                                  : clip.previewUrl == null
-                                  ? '映像準備中'
-                                  : '通常動画',
-                              style: Theme.of(context).textTheme.labelSmall,
-                            ),
-                          ],
-                        ),
+            if (!_freeView)
+              ColoredBox(
+                key: ValueKey('${clip.id}-video-layer'),
+                color: Colors.black,
+                child: _ordinaryView(compact),
+              ),
+            Positioned(
+              left: 16,
+              right: 72,
+              bottom: largeText ? 152 : 112,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IgnorePointer(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: .72),
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      const Divider(height: 1),
-                    ],
-                    Expanded(
-                      child: _freeView && active && clip.sceneUrl != null
-                          ? PreviewViewer(
-                              key: ValueKey('${clip.id}-scene'),
-                              source: clip.sceneUrl!,
-                              factory: widget.sceneFactory,
-                              freeView: true,
-                            )
-                          : clip.previewUrl != null && active
-                          ? PreviewViewer(
-                              key: ValueKey('${clip.id}-video'),
-                              source: clip.previewUrl!,
-                              factory: widget.viewerFactory,
-                            )
-                          : Column(
-                              children: [
-                                Expanded(
-                                  child: compact
-                                      ? Center(
-                                          child: Text(
-                                            '映像を準備しています',
-                                            style: Theme.of(context)
-                                                .textTheme
-                                                .titleSmall,
-                                          ),
-                                        )
-                                      : ViewerMessage(
-                                          icon: Icons.video_library_outlined,
-                                          title: '映像を準備しています',
-                                          description:
-                                              '公開されたハイライトが\nここに表示されます。',
-                                          action: onNext == null
-                                              ? null
-                                              : OutlinedButton.icon(
-                                                  onPressed: onNext,
-                                                  icon: const Icon(
-                                                    Icons.arrow_downward,
-                                                    size: 18,
-                                                  ),
-                                                  label: const Text('次の項目を見る'),
-                                                ),
-                                        ),
-                                ),
-                                if (!compact) const _PendingControls(),
-                              ],
-                            ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: EdgeInsets.fromLTRB(
-              4,
-              compact ? 4 : 16,
-              4,
-              compact ? 0 : 12,
-            ),
-            child: compact
-                ? Row(
-                    children: [
-                      Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.all(8),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
@@ -167,80 +246,72 @@ class _ClipCardState extends State<ClipCard> {
                               header: true,
                               child: Text(
                                 clip.title,
-                                maxLines: 2,
+                                maxLines: compact ? 1 : 2,
                                 overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium,
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w700),
                               ),
                             ),
-                            Text(
-                              _freeView
-                                  ? '自由視点'
-                                  : clip.previewUrl == null
-                                  ? '映像準備中'
-                                  : '通常動画',
-                              style: Theme.of(context).textTheme.labelSmall,
+                            const SizedBox(height: 4),
+                            Semantics(
+                              liveRegion: true,
+                              child: Text(
+                                '${clip.sport} · $_modeLabel',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
                             ),
                           ],
                         ),
                       ),
-                      IconButton(
-                        tooltip: clip.sceneUrl == null
-                            ? '自由視点は準備中'
-                            : _freeView
-                            ? '動画に戻る'
-                            : '自由視点で見る',
-                        onPressed: clip.sceneUrl == null ? null : _toggleMode,
-                        icon: Icon(
-                          _freeView
-                              ? Icons.movie_outlined
-                              : Icons.threed_rotation,
-                        ),
-                      ),
-                    ],
-                  )
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
                     children: [
-                      Semantics(
-                        header: true,
-                        child: Text(
-                          clip.title,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        clip.description,
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          height: 1.6,
-                          color: colors.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
+                      if (compact)
+                        IconButton.filledTonal(
+                          tooltip: _modeAction,
                           onPressed: clip.sceneUrl == null ? null : _toggleMode,
                           icon: Icon(
-                            _freeView
+                            _pendingScene
+                                ? Icons.hourglass_top
+                                : _freeView
                                 ? Icons.movie_outlined
                                 : Icons.threed_rotation,
-                            size: 18,
                           ),
-                          label: Text(
-                            clip.sceneUrl == null
-                                ? '自由視点は準備中'
-                                : _freeView
-                                ? '動画に戻る'
-                                : '自由視点で見る',
+                        )
+                      else
+                        Flexible(
+                          child: FilledButton.tonalIcon(
+                            onPressed: clip.sceneUrl == null
+                                ? null
+                                : _toggleMode,
+                            icon: Icon(
+                              _pendingScene
+                                  ? Icons.hourglass_top
+                                  : _freeView
+                                  ? Icons.movie_outlined
+                                  : Icons.threed_rotation,
+                              size: 18,
+                            ),
+                            label: Text(_modeAction),
                           ),
                         ),
+                      const SizedBox(width: 8),
+                      IconButton.filledTonal(
+                        tooltip: '出典・詳細',
+                        onPressed: _showDetails,
+                        icon: const Icon(Icons.info_outline),
                       ),
                     ],
                   ),
-          ),
-        ],
+                ],
+              ),
+            ),
+          ],
+        ),
       );
     },
   );
