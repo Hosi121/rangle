@@ -154,6 +154,15 @@ main:
             steps:
               - shutdown_failed:
                   raise: $${json.encode_to_string(errors)}
+    - prepare_receipt:
+        assign:
+          - receipt:
+              reason: $${reason}
+              observed_cost: $${observed_cost}
+              currency: "${budget_currency}"
+              time: $${time.format(sys.now())}
+              edge: "${edge_prefix}-edge"
+              service: "${service}"
     - persist_receipt:
         try:
           call: http.post
@@ -165,7 +174,7 @@ main:
               ifGenerationMatch: "0"
             auth: {type: OAuth2}
             headers: {Content-Type: "application/json"}
-            body: '$${json.encode_to_string({"reason": reason, "observed_cost": observed_cost, "currency": "${budget_currency}", "time": time.format(sys.now()), "edge": "${edge_prefix}-edge", "service": "${service}"})}'
+            body: $${json.encode_to_string(receipt)}
         except:
           as: error
           steps:
@@ -197,7 +206,10 @@ main:
                     auth: {type: OAuth2}
                     body: {}
     - result:
-        return: '$${{"stopped": stop, "reason": reason, "observed_cost": observed_cost}}'
+        return:
+          stopped: $${stop}
+          reason: $${reason}
+          observed_cost: $${observed_cost}
 
 wait_until_absent:
   params: [url]

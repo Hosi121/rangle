@@ -17,8 +17,8 @@ resource "google_compute_backend_bucket" "media" {
     cache_key_policy {
       # Only these parameters fragment the key. The publisher must not use
       # query strings for authorization, revisions, or content selection.
+      # Cloud CDN handles the origin's Vary: Origin; Origin is forbidden here.
       query_string_whitelist = ["generation"]
-      include_http_headers   = ["Origin"]
     }
   }
 }
