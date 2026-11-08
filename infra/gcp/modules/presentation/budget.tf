@@ -2,7 +2,8 @@ resource "google_billing_budget" "presentation" {
   count           = var.budget == null ? 0 : 1
   billing_account = var.budget.billing_account_id
   display_name    = var.budget_display_name
-  ownership_scope = "ALL_USERS"
+  # The API returns omitted scope for its ALL_USERS default. Setting ALL_USERS
+  # explicitly causes perpetual drift; unspecified has the same documented scope.
   budget_filter {
     projects               = ["projects/${var.project_number}"]
     credit_types_treatment = "EXCLUDE_ALL_CREDITS"

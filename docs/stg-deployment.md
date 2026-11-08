@@ -46,7 +46,7 @@ OIDC は標準 `workflow_ref` を使う。WorkloadIdentityUser、runtime actAs�
 
 既存の **Cloud Run 200円 spend cap は変更・解除しない**。Cloud Run が先に停止する可能性がある。この cap は CDN / LB / GCS / AR を止めない。[Spend cap の範囲](https://docs.cloud.google.com/billing/docs/how-to/budgets-spend-caps)
 
-専用 budget は全 service、単一 project、`ownership_scope=ALL_USERS`、custom period `2026-11-08`〜`2026-11-15`、credits 除外、JPY30000、threshold25/50/75%、project owner 通知、既定 billing-account recipient 無効。account data source は参照しない。通知先は `projects/comin-up/topics/rangle-stg-budget`。公式 publisher `billing-budget-alert@system.gserviceaccount.com` にこの topic だけの Publisher を付ける。[公式 principal](https://docs.cloud.google.com/organization-policy/restrict-domains)
+専用 budget は全 service、単一 project、`ownership_scope` 未指定（API既定は `ALL_USERS` と同義）、custom period `2026-11-08`〜`2026-11-15`、credits 除外、JPY30000、threshold25/50/75%、project owner 通知、既定 billing-account recipient 無効。account data source は参照しない。通知先は `projects/comin-up/topics/rangle-stg-budget`。公式 publisher `billing-budget-alert@system.gserviceaccount.com` にこの topic だけの Publisher を付ける。[公式 principal](https://docs.cloud.google.com/organization-policy/restrict-domains)
 
 15分ごとに Scheduler が OAuth で Workflow を実行し、専用 subscription `rangle-stg-budget-guard` の display name `rangle-stg-presentation-20261114` / currency `JPY` / `costAmount` を照合する。**JPY15000 または期限到達**で次を実施する。
 
@@ -65,4 +65,6 @@ JPY30000 は日本銀行2026-11-06中心相場157.69円/USDで参考約190ドル
 
 ローカルでは fmt、init `-backend=false`、validate、mock provider の3 plan（domain未定、domain確定＋media/budget、domain確定＋app）と rendered Workflow YAML を確認する。serverless NEG は Compute health check / backend timeout を設定せず、アプリ startup probe は `/healthz`。実 Google API の compiler、IAM 実効、TLS、Range/CORS/hash、quota・費用・停止完了は別の実環境確認で判断する。特に、期限・予算到達時の破壊的な削除分岐とその実 IAM は未検証で、無断の停止 drill は実行していない。
 
-既存 foundation の一部は先行適用済み。今回の CDN/LB への切替は、この文書作成時点ではコード準備まで。実ドメイン、DNS、HTTPS、公開 URL、CI・停止 guard の実稼働結果は配備担当者が確認後に追記する。
+既存 foundation の一部は先行適用済み。2026-11-08 の実配備では、専用 static IPv4、CDN backend bucket と private origin IAM、Scheduler/Workflow を適用済み。Workflow compiler と guard SA の Pub/Sub pull は実行成功し、期限前の結果 `stopped=false / reason=not_due` を確認した。GCS PAP/UBLA と public IAM 不在、cache-fill viewer、TTL86400秒、project 全 service の JPY30000 budget と通知先もAPIで確認した。
+
+API が省略する ownership scope を明示すると永久差分になるため、公式に `ALL_USERS` と同義の未指定を使う。[Budget API](https://docs.cloud.google.com/billing/docs/reference/budget/rest/v1/billingAccounts.budgets#OwnershipScope)。実ドメイン、DNS、HTTPS、公開UI/API、GitHub WIFによる配備と、破壊的停止分岐の実IAMは未検証。Scheduler の OAuth 起動と Workflow の正常終了も実環境で確認済み。専用topicへの費用0円の検証通知も、decode・閾値判定・ackまで成功した。検証通知の値を実請求額とは扱わない。

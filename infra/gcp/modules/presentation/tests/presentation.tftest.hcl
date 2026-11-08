@@ -46,7 +46,7 @@ run "configured_domain_media_and_budget" {
     error_message = "HTTPS must retain its scheme; only HTTP redirects to HTTPS with TLS 1.2 minimum."
   }
   assert {
-    condition     = google_billing_budget.presentation[0].ownership_scope == "ALL_USERS" && google_billing_budget.presentation[0].budget_filter[0].projects == toset(["projects/123456789012"]) && google_billing_budget.presentation[0].amount[0].specified_amount[0].currency_code == "JPY"
+    condition     = google_billing_budget.presentation[0].budget_filter[0].projects == toset(["projects/123456789012"]) && google_billing_budget.presentation[0].amount[0].specified_amount[0].currency_code == "JPY"
     error_message = "Keep the optional budget project-scoped in the verified currency."
   }
 }
