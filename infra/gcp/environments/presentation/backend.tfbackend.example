@@ -1,0 +1,3 @@
+# Replace only after creating the private presentation-specific state bucket.
+bucket = "rangle-example-stg-tfstate"
+prefix = "rangle/presentation-stg"
