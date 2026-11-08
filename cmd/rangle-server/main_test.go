@@ -15,6 +15,15 @@ import (
 	"github.com/Hosi121/rangle/internal/appserver"
 )
 
+func TestLocalCommunityOptionsCannotBindPublicly(t *testing.T) {
+	for _, cfg := range []config{{CommunityMemory: true, SecureCookies: true}, {FirestoreProject: "example", SecureCookies: false}} {
+		err := run(context.Background(), "0.0.0.0:0", cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+		if err == nil || !strings.Contains(err.Error(), "loopback") {
+			t.Fatalf("unsafe public configuration accepted: %v", err)
+		}
+	}
+}
+
 func TestRunServesWebAndSceneAndStops(t *testing.T) {
 	ui, scene := t.TempDir(), t.TempDir()
 	for name, data := range map[string]string{

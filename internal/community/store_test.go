@@ -3,6 +3,7 @@ package community
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"sync"
@@ -112,7 +113,7 @@ func TestFirestoreStoreContract(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	project := "demo-rangle-" + time.Now().Format("150405000000")
+	project := fmt.Sprintf("demo-rangle-%x", time.Now().UnixNano())
 	s, err := NewFirestoreStore(ctx, project, "community")
 	if err != nil {
 		t.Fatal(err)
