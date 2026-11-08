@@ -1,6 +1,6 @@
 # rangle のクラウド構成
 
-2026-11-08 時点の発表用 stg。実装を説明するための構成図で、性能試験の結果は表していない。正本は [presentation Terraform module](../infra/gcp/modules/presentation/) と [stg 配備手順](stg-deployment.md)、[stg 配備 workflow](https://github.com/Hosi121/rangle/blob/ce39d0ec9db6c5e8f54b31a2a31c97875a8a6568/.github/workflows/deploy-stg.yml)。
+2026-11-08 時点の発表用 stg。正本は [Terraform](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。CI の変更は [PR #42](https://github.com/Hosi121/rangle/pull/42)。
 
 ![rangle: Cloudflare DNSからGoogle HTTPS LBへ接続し、Cloud RunのUI/APIとCloud CDN・private GCSのmediaへ分岐する構成。下段はWIFによる配備と予算・期限停止。](diagrams/cloud-architecture.svg)
 
@@ -30,7 +30,7 @@ GitHub Actions の `stg` workflow は OIDC / Workload Identity Federation を経
 
 ## 検証の到達点
 
-2026-11-08 の資料作成時点で、Cloud Run / NEG / LB / Cloud CDN / private GCS は実環境に作成済み。UI と API の HTTP 200、Cloudflare authoritative DNS の app / media A record を確認済み。Google-managed certificate は PROVISIONING で、公開 HTTPS・media の Range/CORS/hash・GitHub WIF CI 配備は確認中。図の HTTPS 経路は設定済みのサービス構成を表す。
+Cloud Run / NEG / LB / Cloud CDN / private GCS は作成済み。Cloud Run URL の UI・API と、media の HTTPS・Range・CORS・ETag・実ファイルのハッシュ一致を確認済み。app の Google-managed certificate 発行と GitHub WIF 経由の初回配備は確認中。図は構成を表し、配備状況の更新先は [配備手順](stg-deployment.md#検証と到達点)。
 
 guard は期限前の `stopped=false / reason=not_due`、Scheduler による起動、費用0円の検証通知の decode・閾値判定・ack を確認済み。予算・期限到達時に資源を削除する分岐と、その実 IAM は未検証。実際の到達点の更新先は [stg 配備手順](stg-deployment.md#検証と到達点)。
 
@@ -44,13 +44,11 @@ python3 docs/diagrams/cloud-architecture.py
 python3 docs/diagrams/cloud-architecture.py --png
 ```
 
-Google の [公式アイコン](https://cloud.google.com/icons) と [製品アイコンガイド（2026年5月版）](https://services.google.com/fh/files/misc/google-cloud-product-icons.pdf) を使用。Cloud Run / Cloud Storage は core product、LB / CDN / NEG は Networking、WIF / SA は Security and Identity、Artifact Registry は DevOps、Scheduler は Developer Tools、Pub/Sub は Data Analytics、Workflows は Integration Services のカテゴリを使用した。Google Cloud のアイコン・商標は Google LLC に帰属する。
+Google の [公式アイコン](https://cloud.google.com/icons) と [製品アイコンガイド（2026年5月版）](https://services.google.com/fh/files/misc/google-cloud-product-icons.pdf) を使用。アイコン・商標は Google LLC に帰属する。
 
 ## GCP向けスキルの確認
 
-既存カタログに GCP の構成図専用スキルはない。`extract-glossary` は用語集・オンボーディング資料向けで、今回の発表用1枚図には範囲が広い。Tier 1 の `anthropics/skills` と `anthropics/claude-plugins-official` に GCP / architecture / diagram 専用の `SKILL.md` は確認できなかった。
-
-候補として Google 公式の [google-cloud-solution-architecture](https://github.com/google/skills/tree/main/skills/cloud/google-cloud-solution-architecture) を確認した。提供元は `google/skills`、[Apache-2.0](https://github.com/google/skills/blob/main/LICENSE)、確認した最終更新は [2026-10-22 / e2071e8](https://github.com/google/skills/commit/e2071e8c958792b9d03d5839fe885b0171ffeaee)。新しい多製品構成の要件探索・設計・検証と Mermaid 図を扱う。今回は実装済みの構成を SVG に整える単発作業のため導入せず、外部スキルのインストール・恒久採用・eval は行っていない。
+Google 公式の [google-cloud-solution-architecture](https://github.com/google/skills/tree/e2071e8c958792b9d03d5839fe885b0171ffeaee/skills/cloud/google-cloud-solution-architecture) を調査した。新規構成の要件整理・設計・検証を扱うスキルで、今回は既存構成の図示のためインストールせず、公式の製品資料とアイコンを参照した。
 
 ## 参照した一次資料
 
