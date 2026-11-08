@@ -22,7 +22,15 @@ from .packing import pack_splats, unpack_splats
 
 def log(event, severity="INFO", **values):
     print(
-        json.dumps({"severity": severity, "event": event, **values}, allow_nan=False),
+        json.dumps(
+            {
+                "service": "rangle-trainer",
+                "severity": severity,
+                "event": event,
+                **values,
+            },
+            allow_nan=False,
+        ),
         flush=True,
     )
 

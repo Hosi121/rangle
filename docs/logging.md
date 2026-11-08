@@ -42,6 +42,8 @@ GoのAPI・CLI・ワーカーで、実行ログは標準の `log/slog` に統一
 
 PythonのML処理とDartのアプリでは、各言語のロガーを使い、サーバーへ集約するログの属性名をこの方針に揃える。Go向けの独自ロガーラッパーや、全処理へのloggerの注入は必要になってから判断する。
 
+VertexのPython workerは `service="rangle-trainer"`・`severity`・`event` を含むJSONをstdoutへ出す。開始・完了はアプリの `job_id`、学習途中はiteration・loss・Gaussian数・経過秒を記録する。実行全体はCloud LoggingのVertex job IDで絞り込み、Goの `provider_name` と対応させる。画像・モデル・入力本文はログへ埋め込まず、結果ファイルと分ける。
+
 クラウドでの収集・保持期間・権限はIaCの運用設計で定める。Cloud Loggingへ接続する際は、JSONの収集とseverity・traceへの対応づけを確認する。現在のJSON出力だけで監視やトレース連携まで実装済みとは扱わない。
 
 参照: [Go log/slog](https://pkg.go.dev/log/slog)、[Cloud Loggingの構造化ログ](https://docs.cloud.google.com/logging/docs/structured-logging)。
