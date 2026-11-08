@@ -54,7 +54,7 @@ fetch() {
     --retry 2 --retry-delay 1 --retry-all-errors \
     --output "$work/$2" "$base$1"
 }
-fetch /healthz health
+fetch /health health
 fetch / landing
 fetch /demo/ demo
 fetch '/api/v1/clips?limit=1' api
@@ -68,7 +68,7 @@ from urllib.parse import urlsplit
 work = Path(sys.argv[1])
 expected_media = urlsplit(sys.argv[2])
 if work.joinpath('health').read_bytes() != b'ok\n':
-    raise SystemExit('healthz did not return the application health contract.')
+    raise SystemExit('health did not return the application health contract.')
 if 'rangle' not in work.joinpath('landing').read_text().lower():
     raise SystemExit('Product landing page is missing.')
 class Demo(HTMLParser):

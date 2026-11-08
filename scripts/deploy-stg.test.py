@@ -31,7 +31,7 @@ if name == 'curl':
         sys.exit(22)
     if os.environ.get('FAIL_CANONICAL_TLS') and url.startswith('https://app.replay.example.test'):
         sys.exit(60)
-    if '/healthz' in url:
+    if '/health' in url:
         body = 'ok\n'
     elif '/api/' in url:
         body = json.dumps({'clips': [{'id': 'vru', 'revision': 'v1', 'title': 'VRU', 'sport': 'basketball',
@@ -104,8 +104,8 @@ class Deployment(unittest.TestCase):
         self.assertEqual(sum(call[1:4] == ['run', 'services', 'update'] for call in calls), 1)
         self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
         probed_urls = [call[-1] for call in calls if call[0] == 'curl']
-        self.assertIn('https://rangle-stg-test.run.app/healthz', probed_urls)
-        self.assertIn('https://app.replay.example.test/healthz', probed_urls)
+        self.assertIn('https://rangle-stg-test.run.app/health', probed_urls)
+        self.assertIn('https://app.replay.example.test/health', probed_urls)
 
     def test_candidate_failure_keeps_previous_traffic(self):
         result, calls = self.run_case({'FAIL_CANDIDATE': '1'})

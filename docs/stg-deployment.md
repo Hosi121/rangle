@@ -63,6 +63,8 @@ JPY30000 は日本銀行2026-11-06中心相場157.69円/USDで参考約190ドル
 
 ## 検証と到達点
 
+外部の疎通確認は `/health` を使う。Cloud Run は末尾が `z` の一部pathを予約しており、`/healthz` はコンテナへ届く前に404になる。既存の内部startup probe向けに `/healthz` も維持する。[Cloud Runの既知事項](https://docs.cloud.google.com/run/docs/known-issues#reserved-url-paths)
+
 ローカルでは fmt、init `-backend=false`、validate、mock provider の3 plan（domain未定、domain確定＋media/budget、domain確定＋app）と rendered Workflow YAML を確認する。serverless NEG は Compute health check / backend timeout を設定せず、アプリ startup probe は `/healthz`。実 Google API の compiler、IAM 実効、TLS、Range/CORS/hash、quota・費用・停止完了は別の実環境確認で判断する。特に、期限・予算到達時の破壊的な削除分岐とその実 IAM は未検証で、無断の停止 drill は実行していない。
 
 既存 foundation の一部は先行適用済み。2026-11-08 の実配備では、専用 static IPv4、CDN backend bucket と private origin IAM、Scheduler/Workflow を適用済み。Workflow compiler と guard SA の Pub/Sub pull は実行成功し、期限前の結果 `stopped=false / reason=not_due` を確認した。GCS PAP/UBLA と public IAM 不在、cache-fill viewer、TTL86400秒、project 全 service の JPY30000 budget と通知先もAPIで確認した。
