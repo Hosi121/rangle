@@ -7,6 +7,15 @@ resource "google_project_service" "generation" {
   service            = "aiplatform.googleapis.com"
   disable_on_destroy = false
 }
+# Provision this Google-managed identity with Service Usage before enabling the
+# application. Explicit identity generation does not grant its service role.
+resource "google_project_iam_member" "generation_service_agent" {
+  count      = local.generation_enabled ? 1 : 0
+  project    = var.project_id
+  role       = "roles/aiplatform.serviceAgent"
+  member     = "serviceAccount:service-${var.project_number}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+  depends_on = [google_project_service.generation]
+}
 resource "google_service_account" "trainer" {
   count        = local.generation_enabled ? 1 : 0
   project      = var.project_id

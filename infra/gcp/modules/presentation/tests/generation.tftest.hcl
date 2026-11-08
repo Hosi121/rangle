@@ -17,7 +17,7 @@ variables {
 run "generation_is_disabled_for_existing_application" {
   command = plan
   assert {
-    condition     = length(google_project_service.generation) == 0 && length(google_service_account.trainer) == 0 && length(google_project_iam_member.generation_runtime) == 0 && length(google_project_iam_member.generation_guard) == 0 && output.deployment.generation == null
+    condition     = length(google_project_service.generation) == 0 && length(google_service_account.trainer) == 0 && length(google_project_iam_member.generation_runtime) == 0 && length(google_project_iam_member.generation_guard) == 0 && length(google_project_iam_member.generation_service_agent) == 0 && output.deployment.generation == null
     error_message = "An existing application must gain no Vertex API changes, trainer or generation permissions."
   }
   assert {
@@ -40,6 +40,10 @@ run "generation_uses_private_config_and_separate_trainer" {
     error_message = "Use the dedicated trainer through the one immutable, readonly-mounted generation config flag."
   }
   assert {
+    condition     = length(google_project_iam_member.generation_service_agent) == 1 && google_project_iam_member.generation_service_agent[0].project == "rangle-example" && google_project_iam_member.generation_service_agent[0].role == "roles/aiplatform.serviceAgent" && google_project_iam_member.generation_service_agent[0].member == "serviceAccount:service-123456789012@gcp-sa-aiplatform.iam.gserviceaccount.com"
+    error_message = "Grant the official service-agent role only to this project's Google-managed Vertex principal."
+  }
+  assert {
     condition     = google_project_iam_custom_role.generation_runtime[0].permissions == toset(["aiplatform.customJobs.create", "aiplatform.customJobs.get", "aiplatform.customJobs.list", "aiplatform.customJobs.cancel"]) && google_project_iam_custom_role.generation_guard[0].permissions == toset(["aiplatform.customJobs.list", "aiplatform.customJobs.cancel"]) && strcontains(google_project_iam_member.generation_runtime[0].condition[0].expression, "2026-11-14T15:00:00Z")
     error_message = "Separate deadline-bound job submission from the guard's two-operation cancellation role."
   }
@@ -58,6 +62,14 @@ run "generation_uses_private_config_and_separate_trainer" {
   assert {
     condition     = one([for step in yamldecode(google_workflows_workflow.guard.source_contents).scan_owned_generation_jobs.steps : step.list_jobs if can(step.list_jobs)]).args.query.filter == "labels.application=\"rangle\" AND labels.environment=\"presentation-stg\" AND labels.rangle_job:*" && strcontains(google_workflows_workflow.guard.source_contents, "^[0-9a-f]{32}$") && strcontains(google_workflows_workflow.guard.source_contents, "^projects/(rangle-example|123456789012)/locations/asia-northeast1/customJobs/") && strcontains(google_workflows_workflow.guard.source_contents, "nextPageToken") && strcontains(google_workflows_workflow.guard.source_contents, "sys.now() + 300")
     error_message = "Guard must paginate the exact environment, recheck owned names/labels, and stop polling within a finite window."
+  }
+  assert {
+    condition     = alltrue([for expression in regexall("\\$\\{[^\\n]*\\}", google_workflows_workflow.guard.source_contents) : length(expression) <= 400]) && length(regexall("\\$\\{[^\\n]*\\}", google_workflows_workflow.guard.source_contents)) == length(regexall("\\$\\{", google_workflows_workflow.guard.source_contents))
+    error_message = "Every rendered Workflow expression, including its delimiters, must fit the compiler's 400-character limit."
+  }
+  assert {
+    condition     = one([for assignment in one([for step in yamldecode(google_workflows_workflow.guard.source_contents).scan_owned_generation_jobs.steps : step.initialize if can(step.initialize)]).assign : assignment.empty_labels if can(assignment.empty_labels)]) == {} && strcontains(google_workflows_workflow.guard.source_contents, "default(map.get(job, \"labels\"), empty_labels)")
+    error_message = "Missing job labels must fall back to a native empty map, never the previous job's labels or a map literal inside an expression."
   }
 }
 run "reject_unversioned_generation_config" {
