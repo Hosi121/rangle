@@ -55,8 +55,7 @@ resource "google_project_iam_custom_role" "community" {
   depends_on = [google_project_service.community]
 }
 
-# Firestore documents use a project allow policy with a database condition;
-# there is no invented per-database IAM resource or unconditional data grant.
+# Firestore database access uses a conditioned project allow policy.
 # https://docs.cloud.google.com/firestore/native/docs/manage-databases#configure_per-database_access_permissions
 resource "google_project_iam_member" "community_runtime" {
   count   = local.community_enabled ? 1 : 0
