@@ -9,6 +9,9 @@ import 'data/clip_repository.dart';
 import 'community/community_api.dart';
 import 'community/account_controller.dart';
 import 'community/account_dialog.dart';
+import 'generation/generation_api.dart';
+import 'generation/generation_screen.dart';
+import 'generation/open_result.dart';
 import 'sharing/share_clip.dart';
 import 'widgets/search_dialog.dart';
 import 'models/clip.dart';
@@ -24,6 +27,8 @@ class ClipFeedScreen extends StatefulWidget {
     required this.viewerFactory,
     required this.sceneFactory,
     this.community,
+    this.generation,
+    this.initialGeneration = false,
     this.initialClipId,
     this.shareAction = shareClip,
     super.key,
@@ -32,6 +37,8 @@ class ClipFeedScreen extends StatefulWidget {
   final ViewerFactory viewerFactory;
   final ViewerFactory sceneFactory;
   final CommunityApi? community;
+  final GenerationApi? generation;
+  final bool initialGeneration;
   final String? initialClipId;
   final ClipShareAction shareAction;
 
@@ -43,6 +50,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   late Future<List<Clip>> _clips;
   AccountController? _account;
   String _query = '', _tag = '';
+  bool _generationOpen = false;
 
   @override
   void initState() {
@@ -52,6 +60,35 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
       _account = AccountController(widget.community!);
       unawaited(_account!.initialize());
     }
+    if (widget.initialGeneration) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_openGeneration());
+      });
+    }
+  }
+
+  Future<void> _openGeneration() async {
+    if (_generationOpen) return;
+    setState(() => _generationOpen = true);
+    final result = await Navigator.of(context).push<Uri>(
+      MaterialPageRoute(
+        builder: (context) => GenerationScreen(
+          account: _account,
+          api: widget.generation,
+          onOpenResult: (uri) {
+            if (!openGeneratedViewer(uri)) Navigator.pop(context, uri);
+          },
+        ),
+      ),
+    );
+    if (!mounted) return;
+    setState(() {
+      _generationOpen = false;
+      if (result != null) {
+        _query = _tag = '';
+        _clips = widget.repository.load(clipId: result.queryParameters['clip']);
+      }
+    });
   }
 
   @override
@@ -102,71 +139,75 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: Colors.black,
-    body: SafeArea(
-      child: FutureBuilder<List<Clip>>(
-        future: _clips,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const ViewerMessage(
-              icon: Icons.view_agenda_outlined,
-              title: 'ハイライトを読み込んでいます',
-              description: 'しばらくお待ちください。',
-            );
-          }
-          if (snapshot.hasError) {
-            return ViewerMessage(
-              icon: Icons.cloud_off_outlined,
-              title: 'ハイライトを読み込めませんでした',
-              description: '接続状況をご確認のうえ、もう一度お試しください。',
-              action: FilledButton.icon(
-                onPressed: _reload,
-                icon: const Icon(Icons.refresh),
-                label: const Text('再読み込み'),
-              ),
-            );
-          }
-          final clips = snapshot.data ?? const <Clip>[];
-          if (clips.isEmpty) {
-            if (_query.isNotEmpty || _tag.isNotEmpty) {
-              return ViewerMessage(
-                icon: Icons.search_off,
-                title: 'ハイライトが見つかりませんでした',
-                description: '別のキーワードやハッシュタグで検索できます。',
-                action: OutlinedButton(
-                  onPressed: _clearSearch,
-                  child: const Text('すべてのハイライトを見る'),
-                ),
-              );
-            }
-            return ViewerMessage(
-              icon: Icons.video_library_outlined,
-              title: '公開されたハイライトはまだありません',
-              description: '新しい映像が公開されると、ここに表示されます。',
-              action: OutlinedButton.icon(
-                onPressed: _reload,
-                icon: const Icon(Icons.refresh),
-                label: const Text('更新する'),
-              ),
-            );
-          }
-          return _HighlightFeed(
-            key: ObjectKey(_clips),
-            clips: clips,
-            viewerFactory: widget.viewerFactory,
-            sceneFactory: widget.sceneFactory,
-            account: _account,
-            shareAction: widget.shareAction,
-            onSearch: () => _search(clips.expand((clip) => clip.tags).toSet()),
-            onTag: _filterTag,
-            onClearSearch: _clearSearch,
-            filterLabel: _tag.isEmpty ? _query : '#$_tag',
-          );
-        },
-      ),
-    ),
-  );
+  Widget build(BuildContext context) => _generationOpen
+      ? const SizedBox.expand()
+      : Scaffold(
+          backgroundColor: Colors.black,
+          body: SafeArea(
+            child: FutureBuilder<List<Clip>>(
+              future: _clips,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const ViewerMessage(
+                    icon: Icons.view_agenda_outlined,
+                    title: 'ハイライトを読み込んでいます',
+                    description: 'しばらくお待ちください。',
+                  );
+                }
+                if (snapshot.hasError) {
+                  return ViewerMessage(
+                    icon: Icons.cloud_off_outlined,
+                    title: 'ハイライトを読み込めませんでした',
+                    description: '接続状況をご確認のうえ、もう一度お試しください。',
+                    action: FilledButton.icon(
+                      onPressed: _reload,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('再読み込み'),
+                    ),
+                  );
+                }
+                final clips = snapshot.data ?? const <Clip>[];
+                if (clips.isEmpty) {
+                  if (_query.isNotEmpty || _tag.isNotEmpty) {
+                    return ViewerMessage(
+                      icon: Icons.search_off,
+                      title: 'ハイライトが見つかりませんでした',
+                      description: '別のキーワードやハッシュタグで検索できます。',
+                      action: OutlinedButton(
+                        onPressed: _clearSearch,
+                        child: const Text('すべてのハイライトを見る'),
+                      ),
+                    );
+                  }
+                  return ViewerMessage(
+                    icon: Icons.video_library_outlined,
+                    title: '公開されたハイライトはまだありません',
+                    description: '新しい映像が公開されると、ここに表示されます。',
+                    action: OutlinedButton.icon(
+                      onPressed: _reload,
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('更新する'),
+                    ),
+                  );
+                }
+                return _HighlightFeed(
+                  key: ObjectKey(_clips),
+                  clips: clips,
+                  viewerFactory: widget.viewerFactory,
+                  sceneFactory: widget.sceneFactory,
+                  account: _account,
+                  shareAction: widget.shareAction,
+                  onSearch: () =>
+                      _search(clips.expand((clip) => clip.tags).toSet()),
+                  onTag: _filterTag,
+                  onClearSearch: _clearSearch,
+                  filterLabel: _tag.isEmpty ? _query : '#$_tag',
+                  onGenerate: _openGeneration,
+                );
+              },
+            ),
+          ),
+        );
 }
 
 class _MoveClipIntent extends Intent {
@@ -182,6 +223,7 @@ class _HighlightFeed extends StatefulWidget {
     required this.account,
     required this.shareAction,
     required this.onSearch,
+    required this.onGenerate,
     required this.onTag,
     required this.onClearSearch,
     required this.filterLabel,
@@ -192,7 +234,7 @@ class _HighlightFeed extends StatefulWidget {
   final ViewerFactory sceneFactory;
   final AccountController? account;
   final ClipShareAction shareAction;
-  final VoidCallback onSearch, onClearSearch;
+  final VoidCallback onSearch, onClearSearch, onGenerate;
   final ValueChanged<String> onTag;
   final String filterLabel;
 
@@ -314,6 +356,14 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                                       ],
                                     ),
                               ),
+                            ),
+                          ),
+                          PointerInterceptor(
+                            intercepting: _freeView,
+                            child: IconButton(
+                              tooltip: '3DGSを生成',
+                              onPressed: widget.onGenerate,
+                              icon: const Icon(Icons.add_box_outlined),
                             ),
                           ),
                           PointerInterceptor(

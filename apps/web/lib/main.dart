@@ -5,6 +5,7 @@ import 'app.dart';
 import 'data/api_clip_repository.dart';
 import 'data/clip_repository.dart';
 import 'community/community_api.dart';
+import 'generation/generation_api.dart';
 import 'sharing/share_clip.dart';
 import 'viewer/free_view_adapter.dart';
 
@@ -18,6 +19,7 @@ void main() {
             .resolve('./'),
       ),
       initialClipId: Uri.base.queryParameters['clip'],
+      initialGeneration: Uri.base.queryParameters['generate'] == '1',
       repository: apiUrl.isEmpty
           ? const DemoClipRepository(
               previewUrl: String.fromEnvironment('RANGLE_PREVIEW_URL'),
@@ -35,6 +37,8 @@ class RangleApp extends StatelessWidget {
     this.viewerFactory,
     this.sceneFactory,
     this.community,
+    this.generation,
+    this.initialGeneration = false,
     this.initialClipId,
     this.shareAction = shareClip,
   });
@@ -43,6 +47,8 @@ class RangleApp extends StatelessWidget {
   final ViewerFactory? viewerFactory;
   final ViewerFactory? sceneFactory;
   final CommunityApi? community;
+  final GenerationApi? generation;
+  final bool initialGeneration;
   final String? initialClipId;
   final ClipShareAction shareAction;
 
@@ -81,6 +87,8 @@ class RangleApp extends StatelessWidget {
       ),
       home: ClipFeedScreen(
         community: community,
+        generation: generation,
+        initialGeneration: initialGeneration,
         initialClipId: initialClipId,
         shareAction: shareAction,
         repository: repository,
