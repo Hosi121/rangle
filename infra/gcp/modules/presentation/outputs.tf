@@ -21,7 +21,13 @@ output "deployment" {
     media_mirror_bucket = google_storage_bucket.private["media"].name
     inputs_bucket       = google_storage_bucket.private["inputs"].name
     catalog_object      = var.application == null ? null : "snapshots/${var.application.catalog_sha256}.json"
-    deadline            = var.deadline
+    community_storage = local.community_enabled ? {
+      project_id  = var.project_id
+      database    = google_firestore_database.community[0].name
+      location    = google_firestore_database.community[0].location_id
+      session_ttl = "sessions.expires_at"
+    } : null
+    deadline = var.deadline
   }
 }
 output "budget_guard" {

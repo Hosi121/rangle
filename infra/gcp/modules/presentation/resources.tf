@@ -137,11 +137,14 @@ resource "google_cloud_run_v2_service" "app" {
     timeout                          = "30s"
     containers {
       image = var.application.image_digest
-      args = [
+      args = concat([
         "-listen", "0.0.0.0:8080", "-ui-root", "/app/web",
         "-catalog", "/mnt/catalog/snapshots/${var.application.catalog_sha256}.json",
         "-asset-origin", local.media_origin
-      ]
+        ], local.community_enabled ? [
+        "-firestore-project", var.project_id,
+        "-firestore-database", google_firestore_database.community[0].name
+      ] : [])
       ports { container_port = 8080 }
       resources {
         limits            = { cpu = "1", memory = "512Mi" }
@@ -180,7 +183,7 @@ resource "google_cloud_run_v2_service" "app" {
       error_message = "The presentation deadline has passed; do not recreate the stopped service."
     }
   }
-  depends_on = [google_storage_bucket_iam_member.catalog_reader, google_cloud_scheduler_job.guard]
+  depends_on = [google_storage_bucket_iam_member.catalog_reader, google_cloud_scheduler_job.guard, google_project_iam_member.community_runtime]
 }
 resource "google_cloud_run_v2_service_iam_member" "deployer" {
   count    = local.app_enabled ? 1 : 0

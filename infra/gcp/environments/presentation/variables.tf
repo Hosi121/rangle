@@ -53,9 +53,13 @@ variable "budget_display_name" {
 }
 variable "application" {
   description = "Null until a real catalog snapshot and OCI image have been published and verified."
-  type        = object({ image_digest = string, catalog_sha256 = string })
-  default     = null
-  nullable    = true
+  type = object({
+    image_digest      = string
+    catalog_sha256    = string
+    community_enabled = optional(bool, false)
+  })
+  default  = null
+  nullable = true
   validation {
     condition     = var.application == null ? true : can(regex("^[^@[:space:]]+@sha256:[0-9a-f]{64}$", var.application.image_digest)) && can(regex("^[0-9a-f]{64}$", var.application.catalog_sha256))
     error_message = "Use an immutable image digest and catalog content SHA256."
