@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../models/clip.dart';
+import '../community/account_controller.dart';
+import '../community/clip_actions.dart';
+import '../sharing/share_clip.dart';
 import '../viewer/viewer_adapter.dart';
 import 'preview_viewer.dart';
 
@@ -12,6 +15,9 @@ class ClipCard extends StatefulWidget {
     required this.sceneFactory,
     required this.onFreeViewChanged,
     this.onNext,
+    this.account,
+    this.onTag,
+    this.shareAction = shareClip,
     super.key,
   });
   final Clip clip;
@@ -20,6 +26,9 @@ class ClipCard extends StatefulWidget {
   final ViewerFactory sceneFactory;
   final ValueChanged<bool> onFreeViewChanged;
   final VoidCallback? onNext;
+  final AccountController? account;
+  final ValueChanged<String>? onTag;
+  final ClipShareAction shareAction;
 
   @override
   State<ClipCard> createState() => _ClipCardState();
@@ -181,6 +190,21 @@ class _ClipCardState extends State<ClipCard> {
               Text(clip.title, style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
               Text(clip.sport),
+              if (clip.tags.isNotEmpty)
+                Wrap(
+                  spacing: 8,
+                  children: clip.tags
+                      .map(
+                        (tag) => TextButton(
+                          onPressed: () {
+                            Navigator.pop(context);
+                            widget.onTag?.call(tag);
+                          },
+                          child: Text('#$tag'),
+                        ),
+                      )
+                      .toList(),
+                ),
               const SizedBox(height: 16),
               SelectableText(
                 clip.description,
@@ -222,6 +246,18 @@ class _ClipCardState extends State<ClipCard> {
                 color: Colors.black,
                 child: _ordinaryView(compact),
               ),
+            Positioned(
+              right: 8,
+              top: compact ? 64 : null,
+              bottom: compact ? null : constraints.maxHeight * .36,
+              child: ClipActions(
+                clip: clip,
+                active: active,
+                account: widget.account,
+                share: widget.shareAction,
+                compact: compact,
+              ),
+            ),
             Positioned(
               left: 16,
               right: 72,
@@ -267,6 +303,32 @@ class _ClipCardState extends State<ClipCard> {
                       ),
                     ),
                   ),
+                  if (!compact && clip.tags.isNotEmpty)
+                    Wrap(
+                      spacing: 4,
+                      children: clip.tags
+                          .take(2)
+                          .map(
+                            (tag) => TextButton(
+                              style: TextButton.styleFrom(
+                                minimumSize: const Size(48, 48),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                ),
+                                backgroundColor: Colors.black.withValues(
+                                  alpha: .55,
+                                ),
+                              ),
+                              onPressed: () => widget.onTag?.call(tag),
+                              child: Text(
+                                '#$tag',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          )
+                          .toList(),
+                    ),
                   const SizedBox(height: 8),
                   Row(
                     children: [

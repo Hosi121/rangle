@@ -4,12 +4,20 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'app.dart';
 import 'data/api_clip_repository.dart';
 import 'data/clip_repository.dart';
+import 'community/community_api.dart';
+import 'sharing/share_clip.dart';
 import 'viewer/free_view_adapter.dart';
 
 void main() {
   const apiUrl = String.fromEnvironment('RANGLE_API_URL');
   runApp(
     RangleApp(
+      community: CommunityApi(
+        endpoint: Uri.base
+            .resolve(apiUrl.isEmpty ? '/api/v1/' : apiUrl)
+            .resolve('./'),
+      ),
+      initialClipId: Uri.base.queryParameters['clip'],
       repository: apiUrl.isEmpty
           ? const DemoClipRepository(
               previewUrl: String.fromEnvironment('RANGLE_PREVIEW_URL'),
@@ -26,11 +34,17 @@ class RangleApp extends StatelessWidget {
     super.key,
     this.viewerFactory,
     this.sceneFactory,
+    this.community,
+    this.initialClipId,
+    this.shareAction = shareClip,
   });
 
   final ClipRepository repository;
   final ViewerFactory? viewerFactory;
   final ViewerFactory? sceneFactory;
+  final CommunityApi? community;
+  final String? initialClipId;
+  final ClipShareAction shareAction;
 
   @override
   Widget build(BuildContext context) {
@@ -66,6 +80,9 @@ class RangleApp extends StatelessWidget {
         ),
       ),
       home: ClipFeedScreen(
+        community: community,
+        initialClipId: initialClipId,
+        shareAction: shareAction,
         repository: repository,
         viewerFactory: viewerFactory ?? VideoPreviewAdapter.new,
         sceneFactory: sceneFactory ?? createFreeViewAdapter,
