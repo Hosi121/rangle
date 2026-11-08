@@ -56,9 +56,11 @@ go run ./cmd/rangle-server \
   -scene-id basketball
 ```
 
-`http://127.0.0.1:4174/` がUI、`/samples/basketball/scene.json` がsceneです。このURLを `RANGLE_SCENE_URL` に指定したビルドを利用できます。sceneを使わない場合は `-scene-dir` と `-scene-id` の両方を省きます。`/healthz` は起動確認用です。終了はCtrl+Cで、処理中のHTTP要求を最大5秒待って停止します。
+`http://127.0.0.1:4174/` が製品入口、`http://127.0.0.1:4174/demo/` がデモUI、`/samples/basketball/scene.json` がsceneです。`/demo` はクエリを保持して `/demo/` へリダイレクトします。sceneのURLを `RANGLE_SCENE_URL` に指定したビルドを利用できます。sceneを使わない場合は `-scene-dir` と `-scene-id` の両方を省きます。`/healthz` は起動確認用です。終了はCtrl+Cで、処理中のHTTP要求を最大5秒待って停止します。
 
-UIは `index.html` を必須とし、隠しファイル、`*.local.md`、`*.private.md`、ディレクトリ一覧を公開しません。`/samples/` はUI内の同名ディレクトリから独立し、指定sceneのmanifestとそこに列挙された相対 `.splat` だけを配信します。root外へ参照を解決させず、大きなframeは全量をRAMへコピーせずストリーミングします。
+UI rootは `index.html` と製品入口の `landing.html` を必須とします。通常のFlutterビルドが両方を含むため、追加のpost-build処理は不要です。Flutterの静的ファイルは `/demo/` 配下に限定し、旧 `/main.dart.js`・`/viewer/*`・UI用 `/assets/*` 等のroot側aliasは公開しません。カタログで宣言されたローカル動画（webm/mp4/m4v/ogv）がUI root内にある場合だけ、既存のroot側URLを維持します。`/api/v1/*`・`/manifests/*`・版付き `/assets/{clip}/{revision}/*` は従来どおりです。
+
+隠しファイル、`*.local.md`、`*.private.md`、ディレクトリ一覧を公開しません。`/samples/` はUI内の同名ディレクトリから独立し、指定sceneのmanifestとそこに列挙された相対 `.splat` だけを配信します。root外へ参照を解決させず、大きなframeは全量をRAMへコピーせずストリーミングします。
 
 公開対象は起動時に固定します。UIの再ビルド、ファイルの置換、manifestの変更はサーバーを再起動して反映します。ローカルの可変ファイルなので `immutable` は付けず、`no-cache` と `Last-Modified` で再検証します。HEAD・Range・条件付きGETに対応し、エラーは `no-store` です。例のframe名は自身のmanifestに合わせてください。
 
