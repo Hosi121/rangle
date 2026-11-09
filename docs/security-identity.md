@@ -38,6 +38,24 @@ IAM Recommender の提案だけから必要権限を決めていない。Google 
 への影響を評価してから既定 SA の Editor を整理するよう案内している。
 [Compute Engine のサービスアカウント変更](https://docs.cloud.google.com/compute/docs/instances/change-service-account)
 
+## 適用結果（2026-11-10、private generation manager 追加前）
+
+変更担当者が live 環境で次の変更と検証を行った。
+
+- project の無条件 `roles/editor` から既定 Compute SA の member だけを削除した。
+  代替ロールは付けず、人の Editor / Owner や別の identity の binding は維持した。
+- `rangle-stg-113704194486-{catalog,inputs,media,tfstate}` の 4 bucket から、
+  `projectViewer:comin-up` に対する `roles/storage.legacyBucketReader` と
+  `roles/storage.legacyObjectReader` の 2 grant ずつを削除した。projectEditor /
+  projectOwner の convenience owner と専用 runtime / operator の権限は維持した。
+- 下記 checker を専用 7 SA・既定 Compute SA・4 bucket に実行し、23/23 項目合格、
+  終了 code 0 を確認した。basic role 不在、runtime identity、LB 限定 ingress、
+  8 identity のユーザー管理 key 不在、各 bucket の所属・PAP・uniform access・
+  viewer convenience grant / public IAM grant 不在の検証である。
+
+この記録は private generation manager と専用 database の追加前の結果であり、
+それらの追加後の権限分離や実データへの拒否を検証した記録ではない。
+
 ## 変更範囲と戻し方
 
 この調査に基づく最小の変更は、project IAM の無条件 `roles/editor` binding から
@@ -46,8 +64,8 @@ IAM Recommender の提案だけから必要権限を決めていない。Google 
 を予防的には付けない。人の Editor / Owner、Google 管理 service agent、専用
 runtime / trainer / guard の権限、既定 SA 自体の有効状態を維持する。
 
-変更担当者は、直前の IAM policy を非公開の作業記録へ保存し、対象 member と条件が
-一致することを再確認したうえで、次の 1 member の変更を行う。
+対象の 1 member を削除する command は次のとおり。再適用や復旧時も、直前の IAM
+policy を非公開の作業記録へ保存し、対象 member と条件の一致を確認する。
 
 ```bash
 gcloud projects remove-iam-policy-binding comin-up \
@@ -70,6 +88,62 @@ Artifact Registry 読み取りは対象 repository へ付与できる。Vertex p
 `aiplatform.*` permission が必要になった場合も、その permission の対応 IAM scope
 を確認し、未対応の resource-level binding を仮定しない。
 [Vertex pipelines の identity と granular permissions](https://docs.cloud.google.com/vertex-ai/docs/pipelines/configure-project)
+
+## IAM evaluator の確認範囲
+
+2026-11-10 に runtime → Vertex create、runtime → generation database の
+`datastore.entities.get`、manager → community database の同 permission を、
+Policy Troubleshooter v3 へ現在時刻の condition context を付けて問い合わせた。
+3 件とも HTTP 403、`PERMISSION_DENIED`、reason `SERVICE_DISABLED`、
+service `policytroubleshooter.googleapis.com`、consumer `projects/comin-up` だった。
+これは evaluator を利用できない結果であり、対象 SA が拒否された証拠ではない。
+Cloud Asset API も有効 API 一覧に含まれず、Policy Analyzer も未実行である。
+同 Analyzer は allow policy の分析で、反映が best effort のため、切替直後の空結果を
+拒否の証拠にしない。
+[Policy Analyzer の前提と反映の制約](https://docs.cloud.google.com/policy-intelligence/docs/analyze-iam-policies)
+API 有効化、IAM 付与、SA impersonation、アプリデータ access は行っていない。
+
+以下は Troubleshooter API が既に有効で、必要な policy / custom role の閲覧権限がある
+場合の再確認用。`CHECK_TIME` は確認時点の UTC RFC3339 時刻を指定する。IAM の global
+API には `--region` がなく、Vertex create の project-level permission を評価する。
+Tokyo の API 呼出しや resource 作成は発生しない。
+
+```bash
+gcloud policy-intelligence troubleshoot-policy iam \
+  //cloudresourcemanager.googleapis.com/projects/comin-up \
+  --principal-email=rangle-stg-runtime@comin-up.iam.gserviceaccount.com \
+  --permission=aiplatform.customJobs.create --request-time="$CHECK_TIME" \
+  --account=takuyakataiwa@gmail.com --project=comin-up --billing-project=comin-up \
+  --format='json(overallAccessState,allowPolicyExplanation.allowAccessState,denyPolicyExplanation.denyAccessState)'
+
+check_database_iam() {
+  gcloud policy-intelligence troubleshoot-policy iam \
+    "//firestore.googleapis.com/projects/comin-up/databases/$2" \
+    --principal-email="$1" --permission="${3:-datastore.entities.get}" \
+    --resource-name="projects/comin-up/databases/$2" \
+    --resource-service=firestore.googleapis.com \
+    --resource-type=firestore.googleapis.com/Database --request-time="$CHECK_TIME" \
+    --account=takuyakataiwa@gmail.com --project=comin-up --billing-project=comin-up \
+    --format='json(overallAccessState,allowPolicyExplanation.allowAccessState,denyPolicyExplanation.denyAccessState)'
+}
+check_database_iam rangle-stg-runtime@comin-up.iam.gserviceaccount.com rangle-stg-generation
+check_database_iam rangle-stg-generation@comin-up.iam.gserviceaccount.com rangle-stg
+```
+
+Firestore の `--resource-name` は既存 condition と同じ相対名で、`//firestore...` の
+full resource name と区別する。他の権限も確認する場合は helper の第 3 引数へ
+`datastore.entities.list`、`datastore.entities.create`、`datastore.entities.update`、
+`datastore.entities.delete`、`datastore.databases.get` を個別に渡す。
+正の対照は runtime → community、manager → generation の組合せ。
+
+`overallAccessState=CANNOT_ACCESS` が evaluator の拒否判定であり、`UNKNOWN_INFO` /
+`UNKNOWN_CONDITIONAL` や HTTP 403 は拒否の証明に使わない。判定は現在の policy と
+指定 context に対する v3 の IAM allow / deny 評価で、実データの read/write や API 全体の挙動の確認とは
+分けて報告する。`testIamPermissions` は呼出し元の権限を返すため、operator で実行しても
+対象 SA の拒否は確認できない。
+[testIamPermissions の呼出し元 scope](https://docs.cloud.google.com/resource-manager/reference/rest/v1/projects/testIamPermissions)
+[Troubleshooter の必要権限と条件 context](https://docs.cloud.google.com/policy-intelligence/docs/troubleshoot-access)、
+[v3 の判定値](https://docs.cloud.google.com/policy-intelligence/docs/reference/policytroubleshooter/rest/v3/iam/troubleshoot)
 
 ## 継続検証
 
