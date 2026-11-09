@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"time"
 
@@ -67,5 +68,12 @@ func newGenerationManager(cfg config, logger *slog.Logger) (app *application, er
 	}
 	service.ReservedClipID = func(id string) bool { return reserved[id] }
 	app.Handler, err = generation.NewManager(service, managerConfig)
+	if err == nil && cfg.ServingRevision != "" {
+		next := app.Handler
+		app.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Rangle-Revision", cfg.ServingRevision)
+			next.ServeHTTP(w, r)
+		})
+	}
 	return app, err
 }

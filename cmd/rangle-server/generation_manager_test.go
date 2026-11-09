@@ -4,13 +4,57 @@ import (
 	"encoding/json"
 	"io"
 	"log/slog"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Hosi121/rangle/internal/generation"
 )
+
+func TestManagerReportsServingRevisionOnHealthAndRejectedBusinessPaths(t *testing.T) {
+	settings := generation.Config{Project: "comin-up", ProjectNumber: "113704194486", Database: "rangle-stg-generation",
+		Image:          "asia-northeast1-docker.pkg.dev/comin-up/rangle-stg/trainer@sha256:" + strings.Repeat("a", 64),
+		ServiceAccount: "rangle-stg-trainer@comin-up.iam.gserviceaccount.com", OutputBucket: "rangle-stg-media", MediaOrigin: "https://media.rangle.test",
+		Deadline: time.Date(2026, 11, 14, 15, 0, 0, 0, time.UTC), Attempts: 10,
+		Presets: []generation.Preset{{ID: "reviewed", Title: "Reviewed frame", Sport: "basketball", Description: "Reviewed sample", InputURI: "gs://inputs/datasets/sample.npz", InputSHA256: strings.Repeat("b", 64), PreviewURL: "https://media.rangle.test/preview.webm", Source: "https://source.rangle.test/sample", License: "CC BY 4.0"}},
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "generation.json")
+	payload, _ := json.Marshal(settings)
+	if err := os.WriteFile(path, payload, 0600); err != nil {
+		t.Fatal(err)
+	}
+	catalogPath := filepath.Join(root, "catalog.json")
+	if err := os.WriteFile(catalogPath, []byte(`{"version":1,"clips":[]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config{GenerationManager: true, GenerationFile: path, CatalogFile: catalogPath,
+		GenerationAudience: "https://manager.rangle.test", GenerationCaller: "rangle-stg-runtime@comin-up.iam.gserviceaccount.com",
+		ServingRevision: "rangle-stg-generation-00003-abc", GenerationService: &generation.Service{
+			Config: settings, Store: struct{ generation.Store }{}, Provider: struct{ generation.Provider }{},
+		}}
+	app, err := newApplication(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer app.Close()
+	for path, code := range map[string]int{"/health": 200, "/healthz": 200, "/api/v1/generation/jobs": 401, "/internal/generation/public-clips": 401} {
+		request := httptest.NewRequest("GET", "https://manager.rangle.test"+path, nil)
+		request.Header.Set("Authorization", "Bearer deployer-token")
+		request.Header.Set("X-Rangle-Revision", "forged")
+		response := httptest.NewRecorder()
+		app.ServeHTTP(response, request)
+		if response.Code != code || response.Header().Get("X-Rangle-Revision") != cfg.ServingRevision {
+			t.Fatal("manager health/revision or business authentication changed", path, response.Code, response.Body.String())
+		}
+		if path == "/health" && response.Body.String() != "ok\n" {
+			t.Fatal("manager health returned a platform response")
+		}
+	}
+}
 
 func TestPublicRemoteModeRejectsLocalGenerationAndSharedDatabase(t *testing.T) {
 	for _, tc := range []struct {

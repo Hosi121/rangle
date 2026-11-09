@@ -65,6 +65,9 @@ func TestManagerIndependentlyVerifiesCallerBeforeTrustingOwner(t *testing.T) {
 		{name: "scheduler on runtime API", token: "signed", mutate: func(p *idtoken.Payload) {
 			p.Claims["email"] = "rangle-stg-generation-sync@comin-up.iam.gserviceaccount.com"
 		}},
+		{name: "deployer on runtime API", token: "signed", mutate: func(p *idtoken.Payload) {
+			p.Claims["email"] = "rangle-stg-deploy@comin-up.iam.gserviceaccount.com"
+		}},
 		{name: "unverified email", token: "signed", mutate: func(p *idtoken.Payload) { p.Claims["email_verified"] = false }},
 		{name: "string email verification", token: "signed", mutate: func(p *idtoken.Payload) { p.Claims["email_verified"] = "true" }},
 		{name: "foreign issuer", token: "signed", mutate: func(p *idtoken.Payload) { p.Issuer = "https://evil.invalid" }},

@@ -17,6 +17,7 @@ from pathlib import Path
 root = Path(os.environ['STUB_STATE'])
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
+assert 'GENERATION_MANAGER_ID_TOKEN' not in os.environ, 'manager ID token leaked into a subprocess environment'
 if name == 'sleep':
     sys.exit(0)
 if name == 'date':
@@ -32,6 +33,22 @@ with (root / 'calls').open('a') as f:
     f.write(json.dumps([name] + args) + '\n')
 if name == 'curl':
     url = args[-1]
+    if url.startswith('https://ci-manager-candidate---rangle-stg-generation-'):
+        assert args[args.index('--header') + 1] == '@-'
+        assert sys.stdin.read() == 'Authorization: Bearer DO_NOT_EXPORT_MANAGER_ID_TOKEN\n'
+        assert url.endswith('/health')
+        if os.environ.get('FAIL_MANAGER_HEALTH'):
+            sys.exit(22)
+        revision = 'rangle-stg-generation-00003-abc'
+        if os.environ.get('BAD_MANAGER_REVISION_HEADER'):
+            revision = 'rangle-stg-generation-old-a'
+        header = 'HTTP/2 200\r\n'
+        if not os.environ.get('MISSING_MANAGER_REVISION_HEADER'):
+            header += 'X-Rangle-Revision: ' + revision + '\r\n'
+        Path(args[args.index('--dump-header') + 1]).write_text(header + '\r\n')
+        Path(args[args.index('--output') + 1]).write_text('ok\n')
+        print('204' if os.environ.get('BAD_MANAGER_STATUS') else '200', end='')
+        sys.exit(0)
     candidate = 'X-Rangle-Candidate: ci-candidate' in args
     if '--write-out' in args:
         assert url.endswith('.run.app/health')
@@ -100,11 +117,93 @@ if name == 'curl':
 assert name == 'gcloud'
 assert '--project=comin-up' in args and '--region=asia-northeast1' in args
 image_base = 'asia-northeast1-docker.pkg.dev/comin-up/rangle-stg/server'
+manager_service = 'rangle-stg-generation'
+manager_url = 'https://rangle-stg-generation-113704194486.asia-northeast1.run.app'
+manager_revision = manager_service + '-00003-abc'
+if args[:3] == ['run', 'revisions', 'describe'] and args[3].startswith(manager_service + '-') or args[:2] == ['run', 'services'] and args[3] == manager_service:
+    if os.environ.get('MISSING_MANAGER'):
+        sys.exit(1)
+    manager_args = ['-listen', '0.0.0.0:8080', '-generation-manager',
+        '-catalog', '/mnt/catalog/snapshots/' + 'd' * 64 + '.json',
+        '-generation-config', '/mnt/catalog/generation/' + 'e' * 64 + '.json',
+        '-generation-manager-audience', manager_url,
+        '-generation-caller-service-account', 'rangle-stg-runtime@comin-up.iam.gserviceaccount.com',
+        '-generation-sync-audience', manager_url]
+    if os.environ.get('BAD_MANAGER_ARGS'):
+        manager_args += ['-firestore-project', 'comin-up']
+    if os.environ.get('BAD_MANAGER_CATALOG'):
+        manager_args[4] = '/mnt/catalog/snapshots/' + 'f' * 64 + '.json'
+    if os.environ.get('BAD_MANAGER_AUDIENCE'):
+        manager_args[8] = 'https://unrelated.run.app'
+    spec = {'serviceAccountName': 'rangle-stg-generation@comin-up.iam.gserviceaccount.com', 'containers': [
+        {'image': image_base + '@sha256:' + 'a' * 64, 'args': manager_args}]}
+    if os.environ.get('BAD_MANAGER_IDENTITY'):
+        spec['serviceAccountName'] = 'rangle-stg-runtime@comin-up.iam.gserviceaccount.com'
+    if os.environ.get('BAD_MANAGER_IMAGE'):
+        spec['containers'][0]['image'] = image_base + ':latest'
+    if os.environ.get('BAD_MANAGER_ENV'):
+        spec['containers'][0]['env'] = [{'name': 'SECRET', 'value': 'DO_NOT_EXPORT_MANAGER_ENV'}]
+    if args[:3] == ['run', 'revisions', 'describe']:
+        revision = args[3]
+        if revision == manager_revision:
+            spec['containers'][0]['image'] = os.environ['STG_IMAGE']
+            if os.environ.get('DRIFT_MANAGER_ACTUAL_ARGS'):
+                spec['containers'][0]['args'] = manager_args + ['-unexpected', 'changed']
+        else:
+            assert revision in (manager_service + '-old-a', manager_service + '-old-b')
+        print(json.dumps({'metadata': {'name': revision}, 'spec': spec}))
+        sys.exit(0)
+    if args[2] == 'get-iam-policy':
+        members = ['serviceAccount:' + account + '@comin-up.iam.gserviceaccount.com' for account in
+            ('rangle-stg-runtime', 'rangle-stg-generation-sync', 'rangle-stg-deploy')]
+        if os.environ.get('PUBLIC_MANAGER_IAM'):
+            members.append('allUsers')
+        print(json.dumps({'bindings': [{'role': 'roles/run.invoker', 'members': members}]}))
+        sys.exit(0)
+    status = {'url': manager_url, 'latestReadyRevisionName': manager_service + '-old-a',
+        'traffic': [{'revisionName': manager_service + '-old-a', 'percent': 80},
+                    {'revisionName': manager_service + '-old-b', 'percent': 20}]}
+    if (root / 'manager-deployed').exists():
+        status['latestCreatedRevisionName'] = manager_revision
+        spec['containers'][0]['image'] = os.environ['STG_IMAGE']
+    if (root / 'manager-promoted').exists():
+        status['traffic'] = [{'revisionName': manager_revision, 'percent': 100}]
+    if (root / 'manager-tagged').exists():
+        status['traffic'].append({'tag': 'ci-manager-candidate', 'revisionName': manager_revision,
+            'url': manager_url.replace('https://', 'https://ci-manager-candidate---')})
+    doc = {'metadata': {'name': manager_service, 'annotations': {'run.googleapis.com/ingress': 'all',
+            'private': 'DO_NOT_EXPORT_MANAGER_METADATA'}}, 'status': status, 'spec': {'template': {'spec': spec}}}
+    if os.environ.get('DISABLED_MANAGER_IAM'):
+        doc['metadata']['annotations']['run.googleapis.com/invoker-iam-disabled'] = 'true'
+    if args[2] == 'update':
+        assert '--no-traffic' in args
+        assert not any(x.startswith(('--args', '--set-env-vars', '--service-account', '--clear-', '--allow-unauthenticated')) for x in args)
+        (root / 'manager-deployed').touch()
+        status['latestCreatedRevisionName'] = manager_revision
+        spec['containers'][0]['image'] = os.environ['STG_IMAGE']
+    elif args[2] == 'update-traffic':
+        if '--update-tags=ci-manager-candidate=' + manager_revision in args:
+            (root / 'manager-tagged').touch()
+        if '--to-revisions=' + manager_revision + '=100' in args:
+            (root / 'manager-promoted').touch()
+            if os.environ.get('FAIL_MANAGER_PROMOTION'):
+                sys.exit(1)
+        if '--to-revisions=rangle-stg-generation-old-a=80,rangle-stg-generation-old-b=20' in args:
+            (root / 'manager-promoted').unlink(missing_ok=True)
+        if '--remove-tags=ci-manager-candidate' in args:
+            (root / 'manager-tagged').unlink(missing_ok=True)
+            if os.environ.get('FAIL_MANAGER_CLEANUP'):
+                sys.exit(1)
+    print(json.dumps(doc))
+    sys.exit(0)
 target_args = ['-ui-root', '/app/web', '-catalog', '/mnt/catalog/snapshots/' + 'd' * 64 + '.json',
                '-asset-origin', 'https://media.replay.example.test',
                '-private-input', 'gs://DO_NOT_EXPORT_INPUT/private']
 if os.environ.get('WITH_GENERATION'):
     target_args += ['-generation-config', '/mnt/catalog/generation/' + 'e' * 64 + '.json']
+if os.environ.get('WITH_REMOTE_GENERATION'):
+    target_args += ['-generation-manager-url', manager_url,
+                   '-firestore-project', 'comin-up', '-firestore-database', 'rangle-stg']
 secret_env = [{'name': 'PRIVATE_TOKEN', 'value': 'DO_NOT_EXPORT_TOKEN'}]
 if args[:3] == ['run', 'revisions', 'describe']:
     revision = args[3]
@@ -185,6 +284,8 @@ elif args[2] == 'update-traffic':
             sys.exit(1)
     if '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20' in args:
         (root / 'promoted').unlink(missing_ok=True)
+        if os.environ.get('FAIL_PUBLIC_ROLLBACK'):
+            sys.exit(1)
     if '--remove-tags=ci-candidate' in args:
         (root / 'tagged').unlink(missing_ok=True)
 print(json.dumps(status['traffic'] if args[2] == 'update-traffic' else doc))
@@ -213,6 +314,8 @@ class Deployment(unittest.TestCase):
                        GITHUB_STEP_SUMMARY=str(root / 'summary.md'),
                        STG_IMAGE='asia-northeast1-docker.pkg.dev/comin-up/rangle-stg/server@sha256:' + 'b' * 64)
             env.update(extra or {})
+            if env.get('WITH_REMOTE_GENERATION') and 'GENERATION_MANAGER_ID_TOKEN' not in (extra or {}):
+                env['GENERATION_MANAGER_ID_TOKEN'] = 'DO_NOT_EXPORT_MANAGER_ID_TOKEN'
             if env.get('BAD_SUMMARY'):
                 env['GITHUB_STEP_SUMMARY'] = str(root)
             invocation = (['bash', str(SCRIPT.with_name('check-deployment.sh')), 'https://ci-candidate---rangle-stg-test.run.app']
@@ -245,6 +348,99 @@ class Deployment(unittest.TestCase):
         probes = [call for call in calls if call[0] == 'curl' and '--dump-header' in call]
         self.assertTrue(all(call[-1].startswith('https://app.replay.example.test/') for call in probes))
         self.assertEqual(sum('X-Rangle-Candidate: ci-candidate' in call for call in probes), 5)
+
+    def test_remote_manager_is_authenticated_verified_and_promoted_before_public(self):
+        result, calls, receipt, summary = self.run_case({'WITH_REMOTE_GENERATION': '1'}, inspect=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-generation-00003-abc=100',
+                                             '--to-revisions=rangle-stg-00003-abc=100'])
+        updates = [call[4] for call in calls if call[1:4] == ['run', 'services', 'update']]
+        self.assertEqual(updates, ['rangle-stg-generation', 'rangle-stg'])
+        probes = [call for call in calls if call[0] == 'curl' and 'ci-manager-candidate---' in call[-1]]
+        self.assertEqual(len(probes), 1)
+        self.assertEqual(probes[0][probes[0].index('--header') + 1], '@-')
+        self.assertTrue(probes[0][-1].endswith('/health'))
+        self.assertTrue(any('--remove-tags=ci-manager-candidate' in call for call in calls))
+        manager = receipt['generation_manager']
+        self.assertEqual(manager['candidate']['revision'], 'rangle-stg-generation-00003-abc')
+        self.assertEqual(manager['candidate']['generation_config_sha256'], 'e' * 64)
+        self.assertEqual(manager['confirmed_traffic'], {'rangle-stg-generation-00003-abc': 100})
+        exported = json.dumps(receipt) + summary + result.stdout + result.stderr + json.dumps(calls)
+        for secret in ('DO_NOT_EXPORT_MANAGER', 'GENERATION_MANAGER_ID_TOKEN', 'Bearer DO_NOT_EXPORT', 'PRIVATE_TOKEN'):
+            self.assertNotIn(secret, exported)
+
+    def test_remote_missing_or_mismatched_manager_fails_before_any_service_mutation(self):
+        for key in ('MISSING_MANAGER', 'BAD_MANAGER_ARGS', 'BAD_MANAGER_CATALOG', 'BAD_MANAGER_AUDIENCE',
+                    'BAD_MANAGER_IDENTITY', 'BAD_MANAGER_IMAGE', 'BAD_MANAGER_ENV', 'PUBLIC_MANAGER_IAM',
+                    'DISABLED_MANAGER_IAM'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({'WITH_REMOTE_GENERATION': '1', key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(call[1:4] == ['run', 'services', 'update'] for call in calls))
+                self.assertEqual(self.traffic(calls), [])
+                self.assertIsNone(receipt)
+
+    def test_remote_requires_token_and_never_downgrades_to_legacy(self):
+        for change in ({'GENERATION_MANAGER_ID_TOKEN': ''}, {'WITH_GENERATION': '1'}):
+            with self.subTest(change=change):
+                result, calls, receipt, _ = self.run_case({'WITH_REMOTE_GENERATION': '1', **change}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(call[1:4] == ['run', 'services', 'update'] for call in calls))
+                self.assertIsNone(receipt)
+
+    def test_manager_health_auth_status_and_revision_are_required_before_public_update(self):
+        for key in ('FAIL_MANAGER_HEALTH', 'BAD_MANAGER_STATUS', 'BAD_MANAGER_REVISION_HEADER',
+                    'MISSING_MANAGER_REVISION_HEADER'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({'WITH_REMOTE_GENERATION': '1', key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls), [])
+                updates = [call[4] for call in calls if call[1:4] == ['run', 'services', 'update']]
+                self.assertEqual(updates, ['rangle-stg-generation'])
+                self.assertTrue(any('--remove-tags=ci-manager-candidate' in call for call in calls))
+                self.assertFalse(any('--remove-tags=ci-candidate' in call for call in calls))
+                self.assertIsNone(receipt)
+
+    def test_any_public_failure_restores_both_manager_and_public_allocations(self):
+        for key in ('FAIL_CANDIDATE', 'BAD_PUBLIC_REVISION', 'FAIL_RECEIPT_OUTPUT', 'BAD_SUMMARY'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({'WITH_REMOTE_GENERATION': '1', key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls)[-2:], [
+                    '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20',
+                    '--to-revisions=rangle-stg-generation-old-a=80,rangle-stg-generation-old-b=20'])
+                self.assertTrue(any('--remove-tags=ci-manager-candidate' in call for call in calls))
+                self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
+                self.assertIsNone(receipt)
+
+    def test_partial_manager_promotion_and_actual_revision_drift_roll_back_before_public_update(self):
+        for key in ('FAIL_MANAGER_PROMOTION', 'DRIFT_MANAGER_ACTUAL_ARGS'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({'WITH_REMOTE_GENERATION': '1', key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                updates = [call[4] for call in calls if call[1:4] == ['run', 'services', 'update']]
+                self.assertEqual(updates, ['rangle-stg-generation'])
+                self.assertEqual(self.traffic(calls)[-2:], [
+                    '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20',
+                    '--to-revisions=rangle-stg-generation-old-a=80,rangle-stg-generation-old-b=20'])
+                self.assertIsNone(receipt)
+
+    def test_legacy_generation_bootstrap_never_reads_or_updates_manager(self):
+        result, calls = self.run_case({'WITH_GENERATION': '1'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any('rangle-stg-generation' in call for call in calls))
+
+    def test_cleanup_failure_or_public_rollback_error_still_restores_manager(self):
+        for change in ({'FAIL_MANAGER_CLEANUP': '1'}, {'FAIL_POST': '1', 'FAIL_PUBLIC_ROLLBACK': '1'}):
+            with self.subTest(change=change):
+                result, calls, receipt, _ = self.run_case({'WITH_REMOTE_GENERATION': '1', **change}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls)[-2:], [
+                    '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20',
+                    '--to-revisions=rangle-stg-generation-old-a=80,rangle-stg-generation-old-b=20'])
+                removals = [arg for call in calls for arg in call if arg.startswith('--remove-tags=')]
+                self.assertEqual(set(removals), {'--remove-tags=ci-candidate', '--remove-tags=ci-manager-candidate'})
+                self.assertIsNone(receipt)
 
     def test_direct_ingress_must_be_closed_and_network_errors_are_not_rejection(self):
         for key in ('OPEN_DEFAULT_INGRESS', 'OPEN_TAG_INGRESS', 'DIRECT_NETWORK_FAILURE', 'BAD_INGRESS'):

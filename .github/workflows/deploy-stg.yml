@@ -78,12 +78,23 @@ jobs:
           token_format: access_token
           access_token_lifetime: 3600s
       - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - id: manager-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: https://rangle-stg-generation-113704194486.asia-northeast1.run.app
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
       - name: Smoke candidate, promote, and verify
         env:
           STG_IMAGE: ${{ env.IMAGE_REPOSITORY }}@${{ steps.image.outputs.digest }}
           GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
           GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
           CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.deploy-auth.outputs.access_token }}
+          GENERATION_MANAGER_ID_TOKEN: ${{ steps.manager-auth.outputs.id_token }}
           RANGLE_STG_DOMAIN: ${{ vars.RANGLE_STG_DOMAIN }}
           RELEASE_RECEIPT_PATH: ${{ runner.temp }}/rangle-release-receipt.json
         run: bash scripts/deploy-stg.sh deploy
