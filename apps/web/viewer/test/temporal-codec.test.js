@@ -63,6 +63,8 @@ test('declared expansion limits and exact decoded lengths are enforced', async (
 
 test('native passes cancel failures and always release reader locks', async () => {
   const Native = globalThis.DecompressionStream, streams = [];
+  const boundaryFailure = new Error('Injected native boundary failure');
+  let failBoundary = false;
   globalThis.DecompressionStream = class {
     constructor(format) {
       const decoder = new Native(format), state = { format, canceled: 0, released: 0 };
@@ -72,6 +74,7 @@ test('native passes cancel failures and always release reader locks', async () =
         const reader = getReader(...args), cancel = reader.cancel.bind(reader), release = reader.releaseLock.bind(reader);
         reader.cancel = (...values) => { state.canceled++; return cancel(...values); };
         reader.releaseLock = () => { state.released++; return release(); };
+        if (failBoundary && format === 'deflate') reader.read = async () => { throw boundaryFailure; };
         return reader;
       };
       return decoder;
@@ -87,10 +90,24 @@ test('native passes cancel failures and always release reader locks', async () =
     extra.set(new Uint8Array(valid, 0, 32));
     extra.set(empty, 32); extra.set(new Uint8Array(valid, 32), 32 + empty.length);
     await assert.rejects(decodeTemporal(extra.buffer));
+    // Native gzip may reject additional members itself. Assert exact cleanup
+    // of the passes actually opened, without requiring a permissive runtime.
+    const rejected = streams.splice(0);
+    assert.deepEqual(rejected, rejected.length === 1 ? [
+      { format: 'gzip', canceled: 1, released: 1 },
+    ] : [
+      { format: 'gzip', canceled: 0, released: 1 },
+      { format: 'deflate', canceled: 1, released: 1 },
+    ]);
+    // Valid single-member gzip always reaches the boundary pass. Inject a
+    // failure there independently of native multi-member acceptance behavior.
+    failBoundary = true;
+    await assert.rejects(decodeTemporal(valid), error => error === boundaryFailure);
     assert.deepEqual(streams.splice(0), [
       { format: 'gzip', canceled: 0, released: 1 },
       { format: 'deflate', canceled: 1, released: 1 },
     ]);
+    failBoundary = false;
     const expansion = pack(fixture(2));
     new DataView(expansion).setUint32(8, 1, true);
     // A forged ISIZE bypasses the cheap check; stream/native integrity rejects it.
