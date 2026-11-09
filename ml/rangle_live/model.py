@@ -39,12 +39,42 @@ def bootstrap_cuda(extension_path=None):
                 stream, "sha256"
             ).hexdigest()
     if not torch.cuda.is_available():
-        raise RuntimeError("The live worker requires the authorized local CUDA GPU")
+        raise RuntimeError("The live worker requires a CUDA GPU")
     result["gpu"] = torch.cuda.get_device_name()
     torch.set_num_threads(4)
     torch.manual_seed(0)
     torch.cuda.init()
     return result
+
+
+def warmup_cuda():
+    """Load compiled forward/backward kernels before the capture epoch, without RNG."""
+    import torch
+    from gsplat import rasterization
+
+    def tensor(value, gradient=False):
+        return torch.tensor(
+            value, dtype=torch.float32, device="cuda", requires_grad=gradient
+        )
+
+    image = rasterization(
+        means=tensor([[0, 0, 2]], True),
+        scales=tensor([[0.1, 0.1, 0.1]], True),
+        quats=tensor([[1, 0, 0, 0]], True),
+        colors=tensor([[0.5, 0.5, 0.5]], True),
+        opacities=tensor([0.1], True),
+        viewmats=torch.eye(4, device="cuda")[None],
+        Ks=tensor([[[16, 0, 8], [0, 16, 8], [0, 0, 1]]]),
+        width=16,
+        height=16,
+        packed=False,
+    )[0]
+    if not image.requires_grad:
+        raise RuntimeError("Warmup render produced no differentiable pixels")
+    (
+        image.mean() + 1 - _ssim_function("cuda")(image, torch.zeros_like(image))
+    ).backward()
+    torch.cuda.synchronize()
 
 
 def advance_local_window(params, delta):

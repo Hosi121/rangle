@@ -4,16 +4,60 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 import torch
 from PIL import Image
-from rangle_live.model import IncrementalModel, advance_local_window
+from rangle_live.model import IncrementalModel, advance_local_window, warmup_cuda
 from rangle_live.window import Frame, Window
 from rangle_training.temporal import initialize_parameters, temporal_values
 
 
 class PersistentStateTests(unittest.TestCase):
+    def test_kernel_warmup_runs_backward_without_consuming_rng_and_rejects_empty_graph(
+        self,
+    ):
+        state = torch.random.get_rng_state().clone()
+        tensor, eye = torch.tensor, torch.eye
+
+        def cpu_tensor(*args, **kwargs):
+            kwargs["device"] = "cpu"
+            return tensor(*args, **kwargs)
+
+        def cpu_eye(*args, **kwargs):
+            kwargs["device"] = "cpu"
+            return eye(*args, **kwargs)
+
+        colors = []
+
+        def render(**kwargs):
+            self.assertEqual((kwargs["width"], kwargs["height"]), (16, 16))
+            self.assertGreater(float(kwargs["means"][0, 2].detach()), 0)
+            colors.append(kwargs["colors"])
+            return (kwargs["colors"][:, None, None, :].expand(1, 16, 16, 3),)
+
+        with (
+            patch("torch.tensor", side_effect=cpu_tensor),
+            patch("torch.eye", side_effect=cpu_eye),
+            patch("torch.cuda.synchronize"),
+            patch("gsplat.rasterization", side_effect=render),
+            patch(
+                "rangle_live.model._ssim_function",
+                return_value=lambda a, b: 1 - (a - b).square().mean(),
+            ),
+        ):
+            warmup_cuda()
+        self.assertGreater(float(colors[0].grad.abs().sum()), 0)
+        torch.testing.assert_close(torch.random.get_rng_state(), state, rtol=0, atol=0)
+        with (
+            patch("torch.tensor", side_effect=cpu_tensor),
+            patch("torch.eye", side_effect=cpu_eye),
+            patch("gsplat.rasterization", return_value=(torch.zeros(1, 16, 16, 3),)),
+            self.assertRaisesRegex(RuntimeError, "differentiable"),
+        ):
+            warmup_cuda()
+
     def test_diagnostics_are_local_packed_rgb_at_the_final_window_times(self):
         stored = object()
         calls = []
