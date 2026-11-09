@@ -114,6 +114,19 @@ resource "google_compute_url_map" "https" {
     content {
       name            = "app"
       default_service = google_compute_backend_service.app[0].id
+      # Routing selector, not an authentication secret. Candidate requests use
+      # the same application authorization and public LB as production traffic.
+      route_rules {
+        priority = 10
+        service  = google_compute_backend_service.candidate[0].id
+        match_rules {
+          prefix_match = "/"
+          header_matches {
+            header_name = "X-Rangle-Candidate"
+            exact_match = "ci-candidate"
+          }
+        }
+      }
     }
   }
   # Google rejects URL map updates if these routing tests fail. Keep mutable
@@ -129,6 +142,44 @@ resource "google_compute_url_map" "https" {
       host    = local.media_host
       path    = test.key
       service = test.value
+    }
+  }
+  # Google validates both the ordinary and candidate routes when applying the
+  # URL map, including isolation from the media host and the OIDC sync path.
+  dynamic "test" {
+    for_each = local.app_enabled ? {
+      public = {
+        host    = local.app_host, path = "/api/v1/clips",
+        service = google_compute_backend_service.app[0].id, selector = null
+      }
+      candidate = {
+        host    = local.app_host, path = "/api/v1/clips",
+        service = google_compute_backend_service.candidate[0].id, selector = "ci-candidate"
+      }
+      invalid_selector = {
+        host    = local.app_host, path = "/health",
+        service = google_compute_backend_service.app[0].id, selector = "another-tag"
+      }
+      scheduler = {
+        host    = local.app_host, path = "/internal/generation/sync",
+        service = google_compute_backend_service.app[0].id, selector = null
+      }
+      media = {
+        host    = local.media_host, path = "/live/example/000001-aaaaaaaaaaaaaaaa/model.rgs",
+        service = google_compute_backend_bucket.media.id, selector = "ci-candidate"
+      }
+    } : {}
+    content {
+      host    = test.value.host
+      path    = test.value.path
+      service = test.value.service
+      dynamic "headers" {
+        for_each = test.value.selector == null ? [] : [test.value.selector]
+        content {
+          name  = "X-Rangle-Candidate"
+          value = headers.value
+        }
+      }
     }
   }
   depends_on = [google_storage_bucket_iam_member.cache_fill]
@@ -202,6 +253,34 @@ resource "google_compute_backend_service" "app" {
   enable_cdn            = false
   backend { group = google_compute_region_network_endpoint_group.app[0].id }
   # Serverless NEGs do not use a health_check or configurable backend timeout.
+  log_config {
+    enable      = true
+    sample_rate = 0.1
+  }
+}
+
+# A stable, CI-owned tag lets the serialized deploy workflow probe an unpromoted
+# revision without network-admin permissions, extra DNS, or a second service.
+resource "google_compute_region_network_endpoint_group" "candidate" {
+  count                 = local.app_enabled ? 1 : 0
+  project               = var.project_id
+  name                  = "${local.prefix}-candidate"
+  region                = var.region
+  network_endpoint_type = "SERVERLESS"
+  cloud_run {
+    service = google_cloud_run_v2_service.app[0].name
+    tag     = "ci-candidate"
+  }
+}
+
+resource "google_compute_backend_service" "candidate" {
+  count                 = local.app_enabled ? 1 : 0
+  project               = var.project_id
+  name                  = "${local.prefix}-candidate"
+  protocol              = "HTTP"
+  load_balancing_scheme = "EXTERNAL_MANAGED"
+  enable_cdn            = false
+  backend { group = google_compute_region_network_endpoint_group.candidate[0].id }
   log_config {
     enable      = true
     sample_rate = 0.1

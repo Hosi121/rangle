@@ -116,13 +116,15 @@ resource "google_service_account_iam_member" "runtime_act_as" {
   }
 }
 
+# Keep the URI available to Google-managed callers; ingress rejects public
+# run.app requests, including revision-tag URLs. CI probes through the LB.
 resource "google_cloud_run_v2_service" "app" {
   count                = local.app_enabled ? 1 : 0
   project              = var.project_id
   name                 = local.prefix
   location             = var.region
   deletion_protection  = false # The scheduled guard deletes this owned service.
-  ingress              = "INGRESS_TRAFFIC_ALL"
+  ingress              = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   default_uri_disabled = false
   invoker_iam_disabled = true
   labels               = local.labels

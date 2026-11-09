@@ -58,6 +58,7 @@ func main() {
 		GenerationSyncAudience: *generationSyncAudience,
 		LiveIndex:              *liveIndex,
 		LiveAssetsRoot:         *liveAssetsRoot,
+		ServingRevision:        os.Getenv("K_REVISION"),
 	}
 
 	if err := run(ctx, *address, cfg, logger); err != nil {

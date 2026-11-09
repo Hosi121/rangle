@@ -9,7 +9,7 @@
 - `null` の間は、private GCS の CDN backend bucket、cache-fill IAM、専用 global IPv4 `rangle-stg-edge` まで準備できる。certificate、proxy、forwarding rule、HTTP/HTTPS URL map、アプリはまだ作らない。予約 IP 自体の費用は発生し得る。
 - ドメイン設定後は、Google-managed certificate と外部 global Application Load Balancer を作る。app と media の hostname を URL map で分離する。`app` は CDN 無効の serverless NEG / Cloud Run、`media` だけは CDN backend bucket。API/UI/catalog/入力を CDN bucket に混ぜない。
 - Go＋Flutter Web は Cloud Run `rangle-stg` に置く。1vCPU/512MiB、request billing、min0/max1、concurrency40、timeout30秒。`/` landing、`/demo/*`、root API の path を書き換えない。`-asset-origin` は `https://media.<base_domain>` に固定する。
-- **stg では既定 Run URI と ALL ingress を維持する。** custom app hostname と `run.app` / candidate-tag URL の両方が公開 read-only feed で、後者を CI の HTTPS smoke に使う。origin が LB からしか到達できない構成とは呼ばない。generic main / platform root は変更しない。
+- **コード上のingressは `internal-and-cloud-load-balancing`。** インターネットからのUI/API要求はLBを通し、既定 `run.app` / candidate-tag URLの直通は拒否する。既定URI自体はGoogle管理callerとの互換性のため維持する。Goの認証・CSRF・管理者/所有者認可と、generic main / platform rootは維持する。[Cloud Run ingress](https://docs.cloud.google.com/run/docs/securing/ingress)
 
 `deployment` output に `edge_ip`、`base_domain`、`app_origin`、`media_origin`、既定 `app_uri`、DNS A record 2件を返す。Cloudflare には app / media の A record を同じ IP へ追加し、**DNS only（proxy 無効）**とする。矛盾する A/AAAA がないことを確認し、Google certificate が ACTIVE になるまで待つ。ここに Cloudflare provider・API token・DNS 自動変更は含めない。[Google-managed TLS](https://docs.cloud.google.com/load-balancing/docs/ssl-certificates/google-managed-certs)
 
@@ -30,6 +30,18 @@ Terraform 1.17.1、Google provider 8.10.0 と lock file を固定。presentation
 環境 root の必須値は `project_id`、`project_number`、`region`、`budget_currency`、`budget_stop_amount`。初期 `base_domain=null` / `application=null`。実ドメイン、検証済み image digest と実 catalog SHA256 が揃ってからアプリを追加する。`application` / optional `budget` の形は variables.tf と fake tfvars example に記録する。
 
 CI は image と traffic を所有し、Terraform は両者を ignore する。runtime args / mount / catalog / scale / IAM は IaC が保つ。catalog / runtime 設定を変える前は現行の正常 revision へ traffic を明示固定し、apply でできた revision は smoke 後に昇格する。IaC apply が CI の rollback を LATEST100 で戻す運用にしない。
+
+### LB入口制限への切替
+
+CI候補用に同じCloud Run serviceを指すserverless NEGとCDN無効のbackendを追加する。NEGはCI専用の固定tag `ci-candidate` を指し、app hostnameへの `X-Rangle-Candidate: ci-candidate` 付き要求だけをそこへ送る。通常の要求・Schedulerは既存backendへ送る。新しいDNS、証明書、サービス、CIのnetwork/IAM変更権限は追加しない。headerは公開のルーティング指定で、認証用の秘密ではない。候補にもGoの通常の操作認可が適用される。[NEGのtag指定](https://docs.cloud.google.com/sdk/gcloud/reference/compute/network-endpoint-groups/create)、[header routing](https://docs.cloud.google.com/load-balancing/docs/https/traffic-management-global)
+
+1. 現行の正常revisionとtraffic比率を記録し、LATEST参照を使わず明示固定する。固定tag `ci-candidate` はこの直列deploy workflowだけが使う。初回のNEG作成前には正常revisionへこのtagを割り当てる。
+2. presentation rootでplanを確認し、候補NEG/backend、app hostのrouting、Run ingressの変更を適用する。期限・予算停止、Scheduler、private bucket/IAM、mediaのrouting/cacheに不要な変更がないことを確認する。既存のimage/traffic所有権は変えない。
+3. `stg` workflowを実行する。旧ALL ingressのままではimage更新前に停止する。既定URLと候補tag URLの `/health` が外部から404となることを確認し、候補・昇格後のHTTP検証はappのLB URLで行う。
+4. CIはHTTPの `X-Rangle-Revision` とcatalog SHA、実revisionのimage/argsを照合する。新候補は `K_REVISION` を返すimageが必要。tag反映待ちは最大5回に制限し、検証失敗なら昇格しない。昇格後の失敗は記録したtraffic比率へ戻す。終了時は専用tagだけを削除する。
+5. SchedulerのOIDC同期をLB経由で確認する。audience・専用SA・Goのtoken検証は変更しない。期限・予算停止の設定とreceiptも維持する。
+
+本変更の実環境適用・外部直通拒否・LB候補経路・Schedulerの再疎通は未実施。以下の既存配備記録とは区別する。ネットワーク境界は外部入口の制限で、専用VPC/subnetによる隔離を追加する変更ではない。
 
 | 項目 | 値 |
 | --- | --- |

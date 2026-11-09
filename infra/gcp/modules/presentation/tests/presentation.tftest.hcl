@@ -60,8 +60,8 @@ run "configured_domain_bounded_app" {
     }
   }
   assert {
-    condition     = google_cloud_run_v2_service.app[0].ingress == "INGRESS_TRAFFIC_ALL" && !google_cloud_run_v2_service.app[0].default_uri_disabled && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1 && google_cloud_run_v2_service.app[0].scaling[0].min_instance_count == 0 && google_cloud_run_v2_service.app[0].template[0].max_instance_request_concurrency == 40
-    error_message = "Presentation Run URLs stay probeable with bounded request-based scaling."
+    condition     = google_cloud_run_v2_service.app[0].ingress == "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" && !google_cloud_run_v2_service.app[0].default_uri_disabled && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1 && google_cloud_run_v2_service.app[0].scaling[0].min_instance_count == 0 && google_cloud_run_v2_service.app[0].template[0].max_instance_request_concurrency == 40
+    error_message = "Public app requests must enter through the LB; preserve managed callers and bounded scaling."
   }
   assert {
     condition     = google_cloud_run_v2_service.app[0].template[0].volumes[0].gcs[0].read_only && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "https://media.presentation.example.com") && google_cloud_run_v2_service.app[0].template[0].containers[0].startup_probe[0].http_get[0].path == "/healthz"
@@ -70,6 +70,14 @@ run "configured_domain_bounded_app" {
   assert {
     condition     = !google_compute_backend_service.app[0].enable_cdn && google_compute_backend_service.app[0].health_checks == null && length(google_compute_url_map.https[0].host_rule) == 2 && google_compute_region_network_endpoint_group.app[0].network_endpoint_type == "SERVERLESS"
     error_message = "Route the uncached application via a serverless NEG, which does not use Compute health checks."
+  }
+  assert {
+    condition     = google_compute_region_network_endpoint_group.candidate[0].cloud_run[0].tag == "ci-candidate" && !google_compute_backend_service.candidate[0].enable_cdn && google_compute_backend_service.candidate[0].health_checks == null
+    error_message = "Probe the reserved candidate tag through an uncached serverless backend."
+  }
+  assert {
+    condition     = one([for matcher in google_compute_url_map.https[0].path_matcher : matcher if matcher.name == "app"]).route_rules[0].match_rules[0].header_matches[0].header_name == "X-Rangle-Candidate" && one([for matcher in google_compute_url_map.https[0].path_matcher : matcher if matcher.name == "app"]).route_rules[0].match_rules[0].header_matches[0].exact_match == "ci-candidate"
+    error_message = "Candidate probes must use the app host and the explicit routing selector."
   }
   assert {
     condition     = strcontains(google_service_account_iam_member.github_deployer.condition[0].expression, "2026-11-14T15:00:00Z") && strcontains(google_iam_workload_identity_pool_provider.github.attribute_condition, "assertion.repository_id == '1448803636'") && strcontains(google_project_iam_member.stop_forwarding_rules.condition[0].expression, "global/forwardingRules/rangle-stg-https")

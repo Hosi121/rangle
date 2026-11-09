@@ -17,6 +17,8 @@ from pathlib import Path
 root = Path(os.environ['STUB_STATE'])
 name = Path(sys.argv[0]).name
 args = sys.argv[1:]
+if name == 'sleep':
+    sys.exit(0)
 if name == 'date':
     deadline = 1794668400
     if '-d' in args:
@@ -30,10 +32,17 @@ with (root / 'calls').open('a') as f:
     f.write(json.dumps([name] + args) + '\n')
 if name == 'curl':
     url = args[-1]
-    candidate = 'candidate-' in url
+    candidate = 'X-Rangle-Candidate: ci-candidate' in args
+    if '--write-out' in args:
+        assert url.endswith('.run.app/health')
+        if os.environ.get('DIRECT_NETWORK_FAILURE'):
+            sys.exit(60)
+        key = 'OPEN_TAG_INGRESS' if 'ci-candidate---' in url else 'OPEN_DEFAULT_INGRESS'
+        print('200' if os.environ.get(key) else '404', end='')
+        sys.exit(0)
     if os.environ.get('FAIL_CANDIDATE') and candidate or os.environ.get('FAIL_POST') and not candidate:
         sys.exit(22)
-    if os.environ.get('FAIL_CANONICAL_TLS') and url.startswith('https://app.replay.example.test'):
+    if os.environ.get('FAIL_CANONICAL_TLS') and not candidate and url.startswith('https://app.replay.example.test'):
         sys.exit(60)
     if '/health' in url:
         body = 'ok\n'
@@ -68,11 +77,21 @@ if name == 'curl':
         body = '<html>rangle</html>'
     if '--dump-header' in args:
         header = 'HTTP/2 200\r\n'
+        if not os.environ.get('MISSING_REVISION_HEADER'):
+            revision = 'rangle-stg-00003-abc'
+            if (os.environ.get('BAD_CANDIDATE_REVISION') and candidate or
+                os.environ.get('BAD_PUBLIC_REVISION') and not candidate):
+                revision = 'rangle-stg-old-a'
+            if os.environ.get('STALE_CANDIDATE_ONCE') and candidate and url.endswith('/health'):
+                if not (root / 'stale-probe').exists():
+                    (root / 'stale-probe').touch()
+                    revision = 'rangle-stg-old-a'
+            header += 'X-Rangle-Revision: ' + revision + '\r\n'
         if not os.environ.get('MISSING_CATALOG_HEADER'):
             sha = 'd' * 64
             if (os.environ.get('BAD_CANDIDATE_SHA') and candidate or
                 os.environ.get('BAD_PUBLIC_SHA') and not candidate or
-                os.environ.get('BAD_CANONICAL_SHA') and url.startswith('https://app.')):
+                os.environ.get('BAD_CANONICAL_SHA') and not candidate and url.startswith('https://app.')):
                 sha = 'f' * 64
             header += 'X-Rangle-Catalog-SHA256: ' + sha + '\r\n'
         Path(args[args.index('--dump-header') + 1]).write_text(header + '\r\n')
@@ -131,9 +150,11 @@ if (root / 'promoted').exists():
         if os.environ.get('FAIL_RECEIPT_OUTPUT'):
             Path(os.environ['RELEASE_RECEIPT_PATH']).mkdir()
 if (root / 'tagged').exists():
-    status['traffic'].append({'tag': 'candidate-123-1', 'revisionName': 'rangle-stg-00003-abc',
-                             'url': 'https://candidate-123-1---rangle-stg-test.run.app'})
-doc = {'status': status, 'spec': {'template': {'spec': {'containers': [
+    status['traffic'].append({'tag': 'ci-candidate', 'revisionName': 'rangle-stg-00003-abc',
+                             'url': 'https://ci-candidate---rangle-stg-test.run.app'})
+doc = {'metadata': {'annotations': {'run.googleapis.com/ingress':
+        'all' if os.environ.get('BAD_INGRESS') else 'internal-and-cloud-load-balancing'}},
+       'status': status, 'spec': {'template': {'spec': {'containers': [
     {'args': target_args, 'image': os.environ['STG_IMAGE'], 'env': secret_env}]}}}}
 if os.environ.get('BAD_RUNTIME'):
     doc['spec']['template']['spec']['containers'][0]['args'] = []
@@ -152,19 +173,19 @@ if args[2] == 'update':
     if os.environ.get('MISSING_REVISION'):
         status.pop('latestCreatedRevisionName')
 elif args[2] == 'update-traffic':
-    if '--update-tags=candidate-123-1=rangle-stg-00003-abc' in args:
+    if '--update-tags=ci-candidate=rangle-stg-00003-abc' in args:
         (root / 'tagged').touch()
         if os.environ.get('FAIL_TAG'):
             sys.exit(1)
-        status['traffic'].append({'tag': 'candidate-123-1', 'revisionName': 'rangle-stg-00003-abc',
-                                 'url': 'https://candidate-123-1---rangle-stg-test.run.app'})
+        status['traffic'].append({'tag': 'ci-candidate', 'revisionName': 'rangle-stg-00003-abc',
+                                 'url': 'https://ci-candidate---rangle-stg-test.run.app'})
     if '--to-revisions=rangle-stg-00003-abc=100' in args:
         (root / 'promoted').touch()
         if os.environ.get('FAIL_PROMOTION'):
             sys.exit(1)
     if '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20' in args:
         (root / 'promoted').unlink(missing_ok=True)
-    if '--remove-tags=candidate-123-1' in args:
+    if '--remove-tags=ci-candidate' in args:
         (root / 'tagged').unlink(missing_ok=True)
 print(json.dumps(status['traffic'] if args[2] == 'update-traffic' else doc))
 '''
@@ -176,7 +197,7 @@ class Deployment(unittest.TestCase):
             root = Path(directory)
             bindir = root / 'bin'
             bindir.mkdir()
-            for name in ('gcloud', 'curl', 'date'):
+            for name in ('gcloud', 'curl', 'date', 'sleep'):
                 tool = bindir / name
                 tool.write_text(FAKE)
                 tool.chmod(0o755)
@@ -194,7 +215,7 @@ class Deployment(unittest.TestCase):
             env.update(extra or {})
             if env.get('BAD_SUMMARY'):
                 env['GITHUB_STEP_SUMMARY'] = str(root)
-            invocation = (['bash', str(SCRIPT.with_name('check-deployment.sh')), 'https://candidate-123-1---rangle-stg-test.run.app']
+            invocation = (['bash', str(SCRIPT.with_name('check-deployment.sh')), 'https://ci-candidate---rangle-stg-test.run.app']
                           if command == 'check' else ['bash', str(SCRIPT), command])
             result = subprocess.run(invocation, env=env, capture_output=True, text=True, timeout=20)
             calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()] if (root / 'calls').exists() else []
@@ -213,11 +234,49 @@ class Deployment(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100'])
         self.assertEqual(sum(call[1:4] == ['run', 'services', 'update'] for call in calls), 1)
-        self.assertTrue(any('--update-tags=candidate-123-1=rangle-stg-00003-abc' in call for call in calls))
-        self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+        self.assertTrue(any('--update-tags=ci-candidate=rangle-stg-00003-abc' in call for call in calls))
+        self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
         probed_urls = [call[-1] for call in calls if call[0] == 'curl']
         self.assertIn('https://rangle-stg-test.run.app/health', probed_urls)
         self.assertIn('https://app.replay.example.test/health', probed_urls)
+        direct = [call for call in calls if call[0] == 'curl' and '.run.app/' in call[-1]]
+        self.assertEqual(len(direct), 2)
+        self.assertTrue(all('--write-out' in call for call in direct))
+        probes = [call for call in calls if call[0] == 'curl' and '--dump-header' in call]
+        self.assertTrue(all(call[-1].startswith('https://app.replay.example.test/') for call in probes))
+        self.assertEqual(sum('X-Rangle-Candidate: ci-candidate' in call for call in probes), 5)
+
+    def test_direct_ingress_must_be_closed_and_network_errors_are_not_rejection(self):
+        for key in ('OPEN_DEFAULT_INGRESS', 'OPEN_TAG_INGRESS', 'DIRECT_NETWORK_FAILURE', 'BAD_INGRESS'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls), [])
+                self.assertIsNone(receipt)
+                if key != 'OPEN_TAG_INGRESS':
+                    self.assertFalse(any(call[1:4] == ['run', 'services', 'update'] for call in calls))
+
+    def test_candidate_http_revision_mismatch_blocks_promotion_even_with_matching_catalog(self):
+        for key in ('BAD_CANDIDATE_REVISION', 'MISSING_REVISION_HEADER'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls), [])
+                self.assertIsNone(receipt)
+
+    def test_candidate_waits_for_tag_routing_to_converge(self):
+        result, calls = self.run_case({'STALE_CANDIDATE_ONCE': '1'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100'])
+        probes = [call for call in calls if call[0] == 'curl' and 'X-Rangle-Candidate: ci-candidate' in call]
+        self.assertEqual(len(probes), 10)
+
+    def test_public_http_revision_mismatch_restores_previous_split(self):
+        result, calls, receipt, _ = self.run_case({'BAD_PUBLIC_REVISION': '1'}, inspect=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100',
+                                             '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20'])
+        self.assertIsNone(receipt)
 
     def test_receipt_uses_served_revisions_not_the_desired_template_and_excludes_secrets(self):
         result, calls, receipt, summary = self.run_case({'WITH_GENERATION': '1'}, inspect=True)
@@ -267,7 +326,7 @@ class Deployment(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(self.traffic(calls), [])
                 self.assertIsNone(receipt)
-                self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+                self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
 
     def test_broken_live_index_blocks_candidate_or_restores_previous_traffic(self):
         for variable in ('BAD_LIVE_CANDIDATE', 'BAD_LIVE_PUBLIC'):
@@ -280,7 +339,7 @@ class Deployment(unittest.TestCase):
                 self.assertEqual(promoted, variable == 'BAD_LIVE_PUBLIC')
                 if promoted:
                     self.assertTrue(any('--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20' in row for row in updates))
-                self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+                self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
 
     def test_public_catalog_mismatch_restores_the_previous_split(self):
         for key in ('BAD_PUBLIC_SHA', 'BAD_CANONICAL_SHA'):
@@ -299,7 +358,7 @@ class Deployment(unittest.TestCase):
                 self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100',
                                                      '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20'])
                 self.assertIsNone(receipt)
-                self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+                self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
 
     def test_receipt_path_is_fixed_before_any_cloud_call(self):
         for change in ({'RELEASE_RECEIPT_PATH': '/tmp/unrelated-receipt.json'}, {'GITHUB_STEP_SUMMARY': ''}):
@@ -320,7 +379,7 @@ class Deployment(unittest.TestCase):
         result, calls = self.run_case({'FAIL_CANDIDATE': '1'})
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.traffic(calls), [])
-        self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+        self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
 
     def test_successful_generated_result_can_be_first_without_fake_transport_fields(self):
         result, calls = self.run_case({'GENERATED_API': '1'})
@@ -350,7 +409,7 @@ class Deployment(unittest.TestCase):
         result, calls = self.run_case({'FAIL_TAG': '1'})
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.traffic(calls), [])
-        self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+        self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
 
     def test_unexpected_candidate_cannot_be_tagged_or_promoted(self):
         for change in ({'WRONG_IMAGE': '1'}, {'MISSING_REVISION': '1'}):
@@ -368,7 +427,7 @@ class Deployment(unittest.TestCase):
         result, calls = self.run_case({'EXPIRE_AT': '3'})
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.traffic(calls), [])
-        self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+        self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
 
     def test_untrusted_events_identity_and_mutable_images_never_call_gcloud(self):
         for change in ({'GITHUB_EVENT_NAME': 'pull_request'}, {'GITHUB_REF': 'refs/heads/main'},
@@ -410,7 +469,7 @@ class Deployment(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100',
                                              '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20'])
-        self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+        self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
 
 
 class ReceiptStorage(unittest.TestCase):

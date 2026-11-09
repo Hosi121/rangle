@@ -60,7 +60,7 @@ run "live_uses_existing_private_index_without_changing_capacity" {
     error_message = "The mutable index path must select the one-second backend; immutable live payloads retain the day-long media default."
   }
   assert {
-    condition = { for test in google_compute_url_map.https[0].test : test.path => test.service if test.host == "media.presentation.example.com" } == {
+    condition = { for test in google_compute_url_map.https[0].test : test.path => test.service if test.host == "media.presentation.example.com" && length(test.headers) == 0 } == {
       "/live-index/example.json"                         = google_compute_backend_bucket.live_index[0].id
       "/live/example/000001-aaaaaaaaaaaaaaaa/scene.json" = google_compute_backend_bucket.media.id
       "/live/example/000001-aaaaaaaaaaaaaaaa/model.rgs"  = google_compute_backend_bucket.media.id
