@@ -1,12 +1,10 @@
 # Incremental training from arrived calibrated video
 
-`rangle_live` decodes synchronized recorded camera videos at their original PTS and updates one persistent temporal Gaussian model from arrived image windows. It writes immutable RGS1/scene snapshots and an atomic live index. This is a recorded-source replay test of incremental generation, with no RTMP receiver, camera-clock synchronization, cloud publisher, or trained-model warm start.
-
-The current measurements establish functional generation before source completion. They do **not** establish production quality or a 30-second latency guarantee. Moving players remain blurred and ghosted.
+`rangle_live` replays synchronized recorded camera videos at original PTS, updates one persistent temporal Gaussian model from arrived windows, and writes immutable RGS1/scene snapshots plus an atomic index. It has no RTMP receiver, clock synchronization, cloud publisher or trained-model warm start. Short runs establish generation before source completion; player blur/ghosting and a sustained 30-second target remain unresolved. Cloud operation is documented in [cloud LIVE](cloud-live.md).
 
 ## Run and input
 
-Use the existing complete trainer environment plus the separate [preprocessing dependencies](dataset-preprocessing.md). No new dependency is added to the trainer image. `--help` parses before importing the runtime, Torch, or OpenCV.
+Use the complete trainer plus separate [preprocessing dependencies](dataset-preprocessing.md); the trainer image gains no dependency. `--help` precedes runtime/Torch/OpenCV imports.
 
 ```sh
 PYTHONPATH=ml python3 -m rangle_live \
@@ -19,23 +17,25 @@ PYTHONPATH=ml python3 -m rangle_live \
   --decode-workers 8 --max-runtime-seconds 180
 ```
 
-The manifest is the existing source-manifest v1, using either `calibrated-manifest` or `vru-colmap`, with one local video per view. It supplies the resolution, fps, calibration, training/held-out split, source/license statements, and colored seed cloud. `frames.indices` remains the offline-preparation selection; only its count supplies the live window length. Live playback always starts at recorded frame 0, at the original `frames.fps` cadence, and `--source-seconds` controls its range. Index values do not set the live start, end or sampling stride. The shared validator enforces 4–64 views, at least three training and one held-out camera, output width 64–1920 / height 64–1080, and at most 512 MiB of uint8 RGB per window. Live windows require 2–32 frames.
+| Input / option | Contract |
+| --- | --- |
+| Manifest | Source-manifest v1, `calibrated-manifest` or `vru-colmap`, one local video/view, resolution/fps/calibration/splits/source terms/colored seed. VRU publication metadata requires explicit `source.license: "CC BY 4.0"`. ID/title defaults are replaceable. |
+| Time | Only the `frames.indices` **count** sets window length. Replay starts at frame 0 with original `frames.fps`; `--source-seconds` sets duration. Index values do not set live start/stride/end. Actual PTS/dimensions must match calibration/cadence. |
+| Bounds | 4–64 views, ≥3 train/1 held-out; width 64–1920, height 64–1080; 2–32 frames/window; uint8 RGB ≤512 MiB/window. Source/runtime each ≤1,800s. |
+| Work budgets | Decode workers 1–32, default 8 (only 4/8 measured); bootstrap 1–1,000 and update 1–2,000 steps. `--seed-available-after` is required to declare seed temporal support. |
+| Paths/checksums | Paths stay in source root. Verify calibration/seed hashes before ingestion; other checksum declarations fail. Do not pre-read/hash full videos. |
 
-Paths stay inside the source root. Calibration/seed checksums are verified before ingestion; checksum declarations for other files are rejected. Full video files are not read or hashed before capture starts. Actual frame PTS and native dimensions must match the declared synchronized calibration and cadence. Each camera's distortion map is precomputed directly at the target resolution, with one source-to-target remap per frame. The rig/world normalization is computed **once**, from training camera centres, and remains fixed across every snapshot.
-
-Source and runtime bounds are finite, at most 1,800 seconds each. Decode workers are bounded to 1–32 (default 8); only 4 and 8 were measured below. Bootstrap/update budgets are bounded to 1–1,000 and 1–2,000 steps. `--seed-available-after` is required: the caller declares the seed prior's temporal support instead of the worker inferring it from a filename. The bootstrap id/title are defaults that callers can replace. Source labels, URLs and licenses come from the manifest; the VRU bootstrap manifest must explicitly use `source.license: "CC BY 4.0"` for the agreed publication metadata.
-
-An existing compatible gsplat extension may be selected with `--cuda-extension /path/to/gsplat_cuda.so`; its SHA256 is logged. This supports the validated local environment without committing binaries or changing gsplat's production optimizer. The command logs JSON with `service="rangle-live"`, `severity`, `event`, and UTC `time`; failures are recorded once at the command boundary.
+Distortion maps are precomputed at target resolution for one remap/frame. Normalization is computed once from training camera centres and fixed across snapshots. Optional `--cuda-extension /path/to/gsplat_cuda.so` selects an existing compatible extension and logs its SHA, without committing binaries or changing the production optimizer. JSON logs use `service="rangle-live"`, severity/event/UTC time; boundary failures are logged once.
 
 ## Incremental state and bounded work
 
-A producer requests a decoded frame only once its source PTS has arrived. A ring retains one window; a single pending window replaces older pending work while the consumer trains. There is no growing work queue. Skipped windows are not reconstructed as a continuous stream; only selected windows are optimized and published. `dropped_windows` counts these replacements. The current training window is immutable, so later arrivals cannot change its optimization targets. The last complete window is offered at source completion, including an overlapping tail when necessary.
+Decode requests wait for source PTS. One ring window and one replaceable pending window bound work; the active training window is immutable. Replaced windows increment `dropped_windows` and are never reconstructed as a continuous stream. Source completion offers the last complete window, with overlapping tail if needed.
 
-The consumer initializes shared position, velocity, colour, spatial scale/quaternion, centre time, temporal width, and opacity parameters once. It retains their Adam optimizers, moments, RNG, global step count, and gsplat `DefaultStrategy` state between windows. Refinement may change rows through the strategy's existing optimizer-aware operations. A training step samples only a current-window time and a training camera. Held-out pixels are used for evaluation only.
+Position/velocity/RGB/scale/quaternion/centre/sigma/opacity, Adam moments, RNG, global steps and `DefaultStrategy` state persist between windows; optimizer-aware refinement keeps row alignment. Steps sample only current-window training pixels; held-out pixels evaluate only.
 
-The representation and rasterizer reuse [joint temporal training](dynamic-gs-training.md). Initialization uses the `local-lifetime` profile with the same point count, zero velocity, centre times spread across the window and sigma equal to one quarter of its duration. The loss is `0.8 L1 + 0.2 (1 - SSIM)`, with spatial-scale regularization and an early decaying peak-opacity penalty. Refinement stops by global step 3,000 or at a pre-refinement count of 125,000; a 250,000-primitive hard bound rejects an oversized update. These choices are a small streaming approximation, without a claim to reproduce a research system.
+The [joint-training](dynamic-gs-training.md) representation uses `local-lifetime`: unchanged initial count, zero velocity, distributed centres, sigma=duration/4; `0.8 L1 + 0.2 (1 - SSIM)`, scale regularization and decaying opacity penalty. Refinement stops by global step 3,000 or pre-refinement count 125,000; >250,000 points fail. This streaming approximation does not reproduce a research system.
 
-Models use window-local seconds. When the window start advances by `delta`, the warm shift is:
+Window-local warm shift by `delta`:
 
 ```text
 means_new = means_old + velocity * delta
@@ -44,9 +44,9 @@ x_new(t_local) = x_old(t_local + delta)
 opacity_new(t_local) = opacity_old(t_local)
 ```
 
-This deliberately resets the lifetime phase within the new window; it does not preserve an absolute global lifetime envelope. Additive translation retains parameter identities and Adam moments. Snapshot transitions can therefore pop or ghost. Each scene retains the same camera/world convention, and the publisher rejects a changed camera within a session.
+Translation retains parameter identities/moments but resets lifetime phase in each window; absolute lifetime is not preserved and transitions can pop/ghost. Camera/world convention stays fixed; publication rejects a changed session camera.
 
-The supplied VRU `downsample_0_20` cloud is a **precomputed author prior** that may contain frames through 20 (0.8 seconds) and held-out camera information. The first window is admitted only after source time 0.8 has arrived. This does not establish fully causal geometry: only the optimization image stream is causal. No later seed cloud or offline trained model is loaded.
+VRU `downsample_0_20` is an author-precomputed prior that may include frames through 20 (0.8s) and held-out camera information. Admission waits until source time 0.8s. Only optimization images are causal; geometry is not proven causal. No later seed cloud or offline trained model is loaded.
 
 ## Local output and publication boundary
 
@@ -59,9 +59,9 @@ output/run-summary.json
 output/diagnostics/heldout-<view>-frame-<source-frame>.webp
 ```
 
-The output directory must be new. Model and local metrics are written first, scene next, then the revision directory is renamed into place; the index is atomically replaced last. Failed asset writes cannot add a partial revision to the index. Sequence numbers start at 1, the index retains the latest 32 segments, and index/model limits are 512 KiB / 32 MiB. Assets remain immutable; retention of old asset directories is a separate publisher/cleanup concern.
+Output must be new. Write model/metrics, then scene; rename revision into place and atomically replace index last. Failures cannot index partial revisions. Sequence starts at 1; index retains 32 segments and is ≤512 KiB; models ≤32 MiB. Old asset-directory cleanup is separate.
 
-The index is `{"version":1,"sessions":[session]}`. Session fields are `id`, `title`, `state` (`starting`, `live`, `ended`, `failed`), `started_at`, `updated_at`, `target_latency_seconds`, `latest_input_time_seconds`, `dropped_windows`, `source`, and `segments`. `source` has `label`, `url`, `license`, and `caveat`. Each segment contains exactly:
+Index shape is `{"version":1,"sessions":[session]}`. Session fields: `id`, `title`, `state` (`starting`, `live`, `ended`, `failed`), `started_at`, `updated_at`, `target_latency_seconds`, `latest_input_time_seconds`, `dropped_windows`, `source` (`label`, `url`, `license`, `caveat`) and `segments`. Each segment contains exactly:
 
 ```text
 sequence, start_seconds, end_seconds, scene_url,
@@ -69,17 +69,17 @@ model_sha256, model_bytes, captured_at, available_at,
 training_seconds, mean_packed_psnr, mean_packed_ssim
 ```
 
-Segment times are absolute source PTS; model time runs from zero to `end_seconds - start_seconds`. `scene_url` is `/live-assets/<id>/<revision>/scene.json`, `temporal.url` is exactly `model.rgs`, and scene attribution label/source/license equal the session title/source URL/license. RGS1 uses the existing lossless RLE gzip encoding, with no extra quantization or point removal and no HTTP `Content-Encoding: gzip`. VOD keeps its smallest-of-two encoding policy.
+Segment times are absolute PTS; model time is zero to `end_seconds - start_seconds`. `scene_url` is `/live-assets/<id>/<revision>/scene.json`, `temporal.url` exactly `model.rgs`. Attribution label/source/license equals title/source URL/license.
 
-Live updates prioritize encoding time. For the 13 frozen snapshots measured below, RLE produced byte-for-byte identical files to the smallest-of-two choice. On the three final models, a separate CPU check measured 0.045–0.049 seconds for RLE versus 1.011–1.058 seconds for smallest-of-two, with equal decoded bytes. These are single encoding observations, not whole-pipeline speedups; other inputs can produce larger RLE files. The training table below predates this encoding-only change; the final delivery integration must measure the combined pipeline again.
+Live uses lossless RLE Z1, no added quantization/removal or HTTP Content-Encoding; VOD keeps smallest-of-two. On 13 frozen snapshots RLE equalled smallest-of-two bytes. Three final-model CPU checks observed RLE 0.045–0.049s versus 1.011–1.058s, with identical raw bytes. These single encode observations do not establish pipeline speedup; other inputs may grow. The local training table predates this encoder change.
 
-Only `model.rgs` and `scene.json` are publication assets. Metrics, provenance and the three final packed held-out RGB diagnostics stay local. Diagnostics are written after snapshot availability timing, at the first/middle/last time of the final window using its first held-out view. The index exposes only the agreed aggregate metrics. This module performs no cloud mutations or deployment.
+Only model/scene are publication assets. Metrics/provenance/three final packed diagnostics remain local; index exposes agreed aggregates. Diagnostics use first held-out view at first/middle/last final-window times, after availability timing. This module performs no cloud mutation/deployment.
 
 ## Finite local measurement, 2026-11-09
 
-One 10-second VRU Basketball gz source, 250 frames at 25 fps, 34 cameras, 480×270 RGB, 30 training / 4 held-out views, 20-frame windows, seed 0, and 99,330 initial points. Hardware: local NVIDIA RTX PRO 500 Blackwell Generation Laptop GPU; Torch 2.10.0+cu128 / gsplat 1.5.3. No cloud GPU was used. Exactly three training configurations were run, with bootstrap 300 steps throughout. Final manifest generalization, structured logging and diagnostic plumbing were CPU-checked afterwards; the measured dimensions, fps, windows and optimizer equations were unchanged, and no further training trial was run.
+One 10s VRU Basketball gz source: 250 frames/25fps, 34 cameras, 480×270 RGB, 30 train/4 held-out, 20-frame windows, seed 0, 99,330 initial points. Local NVIDIA RTX PRO 500 Blackwell Generation Laptop GPU, Torch 2.10.0+cu128/gsplat 1.5.3; no cloud GPU. Exactly three configurations, bootstrap 300 each. Later manifest/logging/diagnostic generalization was CPU-checked without further training or changed dimensions/fps/windows/optimizer equations.
 
-Frame 0 RGB bytes, normalized view matrices and target intrinsics exactly matched the existing validated VRU NPZ (SHA256 `f735fbbdfd9b17846941d7fdede7a2617999fc77a06cb0f6dc906000a7e55c53`). Each snapshot evaluates both float and actual packed output on all 20 times × 4 held-out views. The final window is source frames 230–249 for all three runs; earlier selected windows differ because pending work is replaced. Thus this is a streaming latency/quality tradeoff, not a controlled fixed-step quality benchmark or an improvement over the offline 12,000-step baseline.
+Frame 0 RGB, normalized view matrices and K exactly matched validated NPZ SHA256 `f735fbbdfd9b17846941d7fdede7a2617999fc77a06cb0f6dc906000a7e55c53`. Every snapshot evaluates float/actual packed on 20×4 held-out images. All final windows are frames 230–249; earlier windows differ due to replacement. This is a latency/quality tradeoff, not a fixed-step quality comparison against offline 12,000 steps.
 
 | Decode workers / update steps | Snapshots / dropped | First output since capture start | Mean / max capture→local | Final packed PSNR / SSIM | Final global steps / Gaussians / bytes |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -87,19 +87,17 @@ Frame 0 RGB bytes, normalized view matrices and target intrinsics exactly matche
 | 8 / 300 | 4 / 9 | 14.539 s | 22.075 / 30.882 s | 20.7988 / .685863 | 1,200 / 127,833 / 5,765,117 |
 | 8 / 600 | 3 / 10 | 14.682 s | 25.290 / 35.797 s | 21.5217 / .711016 | 1,500 / 127,669 / 5,775,973 |
 
-All three produced the first model while source decoding was still in progress. The faster decoder still took 27.897 seconds to read the 10-second source in the 8/300 run. Its per-view decode wall times summed to 177.552 seconds versus 12.111 seconds for remap/colour conversion; these overlapping per-view wall sums are **not CPU time**. The decoder was the main source of capture/arrival lag. An independent 10-frame-set CPU profile measured 1.593 seconds with four workers and 1.030 seconds with eight, using the same resampling pixels.
+All first models preceded decode completion. In 8/300, decoding 10s took 27.897s; overlapping per-view wall sums were 177.552s decode versus 12.111s remap/color (**not CPU time**). Decode dominated arrival lag. A separate 10-frame-set CPU profile took 1.593s with four workers and 1.030s with eight, using the same pixels.
 
-For the 8/300 run, per-update training took 6.258–7.827 seconds, lossless packing/compression 1.113–1.509 seconds, and float+packed held-out evaluation 0.611–0.729 seconds. The final 8/600 update took 12.833 / 1.209 / 0.593 seconds respectively. That final model had 127,669 velocities above magnitude `1e-6`; mean absolute first/last packed-render difference across the four held-out views was .043059 on RGB `[0,1]`. These establish temporal dependence, not accurate motion reconstruction.
+For 8/300, per-update training took 6.258–7.827s, packing 1.113–1.509s, and float+packed evaluation 0.611–0.729s. Final 8/600 times were 12.833/1.209/0.593s respectively. Its 127,669 final velocities exceeded `1e-6`; mean absolute first/last packed-render RGB difference was .043059 (`[0,1]`, four held-out views). These establish time dependence, not accurate motion.
 
-Latency uses a session UTC/monotonic epoch plus original source PTS as the simulated capture timestamp. `capture→local` includes decoder lateness, pending-window wait, model update, export, evaluation and local scene/index availability. `arrival→local` excludes decoder lateness and is also recorded; it must not substitute for capture latency. Startup (1.077–1.607 seconds) is reported separately. Cloud upload, HTTP delivery, client polling, decoding and display are **excluded**. The best measured maximum was 30.882 seconds, so a strict 30-second or end-to-end target remains unproven. These are single trials; visible player ghosting and author-supplied geometry limit the quality claim.
+Simulated capture timestamps use session UTC/monotonic epoch plus source PTS. `capture→local` includes decoder lateness, queue wait, training/export/evaluation/index availability; `arrival→local` excludes decoder lateness. Startup 1.077–1.607s is separate. Upload/HTTP/polling/client decode/display are excluded. Best maximum 30.882s misses strict 30s; single trials and supplied geometry limit generalization.
 
 ## Checks
 
 ### Verified cloud delivery, 2026-11-09
 
-Source `19085e206f67c37b65db86be86fa433e5114c2f8` was then tested with the same 10-second recorded rig, 8 decode workers, 300 bootstrap/update steps and the RLE encoding path. The local worker and an independent publisher ran concurrently. All training was local; no cloud GPU was used.
-
-Four distinct models reached the real GCS/Cloud CDN path, with the first visible through HTTP **before source decoding completed**. Nine pending windows were replaced. Capture timestamps below refer to the last source sample of each 0.76-second window.
+Source `19085e206f67c37b65db86be86fa433e5114c2f8`, same 10s rig, 8 workers, 300 bootstrap/update, RLE; local training and independent publisher ran concurrently, without cloud GPU. Four models reached GCS/Cloud CDN, first HTTP-visible before decode completion; nine pending windows dropped. Capture uses the last sample of each 0.76s window.
 
 | Measurement | Observed result |
 | --- | ---: |
@@ -110,9 +108,9 @@ Four distinct models reached the real GCS/Cloud CDN path, with the first visible
 | Final packed held-out PSNR / SSIM | 20.5904 dB / .674379 |
 | Final compressed model | 5,774,550 bytes |
 
-The observer fetched changing session metadata from the separate one-second CDN route; responses advertised `max-age=1` and permitted the app's CORS origin. It also checked API/CDN agreement at completion. All four published models were fetched through HTTP, passed scene/timeline/size/SHA and Range 206 checks, and decoded to identical raw bytes in Python and the shipped JavaScript reader.
+Observer metadata used the separate one-second CDN route (`max-age=1`, app CORS); API/CDN agreed at completion. All four models passed HTTP scene/timeline/size/SHA/Range 206 and Python/JS raw-byte equality.
 
-These are one short integration run's results, not a sustained 30-second SLO or browser-display measurement. Browser polling, decoding and GPU presentation can add delay. The lossless encoder changed scheduling and selected intermediate windows, so this run is not an isolated end-to-end compression speedup comparison. Player ghosting and gaps remain; [issue #89](https://github.com/Hosi121/rangle/issues/89) tracks source throughput, quality and longer-input validation. The finite test ended and retains its last model at the [LIVE viewer](https://app.rangleplay.stream/demo/?live=basketball-live-20261109).
+This short integration excludes browser display and sustained SLOs. Encoding changed scheduling/intermediate windows, so it is not an isolated speedup comparison. Ghosting/gaps remain; [#89](https://github.com/Hosi121/rangle/issues/89) tracks throughput/quality/longer input. The ended test retains its [last model](https://app.rangleplay.stream/demo/?live=basketball-live-20261109). Current cloud deployment/results: [cloud LIVE](cloud-live.md).
 
 ### Automated checks
 
@@ -124,4 +122,4 @@ ruff format --check ml/rangle_live ml/tests/test_live.py ml/tests/full_ml/test_l
 PYTHONPATH=ml:ml/tests python3 -m unittest discover -s ml/tests/full_ml -v
 ```
 
-The lightweight suite checks pacing before image access, no future windows, replacement/drop counts, cancellation/deadlines, generic manifest dimensions/splits/budgets, seed admission, publication ordering/failures, immutable revisions, fixed camera metadata, exact index fields, retention bounds, finite CLI arguments and help without runtime imports. The existing complete-ML CPU suite analytically verifies warm-shift position/lifetime behavior while retaining actual Adam state and parameter identities. All nine tests also passed in the existing Torch 2.6 trainer image with networking and GPU access disabled. Local diagnostic encoding uses the trainer's existing Pillow dependency. No tests are skipped to accommodate the lightweight environment.
+Lightweight contracts cover PTS pacing/no future access, replacement/cancellation/deadlines, manifest budgets, seed admission, immutable scene-last publication/failure, camera/index/retention bounds and finite CLI/help without runtime imports. Complete-ML CPU tests verify warm-shift/lifetime equations with real Adam identities/state. All nine also passed in the Torch 2.6 trainer without network/GPU; missing dependencies are not skipped. Diagnostics use existing Pillow.

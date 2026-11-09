@@ -1,20 +1,19 @@
 # 時間付きモデルの圧縮比較
 
-2026-11-09に生成した259,797 Gaussianの同じRGS1を、値・順序・数を変えずに比較した。今回のモデルではgzipの `Z_RLE` により、既存Z1の12,106,161Bから11,967,872Bへ138,289B（1.142%）減った。raw 14,548,664Bからの削減は17.739%。新形式・量子化・間引きは導入していない。
+2026-11-09生成の同一259,797点RGS1で、gzip `Z_RLE`は既存Z1 **12,106,161→11,967,872B（138,289B、1.142%減）**。raw14,548,664B比17.739%減。値・順序・点数は保持し、新形式・量子化・間引きは導入しない。
 
-別の学習runである `local-lifetime` の配信モデルは11,626,506Bだった。baseline比3.962%の差には、学習方法、最終Gaussian数、export圧縮の変更が含まれる。この差を圧縮単独の効果とは扱わない。学習条件と指標は[学習比較](training-quality.md)に分けた。
+別runの`local-lifetime`は11,626,506B（baseline比3.962%減）だが、学習・点数・圧縮変更を含む。[学習比較](training-quality.md)と圧縮単独の結果を混ぜない。
 
-RLEは辞書圧縮が得意な既存fixtureでは悪化したため、既存 `compress_temporal(payload)` とNode packerの既定は変更しない。追加の `compress_temporal_smallest(payload)` / `--strategy=auto` は従来方式とRLEを両方encodeして小さい方を選び、同じサイズなら従来方式を保つ。従来Z1より容量を増やさず適用できるが、RLE単独の速度・メモリの測定値をautoや学習全体の改善として扱わない。
+RLEは既存fixtureで悪化するため、`compress_temporal(payload)`/Node既定は維持。`compress_temporal_smallest(payload)`/`--strategy=auto`は従来とRLEを両方encodeし、小さい方（tieは従来）を選ぶ。RLE単独の速度・メモリ結果はautoに適用できない。
 
 ## 固定した比較条件
 
-- 入力はT4で生成した同一モデルの既存Z1。元の固定float RGS1へ一度復号して全候補へ同じbytesを渡した。
-- CPUはローカルWSL2 / Intel Core Ultra 7 255H。Python 3.12.3、NumPy 2.4.2、zlib 1.3。T4でのencode/decode時間ではない。
-- encodeはheader検証・列転置・gzip・結果生成、decodeは既存Python decoderによるheader検証・gzip・元のrecord配置への復元を含む。`process_time`でプロセスのCPU時間を測り、ファイルI/O・SHA計算は時間の外に置いた。
-- 初回7候補、従来方式とRLE9の再計測4回、RLE9の逐次encode 1回の計12回で探索を終了。比較開始から終了までは約87秒で、20分の上限内。以後はcodec互換性の検証だけを行った。
-- 過去に比較済みのword-XOR / Brotli / zstdを再探索していない。新しい研究の再現や、FP16・間引きの評価でもない。
+- T4生成の既存Z1をrawへ一度復号し、全候補へ同じbytesを渡した。
+- ローカルWSL2 / Intel Core Ultra 7 255H、Python3.12.3、NumPy2.4.2、zlib1.3。T4時間ではない。
+- `process_time`によるCPU時間。encodeはheader検証/転置/gzip/生成、decodeはPythonの検証/gzip/record復元を含み、I/OとSHAを除く。
+- 初回7候補＋再計測4回＋逐次RLE9 1回＝12回、約87秒（上限20分）で終了。以後は互換性確認のみ。word-XOR/Brotli/zstdの再探索、研究再現、FP16/間引き評価は含まない。
 
-初回の候補比較は各1回。時間はms、サイズは10進byte。全候補で復号後の全byteとSHA-256が元RGS1に一致した。
+各1回、時間ms・サイズ10進byte。全候補で元rawの全byte/SHAが一致した。
 
 | gzip設定 | サイズ | encode CPU | decode CPU |
 | --- | ---: | ---: | ---: |
@@ -26,58 +25,56 @@ RLEは辞書圧縮が得意な既存fixtureでは悪化したため、既存 `co
 | level9 / FILTERED | 12,017,552 | 1,558.5 | 71.1 |
 | level6 / RLE | 11,967,872 | 135.4 | 77.3 |
 
-levelを下げるだけでは容量が増えた。RLE9は同じサイズとなり、既存のlevel9指定を保った。RLE9の列ごとの逐次encodeは、全列をまとめたRLE9とencoded bytesも一致した。逐次化は最大の転置配列とbytesコピーを同時に作ることを避ける。
+level低下だけでは増量。RLE9も同サイズでlevel9を維持した。列ごとの逐次RLE9は一括版とencoded bytesも一致し、大きな転置配列とbytesコピーの同時確保を避ける。
 
-peak RSSは入力読込とPython/NumPyを含むプロセス全体の最大常駐量。低メモリのlauncherから別プロセスを起動して測り、`/proc/self/status` のVmHWMとも照合した。初回launcherから継承したRSS値は比較に使わない。
+peak RSSは入力/Python/NumPy込み。低メモリlauncherの別プロセスで測定し、`/proc/self/status` VmHWMとも照合した（初回launcher継承RSSは不使用）。
 
 | 実装 | encode CPU | decode CPU | encode peak RSS | decode peak RSS |
 | --- | ---: | ---: | ---: | ---: |
 | 従来DEFAULT、2回 | 1,441.3–1,476.8ms | 75.1–130.3ms | 85.30–85.35MB | 114.54MB |
 | 逐次RLE9、1回 | 144.9ms | 78.9ms | 71.28MB | 114.20MB |
 
-RLE単独のencodeは従来2回の中央値1,459.0msに対して約10.1倍速く、encode peak RSSは約16%少なかった。標本数は少なく、decode時間の差や分位点の優位は主張しない。autoは両encodeと両出力の保持が必要で、この10.1倍・16%削減を適用できない。autoのCPU/peak RSSと、学習・公開工程全体の時間は今回測っていない。
+RLE単独は従来中央値1,459.0ms比約10.1倍速く、encode peak RSS約16%減。少数標本でdecode/分位点の優位は主張しない。autoの両encode/両出力保持、全学習・公開工程のCPU/RSS/時間は未測定。
 
 ## bytesとreaderの互換性
 
 | 内容 | SHA-256 |
 | --- | --- |
-| 元のZ1（従来方式の再encodeとも一致） | `53c82f7ffef6159d16875b702e839199d875a667b244205c96a34db1f6d35ca6` |
-| 固定したraw RGS1 | `b9a897915a613315734dc5483872641f0c4f4396b7668cb1ba3532f57fd2ce03` |
+| 元Z1（従来再encodeとも一致） | `53c82f7ffef6159d16875b702e839199d875a667b244205c96a34db1f6d35ca6` |
+| 固定raw RGS1 | `b9a897915a613315734dc5483872641f0c4f4396b7668cb1ba3532f57fd2ce03` |
 | Python逐次RLE9 / Node RLE9 | `d8f0c60e84bde7cfe1cc03254ffcd48f32b6947e149e3798a226a6c1555fcc83` |
 
-実モデルの従来Z1とPython/Nodeの新RLE Z1を、既存JS `decodeTemporal` とPythonで復号し、14,548,664Bの全byte一致を確認した。autoも同じRLE bytesを選んだ。canonical IDとなるrecord順序、floatの全bit、初期時刻に不可視のGaussianも保持する。Node v24.13.0 / zlib 1.3.1-470d3a2のoracleはブラウザの再生・復号時間を測るものではない。
+Python/既存JS `decodeTemporal`で旧/新Z1を復号し、14,548,664Bが一致。autoも同RLEを選択した。record ID/順序、float全bit、初期不可視点を保持。Node v24.13.0/zlib1.3.1-470d3a2 oracleはブラウザ性能測定ではない。
 
-magicは引き続き `RANGL4Z1`、32byte headerの残りも同一、payloadは単一gzip member。既存D1/Z1のreaderを変更せず読めるため、reader先行配備は不要。32MiBの入力・展開上限、宣言された出力長、CRC・終端検証も変更しない。HTTPの `Content-Encoding` は付けず、新しいbytesは新しいrevisionへ公開する。圧縮後のSHA・サイズをmanifestへ記録し、既存公開資産を上書きしない。
+契約は[既存RGS1-Z](gaussian-compression.md#rgs1-zの契約)のまま：`RANGL4Z1`、32byte header、単一gzip、32MiB入力/展開上限、長さ/CRC/終端検証。reader変更・先行配備は不要。HTTP Content-Encodingは付けず、新bytesのSHA/サイズを新revisionへ公開し、既存資産を上書きしない。
 
 ## 明示して使う
 
-Pythonでは従来のimportとcallをそのまま使える。追加の `compress_temporal_rle(raw)` はRLE単独、`compress_temporal_smallest(raw)` は容量優先の選択で、いずれも同形式Z1を返す。学習workerでautoを使う際はexport側で後者を明示する。
+Pythonは`compress_temporal_rle(raw)`でRLE単独、`compress_temporal_smallest(raw)`で容量優先。workerのauto exportでは後者を明示する。
 
 ```sh
-# 従来のdefault。既存の呼出しは変更不要。
+# 従来default
 node apps/web/viewer/pack-temporal.mjs raw.rgs output-default.rgs
-# 容量を比較して選ぶ。入力rawより大きければ従来どおりrawを保持する。
+# 両方式を比較
 node apps/web/viewer/pack-temporal.mjs raw.rgs output-auto.rgs --strategy=auto
-# 測定済み資産でRLEだけを使う場合。
+# RLE単独
 node apps/web/viewer/pack-temporal.mjs raw.rgs output-rle.rgs --strategy=rle
 ```
 
-packerは復号後の全byte一致を確認し、選択したstrategy・サイズ・SHAをJSONへ出力する。出力先が存在すれば失敗する。autoのtieは従来方式、rawと同サイズの場合は既存動作どおりrawとなる。
+packerは復号一致後にstrategy/サイズ/SHAをJSON出力。出力既存なら失敗し、圧縮がraw以上ならrawを保持する。
 
-検証はPythonの既存契約と追加テスト、Node oracle、JS codec/packerテストで行った。RLE単独が悪化する入力、autoの最小選択・tie、旧Z1/D1、破損・切断・余分なgzip bytes、宣言サイズの不整合を含む。上記の可逆圧縮CPU比較では、学習画像品質、WebGL、スマートフォン、実ブラウザのCPU・memoryを測定していない。全byte一致は固定した配信用RGS1に対するものであり、RGS1に書く前の既存RGB/alpha/quaternion量子化の影響を消すものではない。
+Python契約/追加テスト、Node oracle、JS codec/packerテストで、RLE悪化、auto選択/tie、旧Z1/D1、破損/切断/余分なgzip/宣言サイズ不整合を確認した。CPU比較はWebGL・実ブラウザ・スマートフォンの性能や学習品質を測らず、export前のRGB/alpha/quaternion量子化も取り消さない。
 
 ## FP16精度候補の評価（未採用）
 
-`local-lifetime` の同じ学習結果を固定し、追加学習なしで80枚のheld-out画像すべてを評価した。原wireは250,637 Gaussian、raw 14,035,704B、auto圧縮11,626,506B。候補は全12floatをFP16往復するものと、positionの3floatをFP32に保って残り9floatをFP16往復するもの。RGB8・quaternion8、行順、数、時刻ごとのRGBA8評価は共通とした。
+同じ`local-lifetime`を追加学習せず80 held-out画像で比較。原wireは250,637点、raw14,035,704B、auto11,626,506B。12floatすべて、またはposition3floatを除く9floatをFP16往復し、既存float32欄へ戻して同autoで圧縮した。RGB8/quaternion8、順序/数、時刻別RGBA8評価は共通。rawサイズは同じで、新FP16形式の実装・配備ではない。
 
-往復後の値は既存RGS1のfloat32欄へ戻し、同じ最小選択encoderで圧縮した。以下のサイズはこの既存wire上の候補サイズであり、新しいFP16ファイル形式を実装・配備した結果ではない。候補rawサイズは原wireと同じで、精度削減によるbitの変化も圧縮結果へ影響する。
-
-| 表現 | 圧縮bytes | GT PSNR (dB) | GT SSIM | 原wire比の平均MAE | 原wire比の最大絶対RGB差 |
+| 表現 | 圧縮bytes | GT PSNR (dB) | GT SSIM | 原wire比平均MAE | 最大絶対RGB差 |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | 原wire | 11,626,506 | 27.814041 | 0.915371 | 0 | 0 |
 | 全float FP16往復 | 6,818,929 | 27.798317 | 0.915068 | 0.001186555 | 0.351430 |
 | position FP32・他FP16往復 | 8,023,765 | 27.813830 | 0.915368 | 0.000056239 | 0.237637 |
 
-数値はWebP保存前のgsplat描画によるもので、RGBは `[0,1]`。MAEは各画像の平均誤差を80枚で平均し、最大差は全画像の任意pixel・RGB成分の最大値を取った。全float候補の最大差はframe 0 / view 30、position維持候補はframe 19 / view 30で記録された。平均PSNR/SSIMが近くても、この局所差を小さいとは判断しない。
+WebP保存前のgsplat/RGB`[0,1]`評価。MAEは画像平均の80枚平均、maxは全pixel/成分の最大。max位置は全float：frame0/view30、position保持：frame19/view30。平均が近くても局所差は残る。
 
-これは同一モデル・同一80画像の1回の評価で、WebGLやスマートフォン上の画素差・速度は測っていない。比較処理は同じT4 job内で18.100秒を要し、追加GPU学習jobは起動していない。初回・中間・終端の比較WebPは「GT・原wire・候補」の順で保存した。**FP16は未採用で、配信するモデルは原wireのみ。候補モデルのファイル保存・公開は行っていない。**
+同一モデル/80画像の1回、同T4 job内18.100秒、追加GPU学習jobなし。WebGL/スマートフォンの差・速度は未測定。最初/中間/最後のWebPはGT→原wire→候補順。**FP16未採用、配信は原wireのみ。候補モデルは保存・公開していない。**
