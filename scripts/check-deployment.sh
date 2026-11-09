@@ -36,7 +36,7 @@ if [[ ${1:-} == origins ]]; then
 fi
 readonly media_origin=${origins#*$'\n'}
 
-base=${1:?Usage: check-deployment.sh https://service.run.app}
+base=${1:?Usage: check-deployment.sh https://app.example.com}
 base=${base%/}
 python3 - "$base" <<'PY'
 import os
@@ -50,14 +50,23 @@ if not (u.scheme == 'https' or local) or not u.hostname or u.username or u.passw
 expected = os.environ.get('EXPECTED_CATALOG_SHA256', '')
 if expected and not re.fullmatch(r'[0-9a-f]{64}', expected):
     raise SystemExit('EXPECTED_CATALOG_SHA256 must be a complete lowercase SHA256.')
+revision = os.environ.get('EXPECTED_REVISION', '')
+if revision and (not re.fullmatch(r'rangle-stg-[a-z0-9-]+', revision) or len(revision) > 63):
+    raise SystemExit('EXPECTED_REVISION must name a dedicated stg revision.')
+if os.environ.get('RANGLE_CANDIDATE_PROBE', '') not in ('', 'ci-candidate'):
+    raise SystemExit('RANGLE_CANDIDATE_PROBE must be empty or ci-candidate.')
 PY
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
+probe_headers=()
+if [[ ${RANGLE_CANDIDATE_PROBE:-} == ci-candidate ]]; then
+  probe_headers=(--header 'X-Rangle-Candidate: ci-candidate')
+fi
 fetch() {
   curl --silent --show-error --fail-with-body --proto '=https,http' \
     --connect-timeout 5 --max-time 20 --max-filesize 1048576 \
     --retry 2 --retry-delay 1 --retry-all-errors \
-    --dump-header "$work/$2.headers" --output "$work/$2" "$base$1"
+    "${probe_headers[@]}" --dump-header "$work/$2.headers" --output "$work/$2" "$base$1"
 }
 fetch /health health
 fetch / landing
@@ -76,16 +85,23 @@ from urllib.parse import urlsplit
 work = Path(sys.argv[1])
 expected_media = urlsplit(sys.argv[2])
 expected_catalog = os.environ.get('EXPECTED_CATALOG_SHA256', '')
-if expected_catalog:
+expected_revision = os.environ.get('EXPECTED_REVISION', '')
+def response_headers(name):
     headers = {}
-    for line in work.joinpath('api.headers').read_text().splitlines():
+    for line in work.joinpath(name + '.headers').read_text().splitlines():
         if line.startswith('HTTP/'):
             headers = {}
         elif ':' in line:
             key, value = line.split(':', 1)
             headers.setdefault(key.lower().strip(), []).append(value.strip())
-    if headers.get('x-rangle-catalog-sha256') != [expected_catalog]:
+    return headers
+if expected_catalog:
+    if response_headers('api').get('x-rangle-catalog-sha256') != [expected_catalog]:
         raise SystemExit('API did not serve the selected static catalog SHA256.')
+if expected_revision:
+    for name in ('health', 'landing', 'demo', 'api', 'live'):
+        if response_headers(name).get('x-rangle-revision') != [expected_revision]:
+            raise SystemExit('HTTP response did not serve the selected revision: ' + name)
 if work.joinpath('health').read_bytes() != b'ok\n':
     raise SystemExit('health did not return the application health contract.')
 if 'rangle' not in work.joinpath('landing').read_text().lower():
