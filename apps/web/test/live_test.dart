@@ -390,6 +390,47 @@ void main() {
   );
 
   testWidgets(
+    'an active revision updates displayed bookkeeping while newer metadata waits',
+    (tester) async {
+      var sequence = 1;
+      late UpdatingViewer viewer;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: LiveScreen(
+            api: api(
+              MockClient((_) async => reply(liveSession(sequence: sequence))),
+            ),
+            initialId: 'game',
+            viewerFactory: (source) => viewer = UpdatingViewer(source),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      for (final revision in [2, 3, 4]) {
+        sequence = revision;
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pump();
+      }
+      // The adapter may finish revision 2 even though the widget asks for 4.
+      // Its actual draw must advance the displayed source before 4 is ready.
+      expect(viewer.updates, hasLength(3));
+      viewer.finish(true, at: 0);
+      await tester.pump();
+      await tester.pump();
+      expect(viewer.value.source!.path, contains('/000002-'));
+      expect(find.textContaining('0.8–1.6秒の区間'), findsOneWidget);
+      viewer.finish(false, at: 1);
+      viewer.finish(true, at: 2);
+      await tester.pump();
+      await tester.pump();
+      expect(viewer.value.source!.path, contains('/000004-'));
+      expect(find.textContaining('2.4–3.2秒の区間'), findsOneWidget);
+      expect(viewer.disposed, isFalse);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
     'an intermediate model acknowledgement cannot cancel retry of a newer failed snapshot',
     (tester) async {
       var sequence = 1;

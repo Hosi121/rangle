@@ -72,6 +72,7 @@ export class SceneSession {
   load(source, options = {}) {
     this.liveOptions = options;
     this.source = source;
+    this.sourceSha256 = options.sha256;
     return this.initialLoad = this.loadInitial(source);
   }
 
@@ -141,10 +142,35 @@ export class SceneSession {
     }
   }
 
-  async replace(source, sha256) {
-    if (!this.liveOptions?.live || this.disposed || this.paused) return false;
-    this.replacementAbort?.abort();
-    this.temporal?.cancelReplacement();
+  replace(source, sha256) {
+    if (!this.liveOptions?.live || this.disposed || this.paused) return Promise.resolve(false);
+    for (const request of [this.activeReplacement, this.pendingReplacement]) {
+      if (request?.source === source && request.sha256 === sha256) return request.promise;
+    }
+    if (!this.activeReplacement && this.temporal?.initialized &&
+        source === this.source && sha256 === this.sourceSha256) return Promise.resolve(true);
+    let resolve;
+    const request = { source, sha256, promise: new Promise(done => { resolve = done; }), resolve: value => resolve(value) };
+    // New revisions replace waiting metadata, never the download/prepare in flight.
+    this.pendingReplacement?.resolve(false);
+    this.pendingReplacement = request;
+    this.drainReplacement();
+    return request.promise;
+  }
+
+  drainReplacement() {
+    if (this.activeReplacement || !this.pendingReplacement || this.disposed || this.paused) return;
+    const request = this.activeReplacement = this.pendingReplacement;
+    this.pendingReplacement = null;
+    void this.replaceActive(request).then(ready => {
+      request.resolve(ready);
+      if (this.activeReplacement !== request) return;
+      this.activeReplacement = null;
+      this.drainReplacement();
+    });
+  }
+
+  async replaceActive({ source, sha256 }) {
     const abort = this.replacementAbort = new AbortController();
     const timeout = setTimeout(() => abort.abort(), 15000);
     abort.signal.addEventListener('abort', () => {
@@ -159,13 +185,22 @@ export class SceneSession {
       const ready = await this.temporal.replace(manifest, { sha256 });
       if (!ready || abort.signal.aborted || this.disposed) return false;
       this.source = source;
+      this.sourceSha256 = sha256;
       this.manifest = manifest;
       return true;
     } catch { return false; }
     finally { clearTimeout(timeout); }
   }
 
-  cancelReplacement() { this.replacementAbort?.abort(); this.temporal?.cancelReplacement(); }
+  cancelReplacement() {
+    const active = this.activeReplacement;
+    this.activeReplacement = null;
+    this.pendingReplacement?.resolve(false);
+    this.pendingReplacement = null;
+    this.replacementAbort?.abort();
+    this.temporal?.cancelReplacement();
+    active?.resolve(false);
+  }
 
   readyMessage() {
     return { frame: 0, frameCount: this.manifest.frameCount, frameRate: this.manifest.frameRate,
@@ -281,7 +316,7 @@ export class SceneSession {
     this.disposed = true;
     this.pending = null;
     this.abort.abort();
-    this.replacementAbort?.abort();
+    this.cancelReplacement();
     this.frameLoader.dispose();
     this.viewer?.stop();
     this.release = Promise.resolve().then(() => this.temporal ? this.temporal.dispose() : this.viewer?.dispose()).catch(() => {});
