@@ -52,6 +52,18 @@ resource.labels.job_id="<provider-id>"
 
 ローカルではGo race/vet、Terraform module/root validateとmock検証を実行する。Google Cloud APIの `projects.dashboards.create?validateOnly=true` と `entries.list` でも、保存を伴わずダッシュボード定義・収集フィルターを検証できる。
 
+## 2026-11-10 JSTの配備記録
+
+`comin-up` のpresentation stateへログ基盤を適用した。専用bucket・sink・dashboardとLogging/Monitoring APIの管理を追加し、**5追加・0変更・0削除**。完全planに残っていた別PRのCloud Run ingress・候補NEG/backend・URL map変更は適用しなかった。既存設定をstateから復元した非公開tfvarsを使い、この3資源をtargetした保存済みplanで変更先を確認した。既存のdeployment/budget_guard outputも変更していない。
+
+- [配備済みダッシュボード](https://console.cloud.google.com/monitoring/dashboards/custom/df3cbd9c-c2fd-4c0d-ac2e-f7ff0e03c0fd?project=comin-up)：8 widgets。専用bucketの保持30日、sink有効、宛先・filterをAPIで照合した。
+- 専用viewでCloud RunのHTTP 200と生成同期Schedulerのログ受信を確認した。sink作成直後の最初の要求はすぐには検索できず、反映待ち後の要求で確認した。
+- 公開済みLIVE indexを4,487 bytesだけ取得し、同じCDN URLのHTTP 200ログが専用viewへ届くことと `cacheLookup=true` を確認した。cache hit率や大量配信の検証ではない。
+- 要求数・要求遅延の2つのグラフについて、Monitoring timeSeries APIで実データを取得できた。Dashboard APIのvalidateOnlyも成功した。
+- Go全体のrace/vet、module/root validate、Terraform mock 21ケースが成功した。
+
+Go imageの `severity/message` 対応はソース変更までで、今回のインフラ適用ではimage/trafficを変更していない。MLイベントは既存の実ログでservice属性を確認したが、新しいGPU jobを起動して専用bucketへの到達を検証する作業は行っていない。通知/SLOやブラウザQoEを実装済みとは扱わない。
+
 ## 参照
 
 - [Cloud Runの構造化ログ](https://docs.cloud.google.com/run/docs/logging#special-json-fields)
