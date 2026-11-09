@@ -121,6 +121,66 @@ void main() {
     );
   });
 
+  test('approved LIVE uses the existing admission request and keeps its viewer in every state', () async {
+    final fixture = GenerationFixture()..mode = 'live';
+    final api = fixture.api;
+    addTearDown(api.close);
+    expect((await api.presets()).presets.single.isLive, isTrue);
+    final created = await api.create('reviewed-sports', 'a' * 32);
+    expect(created.isLive, isTrue);
+    expect(jsonDecode(fixture.requests.last.body), {
+      'preset': 'reviewed-sports',
+      'request_id': 'a' * 32,
+    });
+    for (final state in [
+      'submitting',
+      'queued',
+      'running',
+      'cancelling',
+      'succeeded',
+      'failed',
+      'cancelled',
+    ]) {
+      fixture.state = state;
+      final job = await api.get(generationJobId);
+      expect(job.mode, 'live');
+      expect(job.viewerUrl.toString(), '/demo/?live=$generationJobId');
+      expect((await api.jobs()).single.mode, 'live');
+    }
+    expect(
+      (await api.cancel(generationJobId)).viewerUrl.toString(),
+      '/demo/?live=$generationJobId',
+    );
+  });
+
+  test('LIVE viewer URLs cannot switch sessions, modes, origins or duplicate query keys', () async {
+    for (final url in [
+      '/demo/?live=${'f' * 32}',
+      '/demo/?clip=generated-$generationJobId',
+      '/demo/?live=$generationJobId&live=$generationJobId',
+      '/demo/?live=$generationJobId&other=1',
+      'https://evil.example.invalid/demo/?live=$generationJobId',
+    ]) {
+      final api = GenerationApi(
+        endpoint: Uri.parse('https://app.example.invalid/api/v1/'),
+        client: MockClient(
+          (_) async => http.Response(
+            jsonEncode({
+              ...generationResult('running', mode: 'live'),
+              'viewer_url': url,
+            }),
+            200,
+          ),
+        ),
+      );
+      addTearDown(api.close);
+      await expectLater(
+        api.get(generationJobId),
+        throwsA(isA<GenerationFailure>()),
+      );
+    }
+  });
+
   test('oversized JSON is rejected before sending', () async {
     final fixture = GenerationFixture();
     final api = fixture.api;

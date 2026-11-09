@@ -5,6 +5,9 @@ import 'package:flutter/material.dart';
 import '../community/account_controller.dart';
 import '../community/account_dialog.dart';
 import '../community/community_api.dart';
+import '../live/live_api.dart';
+import '../live/live_screen.dart';
+import '../viewer/viewer_adapter.dart';
 import '../widgets/viewer_modal.dart';
 import 'generation_api.dart';
 
@@ -14,10 +17,18 @@ class GenerationScreen extends StatefulWidget {
     required this.onOpenResult,
     this.onPublicationChanged,
     this.api,
+    this.live,
+    this.liveFactory,
+    this.liveViewer = false,
+    this.initialLiveId,
     super.key,
   });
   final AccountController? account;
   final GenerationApi? api;
+  final LiveApi? live;
+  final ViewerFactory? liveFactory;
+  final bool liveViewer;
+  final String? initialLiveId;
   final ValueChanged<Uri> onOpenResult;
   final VoidCallback? onPublicationChanged;
 
@@ -40,6 +51,8 @@ class _GenerationScreenState extends State<GenerationScreen>
   final _jobErrors = <String, String>{};
   bool _loading = true, _submitting = false, _accepted = false;
   bool _foreground = true, _covered = false;
+  late bool _showLive;
+  String? _liveId;
   int _epoch = 0;
   Timer? _poll;
 
@@ -51,6 +64,8 @@ class _GenerationScreenState extends State<GenerationScreen>
   @override
   void initState() {
     super.initState();
+    _showLive = widget.liveViewer;
+    _liveId = widget.initialLiveId;
     _api =
         widget.api ??
         GenerationApi(
@@ -61,7 +76,10 @@ class _GenerationScreenState extends State<GenerationScreen>
     widget.account?.addListener(_accountChanged);
     WidgetsBinding.instance.addObserver(this);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
-    _foreground = lifecycle == null || lifecycle == AppLifecycleState.resumed;
+    _foreground =
+        lifecycle == null ||
+        lifecycle == AppLifecycleState.resumed ||
+        (_showLive && lifecycle == AppLifecycleState.inactive);
     if (_foreground) unawaited(_load());
   }
 
@@ -107,14 +125,16 @@ class _GenerationScreenState extends State<GenerationScreen>
       _error = null;
     });
     try {
-      final catalog = await _api.presets();
-      if (!mounted || epoch != _epoch) return;
-      _catalog = catalog;
-      if (!catalog.available || catalog.presets.isEmpty) {
-        throw const GenerationFailure('generation_unavailable');
-      }
-      if (!catalog.presets.any((preset) => preset.id == _preset)) {
-        _preset = catalog.presets.first.id;
+      if (!_showLive) {
+        final catalog = await _api.presets();
+        if (!mounted || epoch != _epoch) return;
+        _catalog = catalog;
+        if (!catalog.available || catalog.presets.isEmpty) {
+          throw const GenerationFailure('generation_unavailable');
+        }
+        if (!catalog.presets.any((preset) => preset.id == _preset)) {
+          _preset = catalog.presets.first.id;
+        }
       }
       if (_signedIn) {
         final jobs = await _api.jobs();
@@ -224,8 +244,12 @@ class _GenerationScreenState extends State<GenerationScreen>
     final confirmed = await showViewerDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('生成を中止しますか？'),
-        content: const Text('途中までの生成結果は表示されません。'),
+        title: Text(job.isLive ? 'LIVEの生成を停止しますか？' : '生成を中止しますか？'),
+        content: Text(
+          job.isLive
+              ? '新しい映像の生成を停止します。公開済みの区間は残る場合があります。'
+              : '途中までの生成結果は表示されません。',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -277,7 +301,16 @@ class _GenerationScreenState extends State<GenerationScreen>
       if (!mounted || epoch != _epoch) return;
       setState(() => _updateJob(result));
       onSuccess?.call();
-      if (open && _visible) widget.onOpenResult(result.viewerUrl!);
+      if (open && _visible) {
+        if (result.isLive) {
+          setState(() {
+            _liveId = result.id;
+            _showLive = true;
+          });
+        } else {
+          widget.onOpenResult(result.viewerUrl!);
+        }
+      }
     } catch (error) {
       if (mounted && epoch == _epoch && _visible) {
         setState(() => _jobErrors[job.id] = _message(error));
@@ -292,6 +325,8 @@ class _GenerationScreenState extends State<GenerationScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Focusing the GS iframe does not hide the visible job controls.
+    if (_showLive && state == AppLifecycleState.inactive) return;
     _foreground = state == AppLifecycleState.resumed;
     if (_foreground && !_covered) {
       unawaited(_load());
@@ -320,8 +355,68 @@ class _GenerationScreenState extends State<GenerationScreen>
     ),
   );
 
+  Widget? _liveStatus(GenerationJob? job) {
+    if (job == null && _error == null) return null;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (job != null)
+            Semantics(liveRegion: true, child: Text(job.stateLabel)),
+          if (job?.active == true && job!.state != 'cancelling')
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton(
+                onPressed: _busy || _loading ? null : () => _cancel(job),
+                child: const Text('LIVEを停止'),
+              ),
+            ),
+          if (_error != null) _errorText(_error!),
+          if (job == null)
+            TextButton(
+              onPressed: _loading ? null : _load,
+              child: const Text('ジョブ状態を再読み込み'),
+            ),
+          if (_jobErrors[job?.id] != null) _errorText(_jobErrors[job?.id]!),
+        ],
+      ),
+    );
+  }
+
+  Widget _liveView() {
+    final job = _jobs
+        .where((job) => job.isLive && job.id == _liveId)
+        .firstOrNull;
+    return LiveScreen(
+      api: widget.live,
+      viewerFactory: widget.liveFactory,
+      initialId: _liveId,
+      waitForSession: job?.active == true,
+      onSessionChanged: (id) => setState(() => _liveId = id),
+      onBack: widget.liveViewer
+          ? () => Navigator.pop(context)
+          : () {
+              setState(() => _showLive = false);
+              unawaited(_load());
+            },
+      jobStatus: _liveStatus(job),
+    );
+  }
+
+  bool get _livePreset =>
+      _catalog?.presets
+          .where((item) => item.id == _preset)
+          .firstOrNull
+          ?.isLive ==
+      true;
+
   @override
-  Widget build(BuildContext context) => Scaffold(
+  Widget build(BuildContext context) =>
+      _showLive ? _liveView() : _generationForm(context);
+
+  Widget _generationForm(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('GSを生成'),
       actions: [
@@ -416,6 +511,8 @@ class _GenerationScreenState extends State<GenerationScreen>
                           ? '依頼を送信しています'
                           : _requestId != null && !_accepted
                           ? '同じ依頼で再試行'
+                          : _livePreset
+                          ? 'LIVEを開始'
                           : '生成を開始',
                     ),
                   ),
@@ -459,10 +556,17 @@ class _GenerationScreenState extends State<GenerationScreen>
                                 onPressed: _busy || _loading
                                     ? null
                                     : () => _cancel(job),
-                                child: const Text('生成を中止'),
+                                child: Text(job.isLive ? 'LIVEを停止' : '生成を中止'),
                               ),
                             ),
-                          if (job.state == 'succeeded') ...[
+                          if (job.isLive)
+                            FilledButton.tonal(
+                              onPressed: _busy || _loading
+                                  ? null
+                                  : () => _open(job),
+                              child: const Text('LIVEを見る'),
+                            ),
+                          if (!job.isLive && job.state == 'succeeded') ...[
                             if (job.published)
                               const Padding(
                                 padding: EdgeInsets.symmetric(vertical: 8),

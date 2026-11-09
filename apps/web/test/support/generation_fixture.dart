@@ -27,7 +27,8 @@ Map<String, Object?> generationResult(
   bool published = false,
 }) => {
   'job': generationJob(state, mode: mode, published: published),
-  if (state == 'succeeded') ...{
+  if (mode == 'live') 'viewer_url': '/demo/?live=$generationJobId',
+  if (mode != 'live' && state == 'succeeded') ...{
     'viewer_url': '/demo/?clip=generated-$generationJobId',
     'scene_url':
         'https://media.example.invalid/generated/$generationJobId/scene.json',

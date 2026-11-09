@@ -1,13 +1,17 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:rangle_web/community/account_controller.dart';
 import 'package:rangle_web/data/clip_repository.dart';
 import 'package:rangle_web/generation/generation_screen.dart';
 import 'package:rangle_web/main.dart';
+import 'package:rangle_web/live/live_api.dart';
+import 'package:rangle_web/live/live_screen.dart';
 import 'package:rangle_web/models/clip.dart';
 import 'package:rangle_web/viewer/viewer_adapter.dart';
 
@@ -32,6 +36,51 @@ class _GeneratedClip implements ClipRepository {
   ];
 }
 
+class _LiveFeed {
+  bool ready = false;
+  int polls = 0;
+  late final api = LiveApi(
+    endpoint: Uri.parse('https://app.example.invalid/api/v1/live'),
+    client: MockClient((_) async {
+      polls++;
+      if (!ready) return http.Response('{}', 404);
+      final digest = 'a' * 64;
+      return http.Response.bytes(
+        utf8.encode(
+          jsonEncode({
+            'id': generationJobId,
+            'title': 'スポーツのLIVE',
+            'state': 'live',
+            'started_at': '2026-11-09T00:00:00Z',
+            'updated_at': '2026-11-09T00:00:01Z',
+            'latest_input_time_seconds': .76,
+            'source': {
+              'label': 'Test source',
+              'url': 'https://source.example.invalid',
+              'license': 'CC BY 4.0',
+            },
+            'segments': [
+              {
+                'sequence': 1,
+                'start_seconds': 0,
+                'end_seconds': .76,
+                'scene_url':
+                    '/live-assets/$generationJobId/000001-${digest.substring(0, 16)}/scene.json',
+                'model_sha256': digest,
+                'model_bytes': 1000,
+                'captured_at': '2026-11-09T00:00:00Z',
+                'available_at': '2026-11-09T00:00:01Z',
+              },
+            ],
+          }),
+        ),
+        200,
+        headers: {'content-type': 'application/json'},
+      );
+    }),
+  );
+}
+
 Future<AccountController> _show(
   WidgetTester tester,
   GenerationFixture fixture, {
@@ -39,6 +88,8 @@ Future<AccountController> _show(
   double scale = 1,
   ValueChanged<Uri>? onOpen,
   VoidCallback? onPublicationChanged,
+  LiveApi? live,
+  ViewerFactory? liveFactory,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -56,6 +107,8 @@ Future<AccountController> _show(
           api: fixture.api,
           onOpenResult: onOpen ?? (_) {},
           onPublicationChanged: onPublicationChanged,
+          live: live,
+          liveFactory: liveFactory,
         ),
       ),
     ),
@@ -79,6 +132,166 @@ Future<void> _tap(WidgetTester tester, String text) async {
 }
 
 void main() {
+  testWidgets(
+    'LIVE starts through admission and retains job status and stop access before and after the first snapshot',
+    (tester) async {
+      final fixture = GenerationFixture()..mode = 'live';
+      final feed = _LiveFeed();
+      final viewers = <FakeViewer>[];
+      await _show(
+        tester,
+        fixture,
+        live: feed.api,
+        liveFactory: (_) {
+          final viewer = FakeViewer(surfaceKey: 'cloud-live-surface');
+          viewers.add(viewer);
+          return viewer;
+        },
+        onOpen: (_) => fail('LIVE must keep job controls in the app'),
+      );
+      expect(find.text('LIVEの自由視点（順次更新）'), findsOneWidget);
+      await _tap(tester, 'LIVEを開始');
+      expect(fixture.creates, hasLength(1));
+      await _tap(tester, 'LIVEを見る');
+      expect(find.byType(LiveScreen), findsOneWidget);
+      expect(find.text('LIVE用GPUの準備を待っています'), findsOneWidget);
+      expect(find.text('GPUと配信の準備をしています'), findsOneWidget);
+      expect(find.text('LIVEを停止'), findsOneWidget);
+      final firstPolls = feed.polls;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(feed.polls, greaterThan(firstPolls));
+      fixture.state = 'running';
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+      expect(find.text('LIVEの生成ジョブが稼働中です'), findsOneWidget);
+      expect(find.text('GPUと配信の準備をしています'), findsOneWidget);
+      feed.ready = true;
+      await tester.pump(const Duration(seconds: 1));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('cloud-live-surface')), findsOneWidget);
+      expect(viewers, hasLength(1));
+      await _tap(tester, 'LIVEを停止');
+      expect(find.text('LIVEの生成を停止しますか？'), findsOneWidget);
+      await _tap(tester, '中止する');
+      expect(fixture.deletes, 1);
+      expect(find.text('中止しています'), findsOneWidget);
+      expect(viewers.single.disposed, isFalse);
+      fixture.state = 'cancelled';
+      await tester.pump(const Duration(seconds: 4));
+      await tester.pumpAndSettle();
+      expect(find.text('生成を中止しました'), findsOneWidget);
+      expect(find.text('LIVEを停止'), findsNothing);
+      expect(find.text('フィードに掲載'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(viewers.single.disposed, isTrue);
+      final polls = feed.polls, jobs = fixture.polls;
+      await tester.pump(const Duration(seconds: 12));
+      expect(feed.polls, polls);
+      expect(fixture.polls, jobs);
+    },
+  );
+
+  for (final state in ['queued', 'succeeded', 'failed', 'cancelled']) {
+    testWidgets(
+      'LIVE history in $state can reopen its viewer without VOD publication',
+      (tester) async {
+        final fixture = GenerationFixture()
+          ..mode = 'live'
+          ..state = state;
+        final feed = _LiveFeed();
+        await _show(tester, fixture, live: feed.api);
+        expect(find.text('結果を見る'), findsNothing);
+        expect(find.text('フィードに掲載'), findsNothing);
+        await _tap(tester, 'LIVEを見る');
+        expect(
+          fixture.polls,
+          1,
+          reason: 'History reconnect retrieves the trusted wrapper viewer URL',
+        );
+        expect(find.byType(LiveScreen), findsOneWidget);
+        final polls = feed.polls;
+        await tester.pump(const Duration(seconds: 1));
+        await tester.pumpAndSettle();
+        expect(feed.polls, state == 'queued' ? greaterThan(polls) : polls);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  testWidgets(
+    'LIVE deep link reload restores owned job controls, pauses hidden work and clears ownership on logout',
+    (tester) async {
+      final fixture = GenerationFixture()
+        ..mode = 'live'
+        ..state = 'queued';
+      final feed = _LiveFeed();
+      await tester.pumpWidget(
+        RangleApp(
+          repository: const DemoClipRepository(),
+          community: fixture.community,
+          generation: fixture.api,
+          live: feed.api,
+          initialLiveId: generationJobId,
+          viewerFactory: (_) => FakeViewer(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('LIVE用GPUの準備を待っています'), findsOneWidget);
+      expect(find.text('LIVEを停止'), findsOneWidget);
+      expect(
+        fixture.requests.any((r) => r.url.path.endsWith('/generation/presets')),
+        isFalse,
+      );
+      expect(fixture.creates, isEmpty);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      await tester.pumpAndSettle();
+      final polls = feed.polls, jobs = fixture.polls;
+      await tester.pump(const Duration(seconds: 8));
+      expect(feed.polls, polls);
+      expect(fixture.polls, jobs);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(feed.polls, greaterThan(polls));
+      tester
+          .widget<GenerationScreen>(find.byType(GenerationScreen))
+          .account!
+          .expired();
+      await tester.pumpAndSettle();
+      expect(find.text('LIVEを停止'), findsNothing);
+      expect(find.text('GPUと配信の準備をしています'), findsNothing);
+      final afterLogout = feed.polls;
+      await tester.pump(const Duration(seconds: 5));
+      expect(feed.polls, afterLogout);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  for (final size in [const Size(320, 640), const Size(844, 390)]) {
+    testWidgets(
+      'pending LIVE retains usable job controls at $size and 2x text',
+      (tester) async {
+        final fixture = GenerationFixture()
+          ..mode = 'live'
+          ..state = 'queued';
+        await _show(
+          tester,
+          fixture,
+          live: _LiveFeed().api,
+          size: size,
+          scale: 2,
+        );
+        await _tap(tester, 'LIVEを見る');
+        expect(find.text('LIVEを停止'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await _tap(tester, 'LIVEを停止');
+        expect(find.byType(AlertDialog), findsOneWidget);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   testWidgets(
     'successful results can be listed and withdrawn without a GPU job',
     (tester) async {

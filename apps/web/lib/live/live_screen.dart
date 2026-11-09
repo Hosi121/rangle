@@ -10,10 +10,23 @@ import 'live_api.dart';
 import 'live_controller.dart';
 
 class LiveScreen extends StatefulWidget {
-  const LiveScreen({this.api, this.initialId, this.viewerFactory, super.key});
+  const LiveScreen({
+    this.api,
+    this.initialId,
+    this.viewerFactory,
+    this.jobStatus,
+    this.waitForSession = false,
+    this.onBack,
+    this.onSessionChanged,
+    super.key,
+  });
   final LiveApi? api;
   final String? initialId;
   final ViewerFactory? viewerFactory;
+  final Widget? jobStatus;
+  final bool waitForSession;
+  final VoidCallback? onBack;
+  final ValueChanged<String?>? onSessionChanged;
   @override
   State<LiveScreen> createState() => _LiveScreenState();
 }
@@ -39,9 +52,16 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
     if (widget.api != null &&
         (widget.initialId == null || liveId(widget.initialId!))) {
       _controller = LiveController(widget.api!, initialId: widget.initialId);
+      _controller!.waitForSession(widget.waitForSession);
       _controller!.visible(_visible);
       _controller!.start();
     }
+  }
+
+  @override
+  void didUpdateWidget(LiveScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _controller?.waitForSession(widget.waitForSession);
   }
 
   void _select(String? id) {
@@ -54,6 +74,7 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
       _sourceRevision = 0;
       _controller!.select(id);
     });
+    widget.onSessionChanged?.call(id);
   }
 
   void _sourceReady(Uri source) {
@@ -111,6 +132,9 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
       title: const Text('LIVE'),
+      leading: widget.onBack == null
+          ? null
+          : BackButton(onPressed: widget.onBack),
       actions: [
         if (_controller?.selectedId != null)
           IconButton(
@@ -122,16 +146,23 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
     ),
     body: SafeArea(
       top: false,
-      child: _controller == null
-          ? const ViewerMessage(
-              icon: Icons.cloud_off,
-              title: 'LIVEに接続できません',
-              description: '接続先または配信URLを確認してください。',
-            )
-          : ListenableBuilder(
-              listenable: _controller!,
-              builder: (context, _) => _content(),
-            ),
+      child: Column(
+        children: [
+          if (widget.jobStatus != null) widget.jobStatus!,
+          Expanded(
+            child: _controller == null
+                ? const ViewerMessage(
+                    icon: Icons.cloud_off,
+                    title: 'LIVEに接続できません',
+                    description: '接続先または配信URLを確認してください。',
+                  )
+                : ListenableBuilder(
+                    listenable: _controller!,
+                    builder: (context, _) => _content(),
+                  ),
+          ),
+        ],
+      ),
     ),
   );
 
@@ -169,14 +200,20 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
     }
     final session = controller.current;
     if (session == null) {
+      final preparing =
+          widget.waitForSession && (controller.loading || controller.missing);
       return ViewerMessage(
         icon: Icons.live_tv,
-        title: controller.missing
+        title: preparing
+            ? 'GPUと配信の準備をしています'
+            : controller.missing
             ? 'LIVEが見つかりません'
             : controller.reconnecting
             ? 'LIVEに再接続しています'
             : '配信を確認しています',
-        description: '前の画面に戻るか、接続を確認して再試行できます。',
+        description: preparing
+            ? 'クラウドの起動には数分かかることがあります。最初の映像を待っています。'
+            : '前の画面に戻るか、接続を確認して再試行できます。',
         action: TextButton(
           onPressed: controller.refresh,
           child: const Text('再試行'),
