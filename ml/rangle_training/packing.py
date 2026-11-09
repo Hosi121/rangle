@@ -57,3 +57,169 @@ def unpack_splats(payload: bytes) -> tuple:
         points["rgba"][:, :3].astype(np.float32) / 255,
         points["rgba"][:, 3].astype(np.float32) / 255,
     )
+
+
+# RGS1 stores each primitive once, in its original order, with float32 motion.
+TEMPORAL_HEADER_BYTES = 32
+TEMPORAL_STRIDE = 56
+MAX_TEMPORAL_BYTES = 32 << 20
+MAX_TEMPORAL_GAUSSIANS = 500_000
+TEMPORAL = np.dtype(
+    SPLAT.descr
+    + [
+        ("velocity", "<f4", 3),
+        ("centre_time", "<f4"),
+        ("sigma", "<f4"),
+        ("peak", "<f4"),
+    ]
+)
+
+
+def temporal_header(payload):
+    import struct
+
+    if not TEMPORAL_HEADER_BYTES <= len(payload) <= MAX_TEMPORAL_BYTES:
+        raise ValueError("Invalid temporal model size")
+    magic, count, stride, frames, fps, duration, flags = struct.unpack_from(
+        "<8sIIIffI", payload
+    )
+    compressed = magic == b"RANGL4Z1"
+    raw_size = TEMPORAL_HEADER_BYTES + count * TEMPORAL_STRIDE
+    if (
+        magic not in (b"RANGL4D1", b"RANGL4Z1")
+        or not 1 <= count <= MAX_TEMPORAL_GAUSSIANS
+        or stride != TEMPORAL_STRIDE
+        or not 2 <= frames <= 32
+        or not np.isfinite(fps)
+        or not 0 < fps <= 240
+        or not np.isfinite(duration)
+        or duration <= 0
+        or abs(duration - (frames - 1) / fps) > 1e-5
+        or flags != 0
+        or raw_size > MAX_TEMPORAL_BYTES
+        or (not compressed and len(payload) != raw_size)
+        or (compressed and len(payload) <= TEMPORAL_HEADER_BYTES)
+    ):
+        raise ValueError("Invalid temporal model header")
+    return count, frames, fps, duration, compressed
+
+
+def pack_temporal(
+    means,
+    scales,
+    quats,
+    colors,
+    peak,
+    velocity,
+    centre_time,
+    sigma,
+    *,
+    frame_count,
+    frame_rate,
+):
+    """Pack the existing RGS1 layout without alpha culling or ID reordering."""
+    import struct
+
+    count = len(means)
+    if not 1 <= count <= MAX_TEMPORAL_GAUSSIANS:
+        raise ValueError("Temporal Gaussian budget exceeded")
+    for array, shape in (
+        (peak, (count,)),
+        (velocity, (count, 3)),
+        (centre_time, (count,)),
+        (sigma, (count,)),
+    ):
+        if array.shape != shape or not np.isfinite(array).all():
+            raise ValueError("Invalid temporal parameter shape or values")
+    if (sigma <= 0).any() or ((peak < 0) | (peak > 1)).any():
+        raise ValueError("Invalid temporal opacity or duration")
+    # A nonzero temporary alpha makes pack_splats preserve even currently invisible IDs.
+    static = np.frombuffer(
+        pack_splats(means, scales, quats, colors, np.ones(count)), dtype=SPLAT
+    )
+    rows = np.empty(count, dtype=TEMPORAL)
+    for name in SPLAT.names:
+        rows[name] = static[name]
+    rows["rgba"][:, 3] = np.rint(peak * 255).astype(np.uint8)
+    rows["velocity"], rows["centre_time"] = velocity, centre_time
+    rows["sigma"], rows["peak"] = sigma, peak
+    header = struct.pack(
+        "<8sIIIffI",
+        b"RANGL4D1",
+        count,
+        TEMPORAL_STRIDE,
+        frame_count,
+        frame_rate,
+        (frame_count - 1) / frame_rate,
+        0,
+    )
+    result = header + rows.tobytes()
+    # Validate after float32 conversion, including representability of reciprocal sigma.
+    unpack_temporal(result)
+    return result
+
+
+def compress_temporal(payload):
+    """Lossless byte-column shuffle + gzip, identical to the viewer codec."""
+    import gzip
+
+    count, _, _, _, compressed = temporal_header(payload)
+    if compressed:
+        raise ValueError("Temporal model is already compressed")
+    columns = np.frombuffer(payload, dtype=np.uint8, offset=TEMPORAL_HEADER_BYTES)
+    columns = columns.reshape(count, TEMPORAL_STRIDE).T.copy().tobytes()
+    result = (
+        b"RANGL4Z1" + payload[8:TEMPORAL_HEADER_BYTES] + gzip.compress(columns, mtime=0)
+    )
+    temporal_header(result)
+    return result
+
+
+def decode_temporal(payload):
+    import gzip
+    import io
+
+    count, _, _, _, compressed = temporal_header(payload)
+    if not compressed:
+        return payload
+    expected = count * TEMPORAL_STRIDE
+    with gzip.GzipFile(fileobj=io.BytesIO(payload[TEMPORAL_HEADER_BYTES:])) as source:
+        columns = source.read(expected + 1)
+    if len(columns) != expected:
+        raise ValueError("Decompressed temporal size differs from its declaration")
+    rows = (
+        np.frombuffer(columns, dtype=np.uint8).reshape(TEMPORAL_STRIDE, count).T.copy()
+    )
+    return b"RANGL4D1" + payload[8:TEMPORAL_HEADER_BYTES] + rows.tobytes()
+
+
+def unpack_temporal(payload):
+    """Decode stored parameters; render alpha is rounded at the requested time."""
+    raw = decode_temporal(payload)
+    rows = np.frombuffer(raw, dtype=TEMPORAL, offset=TEMPORAL_HEADER_BYTES)
+    for field in ("position", "scale", "velocity", "centre_time", "sigma", "peak"):
+        if not np.isfinite(rows[field]).all():
+            raise ValueError("Nonfinite temporal primitive")
+    with np.errstate(over="ignore", divide="ignore"):
+        reciprocal = np.float32(1) / rows["sigma"]
+    if (
+        (rows["scale"] <= 0).any()
+        or (rows["sigma"] <= 0).any()
+        or not np.isfinite(reciprocal).all()
+        or ((rows["peak"] < 0) | (rows["peak"] > 1)).any()
+    ):
+        raise ValueError("Invalid temporal primitive")
+    static_rows = np.empty(len(rows), dtype=SPLAT)
+    for name in SPLAT.names:
+        static_rows[name] = rows[name]
+    means, scales, quats, colors, _ = unpack_splats(static_rows.tobytes())
+    return (
+        means,
+        scales,
+        quats,
+        colors,
+        rows["peak"].copy(),
+        rows["velocity"].copy(),
+        rows["centre_time"].copy(),
+        rows["sigma"].copy(),
+    )

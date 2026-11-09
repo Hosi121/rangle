@@ -1,4 +1,4 @@
-"""Run one bounded static 3DGS reconstruction and publish its immutable preview."""
+"""Run one bounded static or dynamic Gaussian reconstruction and publish its preview."""
 
 import argparse
 import gzip
@@ -244,7 +244,7 @@ def optimize(data, steps, deadline, directory):
     }
 
 
-def main():
+def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     for flag in (
         "input-uri",
@@ -258,13 +258,37 @@ def main():
     ):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--steps", type=int, default=6000)
-    args = parser.parse_args()
+    parser.add_argument("--mode", choices=("static", "dynamic"), default="static")
+    args = parser.parse_args(argv)
     if (
         not re.fullmatch(r"[a-f0-9]{32}", args.job_id)
         or not re.fullmatch(r"[a-f0-9]{64}", args.input_sha256)
-        or not 1 <= args.steps <= 6000
+        or not 1 <= args.steps <= (12000 if args.mode == "dynamic" else 6000)
     ):
         raise ValueError("Invalid job identity, checksum or iteration budget")
+    return args
+
+
+def build_scene(args, dataset):
+    scene = {
+        "version": 1,
+        "frameRate": dataset.frame_rate,
+        "camera": scene_camera(dataset),
+        "attribution": {
+            "label": args.title,
+            "source": args.source,
+            "license": args.license,
+        },
+    }
+    if args.mode == "dynamic":
+        scene.update(frameCount=len(dataset.frame_times), temporal={"url": "model.rgs"})
+    else:
+        scene["frames"] = ["model.splat"]
+    return scene
+
+
+def main(*, storage_client_factory=None):
+    args = parse_args()
     deadline = datetime.fromisoformat(args.deadline.replace("Z", "+00:00"))
     if deadline.tzinfo is None:
         raise ValueError("Deadline must include its timezone")
@@ -286,9 +310,11 @@ def main():
     watchdog.start()
     client = None
     try:
-        from google.cloud import storage
+        if storage_client_factory is None:
+            from google.cloud import storage
 
-        client = storage.Client()
+            storage_client_factory = storage.Client
+        client = storage_client_factory()
         with tempfile.TemporaryDirectory(prefix="rangle-training-") as temporary:
             directory = Path(temporary)
             source = client.bucket(input_bucket).blob(input_name)
@@ -305,39 +331,49 @@ def main():
                     != args.input_sha256
                 ):
                     raise ValueError("Input checksum mismatch")
-            dataset = load_dataset(dataset_file)
-            log("training_started", job_id=args.job_id, input_sha256=args.input_sha256)
-            payload, metrics = optimize(dataset, args.steps, expires, directory)
+            dataset = load_dataset(dataset_file, mode=args.mode)
+            log(
+                "training_started",
+                job_id=args.job_id,
+                mode=args.mode,
+                input_sha256=args.input_sha256,
+            )
+            if args.mode == "dynamic":
+                from .temporal import optimize_dynamic
+
+                payload, metrics = optimize_dynamic(
+                    dataset, args.steps, expires, directory
+                )
+                model_name, model_bytes = "model.rgs", payload
+            else:
+                payload, metrics = optimize(dataset, args.steps, expires, directory)
+                model_name, model_bytes = "model.splat", gzip.compress(payload, mtime=0)
             metrics.update(
                 {
                     "job_id": args.job_id,
+                    "mode": args.mode,
                     "input_sha256": args.input_sha256,
-                    "splat_bytes": len(payload),
-                    "splat_sha256": hashlib.sha256(payload).hexdigest(),
+                    "model_bytes": len(model_bytes),
+                    "model_sha256": hashlib.sha256(model_bytes).hexdigest(),
                     "source": args.source,
                     "license": args.license,
                 }
             )
-            (directory / "model.splat").write_bytes(gzip.compress(payload, mtime=0))
+            if args.mode == "static":
+                metrics.update(
+                    splat_bytes=len(payload),
+                    splat_sha256=hashlib.sha256(payload).hexdigest(),
+                )
+            (directory / model_name).write_bytes(model_bytes)
             (directory / "metrics.json").write_text(
                 json.dumps(metrics, allow_nan=False, indent=2)
             )
-            scene = {
-                "version": 1,
-                "frameRate": 1,
-                "camera": scene_camera(dataset),
-                "frames": ["model.splat"],
-                "attribution": {
-                    "label": args.title,
-                    "source": args.source,
-                    "license": args.license,
-                },
-            }
+            scene = build_scene(args, dataset)
             (directory / "scene.json").write_text(json.dumps(scene, allow_nan=False))
             bucket = client.bucket(output_bucket)
             # Publish the scene only after all referenced files are complete.
             files = [
-                directory / "model.splat",
+                directory / model_name,
                 directory / "metrics.json",
                 *sorted(directory.glob("heldout-*.webp")),
                 directory / "scene.json",
@@ -362,6 +398,7 @@ def main():
             log(
                 "training_completed",
                 job_id=args.job_id,
+                mode=args.mode,
                 training_seconds=metrics["training_seconds"],
                 gaussians=metrics["stored_gaussians"],
             )
