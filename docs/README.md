@@ -49,7 +49,7 @@
 - [発表用stgの配備](stg-deployment.md)：対象環境、IAM、予算・期限停止、検証の到達点。[Terraform README](../infra/gcp/README.md)はroot/moduleとローカル検証の入口。
 - [CI/CD](cicd.md)：PR検証、image digest、candidate確認・traffic昇格・復帰。[Docker](docker.md#imageと配信設定の対応)にbuildとruntime設定の対応を記載。
 - [生成基盤](generation-infrastructure.md)：有限GPU job、入力・結果の権限とconfig。[クラウドLIVE](cloud-live.md#権限と配備)はLIVE専用の拡張。
-- [ログ方針](logging.md)：Go・Pythonの出力と属性、記録する境界。
+- [ログ方針](logging.md)：Go・Pythonの出力と属性、記録する境界。[ログ監視](observability.md)は専用30日保持・ダッシュボード・検索と配備手順。
 
 ## 研究・現状
 
