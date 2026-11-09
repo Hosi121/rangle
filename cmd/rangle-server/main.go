@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Hosi121/rangle/internal/appserver"
+	"github.com/Hosi121/rangle/internal/serverlimit"
 )
 
 func main() {
@@ -89,7 +90,7 @@ func run(ctx context.Context, address string, cfg config, logger *slog.Logger) (
 		ReadHeaderTimeout: 5 * time.Second,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	logger.Info("server started", "scene_id", cfg.Web.SceneID, "clip_count", handler.clipCount)
+	logger.Info("server started", "scene_id", cfg.Web.SceneID, "clip_count", handler.clipCount, "api_max_active_requests", serverlimit.MaxConcurrentAPIRequests, "api_queue_capacity", 0)
 
 	serveError := make(chan error, 1)
 	go func() { serveError <- server.Serve(listener) }()
