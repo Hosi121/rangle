@@ -33,6 +33,16 @@ Workerもviewerと同じ固定版のparserとgeneratorを使う。alpha閾値1�
 
 Workerへの移動もCPU処理そのものをなくす変更ではない。mesh構築やGPU転送は残り、端末でのFPS・初回表示時間・総メモリ削減を保証するものではない。ABRとの接続と実機評価は別に行う。
 
+## 時間モデルの受信
+
+RGS1のWorkerは、利用可能なContent-Lengthを受信用bufferの確保に使い、届いたchunkを直接書き込む。実際のbodyは常に32MiBまで数える。HTTPのcontent codingでbodyが宣言長より大きくなる場合や長さが不明な場合は、従来と同じboundedな結合処理へ戻す。短いbodyには余分なゼロを付けず、SHA確認前に正確な長さへ揃える。応答エラーや上限超過ではbodyをcancelし、readerを解放する。
+
+既存の5,816,150byteモデルと64KiBの模擬chunkでは、元chunk群と結合済みbufferを同時に保持する約11.63MBの期間を、事前確保bufferと処理中chunkの保持へ置き換える。これは受信処理の明示的なpayload保持量の比較であり、ブラウザ全体やGPUを含むpeak memoryの削減量ではない。
+
+Node 24.13.0・同一CPU core・暖機1回ずつ・交互3回で、受信/hash/復号/SDK準備の合計中央値は変更前98.0ms、変更後104.7msだった。CPU時間の短縮は確認していない。全6回でraw model・SDK buffer・motion・textureのSHAが一致した。ネットワーク・Worker起動・GPU転送・実描画はこの測定に含まない。4列単位の復号案も全体の短縮が確認できず、追加scratch bufferが必要なため採用しなかった。
+
+この変更は受信中の一時buffer保持を抑えるもので、圧縮形式・画質・転送bytesは変えない。実回線と端末での表示時間は別途確認する。
+
 ## 検証
 
 `npm test --prefix apps/web/viewer`で、固定SDKの変換とのbyte一致、入力サイズ制限、Worker再利用・取消・遅延イベント、最新seekへの集約、カメラ保持、旧sceneの解放、依存ソースの変更検知を確認する。実ブラウザでは、実資産を使った描画の一致、繰り返しシーク、離脱時の解放、動画との切替を確認する。

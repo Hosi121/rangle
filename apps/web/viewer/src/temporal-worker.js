@@ -1,5 +1,6 @@
-import { MAX_TEMPORAL_BYTES, prepareTemporal } from './temporal-format.js';
+import { prepareTemporal } from './temporal-format.js';
 import { decodeTemporal } from './temporal-codec.js';
+import { readTemporalBody } from './temporal-download.js';
 import { TemporalSorter } from './temporal-sort.js';
 
 let sorter, pendingLoad, loading;
@@ -11,26 +12,8 @@ async function loadPending() {
   try {
     const response = await fetch(data.url, { signal: abort.signal,
       redirect: data.strict ? 'error' : 'follow', credentials: data.strict ? 'omit' : 'same-origin' });
-    if (!response.ok || Number(response.headers.get('Content-Length')) > MAX_TEMPORAL_BYTES) throw new Error('Model request failed');
-    const reader = response.body.getReader(), chunks = [];
-    let size = 0;
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        size += value.byteLength;
-        if (size > MAX_TEMPORAL_BYTES) throw new Error('Model exceeds limit');
-        chunks.push(value);
-      }
-    } catch (error) {
-      await reader.cancel().catch(() => {});
-      throw error;
-    } finally { reader.releaseLock(); }
+    const bytes = await readTemporalBody(response);
     if (abort.signal.aborted || hidden) return;
-    const bytes = new Uint8Array(size);
-    let offset = 0;
-    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-    chunks.length = 0;
     if (data.sha256 !== undefined) {
       if (!/^[a-f0-9]{64}$/.test(data.sha256)) throw new Error('Invalid model digest');
       const digest = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes.buffer)),
