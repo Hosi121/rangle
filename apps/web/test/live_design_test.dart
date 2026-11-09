@@ -44,7 +44,7 @@ void main() {
         tester.view.devicePixelRatio = 1;
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
-        final generation = GenerationFixture()..mode = 'live';
+        final generation = GenerationFixture(admin: false)..mode = 'live';
         final viewers = <live_fixture.UpdatingViewer>[];
         final now = DateTime.now().toUtc();
         final client = MockClient((request) async {
@@ -170,6 +170,8 @@ void main() {
         await tester.tap(find.text('フィードに戻る'));
         await tester.pumpAndSettle();
         expect(viewers.single.disposed, isTrue);
+        generation.admin = true;
+        generation.user!['is_admin'] = true;
         await showApp(initialGeneration: true);
         await tester.pumpAndSettle();
         await capture('generation');

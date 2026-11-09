@@ -16,7 +16,7 @@ func storeContract(t *testing.T, s Store) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	a := Account{User: User{"owner", "Owner"}, Salt: []byte("0123456789abcdef"), Hash: make([]byte, 32), HashVersion: 1}
+	a := Account{User: User{ID: "owner", Name: "Owner"}, Salt: []byte("0123456789abcdef"), Hash: make([]byte, 32), HashVersion: 1}
 	var created atomic.Int32
 	var wg sync.WaitGroup
 	for range 8 {

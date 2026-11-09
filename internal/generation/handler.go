@@ -59,6 +59,8 @@ func (h *Handler) write(w http.ResponseWriter, r *http.Request, code int, value 
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	code, message := http.StatusServiceUnavailable, "generation_unavailable"
 	switch {
+	case errors.Is(err, ErrForbidden):
+		code, message = 403, "admin_required"
 	case errors.Is(err, ErrNotFound):
 		code, message = 404, "not_found"
 	case errors.Is(err, ErrArtifacts):
@@ -100,6 +102,9 @@ func (h *Handler) owner(w http.ResponseWriter, r *http.Request) (string, bool) {
 }
 
 func (h *Handler) presets(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.owner(w, r); !ok {
+		return
+	}
 	rows := make([]map[string]string, 0, len(h.service.Config.Presets))
 	for _, p := range h.service.Config.Presets {
 		rows = append(rows, map[string]string{"id": p.ID, "mode": p.ModeName(), "title": p.Title, "sport": p.Sport, "description": p.Description, "source": p.Source, "license": p.License})

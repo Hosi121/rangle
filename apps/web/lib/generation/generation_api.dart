@@ -9,6 +9,7 @@ class GenerationFailure implements Exception {
   final Duration? retryAfter;
 
   String get message => switch (code) {
+    'admin_required' => '管理者アカウントでログインしてください。',
     'not_authenticated' => 'ログインしてから、もう一度お試しください。',
     'generation_busy' => '別の生成が進行中です。少し時間をおいてお試しください。',
     'generation_budget_exhausted' => '現在の生成受付枠を使い切りました。',

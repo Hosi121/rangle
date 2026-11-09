@@ -163,6 +163,10 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	id := normalizeUsername(input.Username)
+	if id == "admin" {
+		h.fail(w, r, 409, "username_unavailable")
+		return
+	}
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		name = id
@@ -290,8 +294,34 @@ func (h *Handler) requireUser(w http.ResponseWriter, r *http.Request) *User {
 	}
 	return user
 }
-func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
+
+// AccountUser refreshes privileges from the account instead of a session role.
+func (h *Handler) AccountUser(r *http.Request) (*User, error) {
 	user, err := h.SessionUser(r)
+	if err != nil || user == nil {
+		return user, err
+	}
+	a, err := h.cfg.Store.Account(r.Context(), user.ID)
+	if errors.Is(err, ErrNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &a.User, nil
+}
+
+// AdminUser authorizes management operations using the current stored role.
+func (h *Handler) AdminUser(r *http.Request) (*User, error) {
+	user, err := h.AccountUser(r)
+	if err == nil && user != nil && !user.Admin {
+		return nil, ErrForbidden
+	}
+	return user, err
+}
+
+func (h *Handler) me(w http.ResponseWriter, r *http.Request) {
+	user, err := h.AccountUser(r)
 	if err != nil {
 		h.unavailable(w, r, "session", err)
 		return

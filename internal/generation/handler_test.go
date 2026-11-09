@@ -65,7 +65,7 @@ func TestHTTPRejectsAnonymousAndCrossOriginWithoutGPU(t *testing.T) {
 
 func TestHTTPJobFlowKeepsInternalInputsPrivate(t *testing.T) {
 	h, s, p := testHandler(t)
-	presets := call(t, h, "GET", "/api/v1/generation/presets", "", "", "")
+	presets := call(t, h, "GET", "/api/v1/generation/presets", "", "viewer", "")
 	public := decode(t, presets)
 	if strings.Contains(string(public["presets"]), "gs://") {
 		t.Fatal("public preset exposed internal inputs")

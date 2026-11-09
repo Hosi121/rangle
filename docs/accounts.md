@@ -31,4 +31,19 @@ FIRESTORE_EMULATOR_HOST=127.0.0.1:8787 go test -race ./internal/community
 
 emulator未指定時は外部DBへ接続せず、このintegration testだけskipする。アカウント再設定・メール確認・管理者モデレーションは今回の実装範囲に含めない。
 
+## 管理アカウント
+
+`admin` は一般登録で取得できない予約ID。管理者でログインすると、フィードの代わりにGS生成・LIVE・生成履歴の管理ページを表示する。通常ユーザーの視聴・交流機能は従来どおり利用できる。
+
+生成APIはプリセット一覧も含めて管理者専用。権限はFirestoreのアカウントに保存し、管理操作のたびに読み直す。`/auth/me` とログイン応答の `user.is_admin` を画面の切り替えに使い、URLやユーザーIDだけでは権限を付与しない。ジョブの所有者チェック、CSRF対策、生成予算は維持する。
+
+運用者は対象DBへのADC権限で次を実行する。パスワードは標準入力から読み、個別salt付きhashとして保存する。既存アカウントは上書きしない。信頼された管理者作成では8〜128文字を許可し、一般登録の15文字以上という条件は維持する。
+
+```bash
+read -r -s -p 'Administrator password: ' rangle_admin_password
+printf '\n'
+printf '%s\n' "$rangle_admin_password" | go run ./cmd/rangle-admin -project PROJECT_ID -database DATABASE_ID
+unset rangle_admin_password
+```
+
 参照：[OWASP Password Storage](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)、[Go CrossOriginProtection](https://pkg.go.dev/net/http#CrossOriginProtection)、[Firestore aggregation](https://firebase.google.com/docs/firestore/query-data/aggregation-queries)。

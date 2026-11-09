@@ -4,10 +4,14 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 class AccountUser {
-  const AccountUser(this.id, this.name);
+  const AccountUser(this.id, this.name, {this.isAdmin = false});
   final String id, name;
-  factory AccountUser.fromJson(Map<String, dynamic> data) =>
-      AccountUser(data['id'] as String, data['name'] as String);
+  final bool isAdmin;
+  factory AccountUser.fromJson(Map<String, dynamic> data) => AccountUser(
+    data['id'] as String,
+    data['name'] as String,
+    isAdmin: data['is_admin'] == true,
+  );
 }
 
 class Engagement {

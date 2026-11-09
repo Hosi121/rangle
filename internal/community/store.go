@@ -15,8 +15,9 @@ var (
 )
 
 type User struct {
-	ID   string `json:"id" firestore:"id"`
-	Name string `json:"name" firestore:"name"`
+	ID    string `json:"id" firestore:"id"`
+	Name  string `json:"name" firestore:"name"`
+	Admin bool   `json:"is_admin,omitempty" firestore:"admin,omitempty"`
 }
 
 // Account is a storage record. Only its User may be sent to a browser.
