@@ -85,3 +85,13 @@ variable "create_artifact_repository" {
   type        = bool
   default     = false
 }
+
+variable "generation_sync_enabled" {
+  description = "Enable authenticated two-minute active-job reconciliation after reviewing the server image and runtime audience."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.generation_sync_enabled || (var.base_domain != null && (var.application == null ? false : var.application.generation_config_sha256 != null))
+    error_message = "Generation sync requires the configured domain and immutable generation config."
+  }
+}
