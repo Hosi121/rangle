@@ -50,7 +50,7 @@ Firestoreは既存named DBの `clips/{id}/cheer_shards/{00..31}` に区間数を
 
 ### LIVEと生成画面の統合
 
-`origin/stg` の `d43798d`（LIVE index・クラウドLIVEジョブ・viewer更新・開始／停止UIを含む）を取り込んだ。`PreviewViewer` の競合は、LIVEのsource更新・SHA照合・再試行と、既存の再生controller・表示切替の両方を保持して解消した。
+`origin/stg` の `99c6b08` まで取り込んだ。LIVE index・クラウドLIVEジョブ・viewer更新・開始／停止UIに加え、LIVE公開のバックプレッシャー対策とデコード用CPU容量の更新を含む。`PreviewViewer` の競合は、LIVEのsource更新・SHA照合・再試行と、既存の再生controller・表示切替の両方を保持して解消した。
 
 - フィード上部のLIVE入口から一覧・視聴へ進める。小画面では件数をロゴの下へ移し、ロゴの幅を確保する。
 - LIVEと生成に共通のRANGLEヘッダーを使い、黒・暖色のパネル・オレンジの操作色を統一する。LIVEの映像はヘッダーの背後まで表示し、情報は下部へ寄せる。
