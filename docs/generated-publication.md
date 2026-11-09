@@ -12,13 +12,17 @@
 
 Succeeded jobの保存済みpreset snapshotを使い、CC BY 4.0の出典、入力SHA256、mode/profileを確認する。現行presetの後日の編集で過去jobの出典やmodeを差し替えない。
 
-Goが検証のために取得するURLは、設定済みmedia originの `/generated/{32桁job-id}/` と固定ファイル名だけ。scene内のURLを自由に追跡せず、redirectもしない。sceneは64KiB、metricsは256KiB、modelは32MiB、要求全体は25秒以内。HTTP 200とpublic/immutable cache宣言を要求する。
+Goが検証のために取得するURLは、設定済みmedia originの `/generated/{32桁job-id}/` と固定ファイル名だけ。scene内のURLを自由に追跡せず、redirectもしない。sceneは64KiB、metricsは256KiB、modelは32MiB、要求全体は25秒以内。HTTP 200とpublicなcache宣言、正のTTLを要求する。Cache-Controlはdirective名をtokenとして解析し、private・no-store・no-cacheを拒否する。s-maxage指定時はshared TTLを優先し、未指定ならmax-ageの正値を確認する。
 
 1. scene.jsonのversion、フレーム情報、出典・許諾を確認する。staticは単一の `model.splat`、dynamicは `model.rgs` だけを参照できる。
 2. metrics.jsonのjob ID・mode・入力SHA256・出典・許諾とmodelサイズ/SHA256を確認する。追加profileの場合はmetricsのquality_profileも保存済み設定に一致させる。旧baseline metricsの省略はbaselineとして扱う。
 3. model bytesの実サイズとSHA256を照合する。static gzipは展開後32MiB以内で、32byte record境界と展開後SHA256も照合する。dynamicは既存RGS1 header・sceneの時刻・payloadサイズ・圧縮時の展開サイズを確認する。
 
-scene/metrics/modelそれぞれの実サイズ・SHA256を検証記録に保存する。workerのscene-last、GCS generation-match=0、上書き不能な生成先が不変性の基盤となる。検証失敗ではjobのpublishedとpublic registryを変更しない。これらは成果物・出典・サイズ・containerの整合性検証であり、GPU描画品質や実機性能の合否を保証するものではない。
+scene/metrics/modelそれぞれの実サイズ・SHA256を検証記録に保存する。workerのscene-last、GCS generation-match=0、固定job pathへの上書き不能な生成先がcontentの不変性の基盤となる。
+
+HTTPのimmutableは任意のcache hintで、この基盤とは区別する。CDNが応答を public,max-age=86400 へ書き換えてhintを省いても掲載でき、従来のpublic,max-age=31536000,immutableも受け入れる。CDN TTLやIACは変更しない。[shared TTLの優先順位](https://www.rfc-editor.org/rfc/rfc9111.html#section-4.2.1)に従う。
+
+検証失敗ではjobのpublishedとpublic registryを変更しない。HTTPの409を返す境界でjob_idと原因だけをWarnとして1回記録し、認証情報や応答本文は記録しない。これらは成果物・出典・サイズ・containerの整合性検証であり、GPU描画品質や実機性能の合否を保証するものではない。
 
 モデルの取得は所有者の掲載検証時だけ。Goは視聴者へmodelを中継せず、再生は引き続きmedia originから直接行う。preview URLは保存済みの審査済みpresetを使い、ユーザー入力の任意URLを検証先として受け取らない。
 
