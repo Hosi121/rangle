@@ -36,8 +36,6 @@ class Rig:
         self.window_frames = len(self.config["frames"]["indices"])
         if not 2 <= self.window_frames <= 32:
             raise ValueError("Temporal windows require 2 to 32 frames")
-        if self.config["frames"]["indices"] != list(range(self.window_frames)):
-            raise ValueError("Live window templates must be contiguous and zero-based")
         if any(set(view["media"]) != {"video"} for view in self.views):
             raise ValueError("Live input must decode videos, not prepared image arrays")
         self.train = np.array(

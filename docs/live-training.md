@@ -19,7 +19,7 @@ PYTHONPATH=ml python3 -m rangle_live \
   --decode-workers 8 --max-runtime-seconds 180
 ```
 
-The manifest is the existing source-manifest v1, using either `calibrated-manifest` or `vru-colmap`, with one local video per view. It supplies the resolution, fps, calibration, training/held-out split, source/license statements, and colored seed cloud. A contiguous zero-based `frames.indices` template specifies the window length; replay continues sequentially for `--source-seconds`, rather than stopping at the template's last frame. The shared validator enforces 4–64 views, at least three training and one held-out camera, output width 64–1920 / height 64–1080, and at most 512 MiB of uint8 RGB per window. Live windows require 2–32 frames.
+The manifest is the existing source-manifest v1, using either `calibrated-manifest` or `vru-colmap`, with one local video per view. It supplies the resolution, fps, calibration, training/held-out split, source/license statements, and colored seed cloud. `frames.indices` remains the offline-preparation selection; only its count supplies the live window length. Live playback always starts at recorded frame 0, at the original `frames.fps` cadence, and `--source-seconds` controls its range. Index values do not set the live start, end or sampling stride. The shared validator enforces 4–64 views, at least three training and one held-out camera, output width 64–1920 / height 64–1080, and at most 512 MiB of uint8 RGB per window. Live windows require 2–32 frames.
 
 Paths stay inside the source root. Calibration/seed checksums are verified before ingestion; checksum declarations for other files are rejected. Full video files are not read or hashed before capture starts. Actual frame PTS and native dimensions must match the declared synchronized calibration and cadence. Each camera's distortion map is precomputed directly at the target resolution, with one source-to-target remap per frame. The rig/world normalization is computed **once**, from training camera centres, and remains fixed across every snapshot.
 
@@ -29,7 +29,7 @@ An existing compatible gsplat extension may be selected with `--cuda-extension /
 
 ## Incremental state and bounded work
 
-A producer requests a decoded frame only once its source PTS has arrived. A ring retains one window; a single pending window replaces older pending work while the consumer trains. There is no growing work queue. `dropped_windows` counts these replacements. The current training window is immutable, so later arrivals cannot change its optimization targets. The last complete window is offered at source completion, including an overlapping tail when necessary.
+A producer requests a decoded frame only once its source PTS has arrived. A ring retains one window; a single pending window replaces older pending work while the consumer trains. There is no growing work queue. Skipped windows are not reconstructed as a continuous stream; only selected windows are optimized and published. `dropped_windows` counts these replacements. The current training window is immutable, so later arrivals cannot change its optimization targets. The last complete window is offered at source completion, including an overlapping tail when necessary.
 
 The consumer initializes shared position, velocity, colour, spatial scale/quaternion, centre time, temporal width, and opacity parameters once. It retains their Adam optimizers, moments, RNG, global step count, and gsplat `DefaultStrategy` state between windows. Refinement may change rows through the strategy's existing optimizer-aware operations. A training step samples only a current-window time and a training camera. Held-out pixels are used for evaluation only.
 
@@ -95,10 +95,10 @@ Latency uses a session UTC/monotonic epoch plus original source PTS as the simul
 
 ```sh
 PYTHONPATH=ml python3 -m unittest discover -s ml/tests -v
-ruff check ml/rangle_live ml/tests/test_live.py
-ruff format --check ml/rangle_live ml/tests/test_live.py
+ruff check ml/rangle_live ml/tests/test_live.py ml/tests/full_ml/test_live_model.py
+ruff format --check ml/rangle_live ml/tests/test_live.py ml/tests/full_ml/test_live_model.py
 # Complete ML environment; Torch CPU, no GPU execution:
-PYTHONPATH=ml python3 -m unittest discover -s ml/rangle_live/tests -v
+PYTHONPATH=ml:ml/tests python3 -m unittest discover -s ml/tests/full_ml -v
 ```
 
 The lightweight suite checks pacing before image access, no future windows, replacement/drop counts, cancellation/deadlines, generic manifest dimensions/splits/budgets, seed admission, publication ordering/failures, immutable revisions, fixed camera metadata, exact index fields, retention bounds, finite CLI arguments and help without runtime imports. The explicit complete-ML CPU suite analytically verifies warm-shift position/lifetime behavior while retaining actual Adam state and parameter identities. No tests are skipped to accommodate the lightweight environment.

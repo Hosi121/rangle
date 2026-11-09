@@ -388,6 +388,17 @@ class LiveRigTests(unittest.TestCase):
             np.testing.assert_array_equal(rig.matrices, before)
             self.assertFalse(rig.provenance["trained_model_warm_start"])
 
+    def test_offline_frame_selection_does_not_define_live_start_or_cadence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path, value = self.manifest(root)
+            value["frames"]["indices"] = [7, 9]
+            path.write_text(json.dumps(value))
+            rig = Rig(path, root)
+            self.assertEqual((rig.window_frames, rig.fps), (2, 30))
+            # produce() always starts from original recorded frame zero; the
+            # separate pacing test verifies the actual decoder call sequence.
+
     def test_shared_bounds_and_live_video_template_are_strict(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -398,7 +409,6 @@ class LiveRigTests(unittest.TestCase):
                 "images",
                 "budget",
                 "checksum",
-                "template",
             ):
                 value = copy.deepcopy(original)
                 if invalid == "frames":
@@ -412,8 +422,6 @@ class LiveRigTests(unittest.TestCase):
                     value["output"] = {"width": 1920, "height": 1080}
                 elif invalid == "checksum":
                     value["checksums"] = {"view-0.mp4": "0" * 64}
-                else:
-                    value["frames"]["indices"] = [1, 2]
                 path.write_text(json.dumps(value))
                 with self.subTest(invalid=invalid), self.assertRaises(ValueError):
                     Rig(path, root)
