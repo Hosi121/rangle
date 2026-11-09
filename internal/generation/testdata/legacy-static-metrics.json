@@ -1,0 +1,85 @@
+{
+  "seed": 0,
+  "iterations": 6000,
+  "training_seconds": 65.27011421599997,
+  "training_views": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    31,
+    32,
+    33
+  ],
+  "heldout_views": [
+    0,
+    10,
+    20,
+    30
+  ],
+  "width": 480,
+  "height": 270,
+  "initial_gaussians": 99330,
+  "stored_gaussians": 263831,
+  "evaluations": [
+    {
+      "view": 0,
+      "psnr": 25.9799793196345,
+      "ssim": 0.9072349071502686,
+      "packed_psnr": 25.979172379157692
+    },
+    {
+      "view": 10,
+      "psnr": 29.103708510333576,
+      "ssim": 0.9330725073814392,
+      "packed_psnr": 29.101548044781005
+    },
+    {
+      "view": 20,
+      "psnr": 29.463931650995534,
+      "ssim": 0.9334832429885864,
+      "packed_psnr": 29.458391235361677
+    },
+    {
+      "view": 30,
+      "psnr": 29.21016335725794,
+      "ssim": 0.9351144433021545,
+      "packed_psnr": 29.200688818049116
+    }
+  ],
+  "torch_peak_allocated_bytes": 183945216,
+  "torch_version": "2.6.0+cu124",
+  "gpu": "Tesla T4",
+  "model": "static RGB 3DGS, DefaultStrategy, 0.8 L1 + 0.2 SSIM",
+  "evaluation_caveat": "Held-out pixels are excluded from training. Supplied initial geometry/calibration may use all source cameras.",
+  "packing": "32-byte splat: float32 geometry, RGBA8, quaternion8; float and packed PSNR reported separately",
+  "job_id": "e7ef956d504cd595c4d8e081b91fff70",
+  "input_sha256": "5c5c43d4c8d4227b80bd7f42a8854d8f7a24277f51153a909b926662a31f8c10",
+  "splat_bytes": 8442592,
+  "splat_sha256": "b447e2494faeed28a965905c3b145b1ac1cf62ffe689c552bcb608f5f7cbb2f4",
+  "source": "https://huggingface.co/datasets/BestWJH/VRU_Basketball",
+  "license": "CC BY 4.0"
+}
