@@ -33,6 +33,10 @@ type config struct {
 	GenerationFile         string
 	GenerationService      *generation.Service
 	GenerationSyncAudience string
+	GenerationManager      bool
+	GenerationManagerURL   string
+	GenerationAudience     string
+	GenerationCaller       string
 	LiveIndex              string
 	LiveAssetsRoot         string
 	ServingRevision        string
@@ -45,6 +49,21 @@ type application struct {
 }
 
 func newApplication(cfg config, logger *slog.Logger) (app *application, err error) {
+	if cfg.GenerationManager {
+		return newGenerationManager(cfg, logger)
+	}
+	if cfg.GenerationAudience != "" || cfg.GenerationCaller != "" {
+		return nil, fmt.Errorf("generation manager identity options require manager mode")
+	}
+	if cfg.GenerationManagerURL != "" && (cfg.GenerationFile != "" || cfg.GenerationService != nil || cfg.GenerationSyncAudience != "") {
+		return nil, fmt.Errorf("remote generation cannot load a local generation config, service or sync endpoint")
+	}
+	if cfg.GenerationManagerURL != "" && (cfg.CatalogFile == "" || !cfg.SecureCookies || cfg.FirestoreProject == "") {
+		return nil, fmt.Errorf("remote generation requires persistent accounts, secure cookies and a catalog")
+	}
+	if cfg.GenerationManagerURL != "" && cfg.FirestoreDatabase == "rangle-stg-generation" {
+		return nil, fmt.Errorf("public community storage cannot use the generation manager database")
+	}
 	if cfg.Web.UIRoot == "" && cfg.CatalogFile == "" {
 		return nil, fmt.Errorf("a UI root or catalog is required")
 	}
@@ -118,8 +137,18 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		}
 	}
 	generationService := cfg.GenerationService
+	var generationRemote *generation.Remote
+	if cfg.GenerationManagerURL != "" {
+		generationRemote, err = generation.NewRemote(context.Background(), cfg.GenerationManagerURL)
+		if err != nil {
+			return app, err
+		}
+	}
 	interactions := community.NewHandler(community.Config{Store: store, ClipIDs: clipIDs, SecureCookies: cfg.SecureCookies, Logger: logger,
 		ClipExists: func(ctx context.Context, id string) (bool, error) {
+			if generationRemote != nil {
+				return generationRemote.CompletedClipExists(ctx, id)
+			}
 			if generationService == nil {
 				return false, nil
 			}
@@ -207,22 +236,35 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		}
 		generationService = &generation.Service{Config: settings, Store: database, Provider: provider, Logger: logger}
 	}
+	adminOwner := func(r *http.Request) (string, error) {
+		user, err := interactions.AdminUser(r)
+		if errors.Is(err, community.ErrForbidden) {
+			return "", generation.ErrForbidden
+		}
+		if err != nil || user == nil {
+			return "", err
+		}
+		return user.ID, nil
+	}
+	if generationRemote != nil {
+		api, err = catalog.WithPublicClips(api, generationRemote.PublicClips)
+		if err != nil {
+			return app, err
+		}
+		jobs, err := generation.NewRemoteHandler(generationRemote, adminOwner)
+		if err != nil {
+			return app, err
+		}
+		mux.Handle("/api/v1/generation/", jobs)
+		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))
+	}
 	if generationService != nil {
 		generationService.ReservedClipID = func(id string) bool { return clipIDs[id] }
 		api, err = catalog.WithPublicClips(api, generationService.PublicClips)
 		if err != nil {
 			return app, err
 		}
-		jobs, err := generation.NewHandler(generationService, func(r *http.Request) (string, error) {
-			user, err := interactions.AdminUser(r)
-			if errors.Is(err, community.ErrForbidden) {
-				return "", generation.ErrForbidden
-			}
-			if err != nil || user == nil {
-				return "", err
-			}
-			return user.ID, nil
-		})
+		jobs, err := generation.NewHandler(generationService, adminOwner)
 		if err != nil {
 			return app, err
 		}

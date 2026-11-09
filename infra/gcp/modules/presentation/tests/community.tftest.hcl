@@ -38,8 +38,8 @@ run "enabled_community_uses_only_named_tokyo_database" {
     error_message = "Provision a dedicated named Native Standard database in Tokyo, preserving the default database."
   }
   assert {
-    condition     = google_firestore_database.community[0].delete_protection_state == "DELETE_PROTECTION_ENABLED" && google_firestore_database.community[0].deletion_policy == "PREVENT" && google_firestore_database.community[0].point_in_time_recovery_enablement == "POINT_IN_TIME_RECOVERY_DISABLED"
-    error_message = "Retain private account data behind deletion protection without adding paid backup/PITR features."
+    condition     = google_firestore_database.community[0].delete_protection_state == "DELETE_PROTECTION_ENABLED" && google_firestore_database.community[0].deletion_policy == "PREVENT" && google_firestore_database.community[0].point_in_time_recovery_enablement == "POINT_IN_TIME_RECOVERY_ENABLED"
+    error_message = "Retain private account data behind deletion protection and enable point-in-time recovery."
   }
   assert {
     condition     = google_project_iam_member.community_runtime[0].condition[0].expression == "resource.name == 'projects/rangle-example/databases/rangle-stg' && request.time < timestamp('2026-11-14T15:00:00Z')" && google_project_iam_custom_role.community[0].permissions == toset(["datastore.databases.get", "datastore.entities.get", "datastore.entities.list", "datastore.entities.create", "datastore.entities.update", "datastore.entities.delete"])

@@ -1,9 +1,10 @@
 resource "google_compute_backend_bucket" "media" {
-  project          = var.project_id
-  name             = "${local.prefix}-media"
-  bucket_name      = google_storage_bucket.private["media"].name
-  enable_cdn       = true
-  compression_mode = "DISABLED"
+  project              = var.project_id
+  name                 = "${local.prefix}-media"
+  bucket_name          = google_storage_bucket.private["media"].name
+  enable_cdn           = true
+  compression_mode     = "DISABLED"
+  edge_security_policy = var.base_domain == null ? null : google_compute_security_policy.media[0].self_link
   cdn_policy {
     # Private origin access uses the HTTPS load-balancer cache-fill identity.
     # Everything here is public, immutable media; never place private inputs here.
@@ -25,12 +26,13 @@ resource "google_compute_backend_bucket" "media" {
 
 # Mutable discovery metadata has its own cache policy; model URLs remain immutable.
 resource "google_compute_backend_bucket" "live_index" {
-  count            = var.live_streaming_enabled ? 1 : 0
-  project          = var.project_id
-  name             = "${local.prefix}-live-index"
-  bucket_name      = google_storage_bucket.private["media"].name
-  enable_cdn       = true
-  compression_mode = "DISABLED"
+  count                = var.live_streaming_enabled ? 1 : 0
+  project              = var.project_id
+  name                 = "${local.prefix}-live-index"
+  bucket_name          = google_storage_bucket.private["media"].name
+  enable_cdn           = true
+  compression_mode     = "DISABLED"
+  edge_security_policy = google_compute_security_policy.media[0].self_link
   cdn_policy {
     cache_mode         = "FORCE_CACHE_ALL"
     default_ttl        = 1
@@ -251,6 +253,7 @@ resource "google_compute_backend_service" "app" {
   protocol              = "HTTP"
   load_balancing_scheme = "EXTERNAL_MANAGED"
   enable_cdn            = false
+  security_policy       = google_compute_security_policy.app[0].self_link
   backend { group = google_compute_region_network_endpoint_group.app[0].id }
   # Serverless NEGs do not use a health_check or configurable backend timeout.
   log_config {
@@ -280,6 +283,7 @@ resource "google_compute_backend_service" "candidate" {
   protocol              = "HTTP"
   load_balancing_scheme = "EXTERNAL_MANAGED"
   enable_cdn            = false
+  security_policy       = google_compute_security_policy.app[0].self_link
   backend { group = google_compute_region_network_endpoint_group.candidate[0].id }
   log_config {
     enable      = true

@@ -1,0 +1,211 @@
+# Delete schedules, never existing backups, databases, documents, or PITR.
+# ListBackupSchedules is unpaginated; a database supports at most one daily and
+# one weekly schedule. Reject larger or paginated responses rather than scanning.
+# https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.backupSchedules/list
+cleanup_owned_backup_schedules:
+  steps:
+    - initialize:
+        assign:
+          - errors: []
+    - stop_future_backups:
+        for:
+          value: database_path
+          in: ${jsonencode(database_paths)}
+          steps:
+            - stop_one_database:
+                try:
+                  call: stop_database_backup_schedules
+                  args:
+                    database_path: $${database_path}
+                except:
+                  as: error
+                  steps:
+                    - record_database_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+    - verify_cleanup:
+        switch:
+          - condition: $${len(errors) > 0}
+            steps:
+              - cleanup_failed:
+                  raise: $${json.encode_to_string(errors)}
+    - complete:
+        return: "stopped"
+
+stop_database_backup_schedules:
+  params: [database_path]
+  steps:
+    - initialize:
+        assign:
+          - cutoff: $${sys.now() + 60}
+          - errors: []
+    - list_before:
+        call: list_owned_backup_schedules
+        args:
+          database_path: $${database_path}
+          cutoff: $${cutoff}
+        result: schedules
+    - delete_matching_schedules:
+        for:
+          value: schedule
+          in: $${schedules}
+          steps:
+            - delete_one_schedule:
+                try:
+                  call: delete_owned_backup_schedule
+                  args:
+                    database_path: $${database_path}
+                    schedule: $${schedule}
+                    cutoff: $${cutoff}
+                except:
+                  as: error
+                  steps:
+                    - record_schedule_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+    - verify_schedules_stopped:
+        try:
+          steps:
+            - list_after:
+                call: list_owned_backup_schedules
+                args:
+                  database_path: $${database_path}
+                  cutoff: $${cutoff}
+                result: remaining
+            - inspect_remaining_schedules:
+                for:
+                  value: schedule
+                  in: $${remaining}
+                  steps:
+                    - identify_remaining_schedule:
+                        call: is_owned_daily_backup_schedule
+                        args:
+                          database_path: $${database_path}
+                          schedule: $${schedule}
+                        result: owned
+                    - require_absence:
+                        switch:
+                          - condition: $${owned}
+                            steps:
+                              - deletion_unconfirmed:
+                                  assign:
+                                    - errors: $${list.concat(errors, "Owned daily backup schedule still exists")}
+        except:
+          as: error
+          steps:
+            - record_verification_error:
+                assign:
+                  - errors: $${list.concat(errors, error)}
+    - verify_cleanup:
+        switch:
+          - condition: $${len(errors) > 0}
+            steps:
+              - cleanup_failed:
+                  raise: $${json.encode_to_string(errors)}
+    - complete:
+        return: "stopped"
+
+list_owned_backup_schedules:
+  params: [database_path, cutoff]
+  steps:
+    - validate_database:
+        switch:
+          - condition: $${not (database_path in ${jsonencode(database_paths)})}
+            steps:
+              - foreign_database:
+                  raise: "Unexpected backup schedule database"
+          - condition: $${sys.now() >= cutoff}
+            steps:
+              - expired:
+                  raise: "Backup schedule cleanup exceeded its bounded window"
+    - list_schedules:
+        try:
+          call: http.get
+          args:
+            url: $${"https://firestore.googleapis.com/v1/" + database_path + "/backupSchedules"}
+            auth: {type: OAuth2}
+            timeout: 10
+          result: listed
+        except:
+          as: error
+          steps:
+            - accept_missing_database:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - already_gone:
+                          return: []
+            - list_failed:
+                raise: $${error}
+    - inspect_response:
+        assign:
+          - schedules: $${default(map.get(listed.body, "backupSchedules"), [])}
+    - enforce_bounds:
+        switch:
+          - condition: $${get_type(schedules) != "list" or len(schedules) > 2 or default(map.get(listed.body, "nextPageToken"), "") != ""}
+            steps:
+              - invalid_listing:
+                  raise: "Unexpected backup schedule listing size or pagination"
+    - complete:
+        return: $${schedules}
+
+is_owned_daily_backup_schedule:
+  params: [database_path, schedule]
+  steps:
+    - initialize:
+        assign:
+          - name: $${map.get(schedule, "name")}
+          - daily_recurrence: {}
+    - validate_name:
+        switch:
+          - condition: $${not (database_path in ${jsonencode(database_paths)})}
+            steps:
+              - foreign_database:
+                  raise: "Unexpected backup schedule database"
+          - condition: $${name == null or not text.match_regex(name, "^" + database_path + "/backupSchedules/[A-Za-z0-9_-]{1,128}$")}
+            steps:
+              - foreign_schedule:
+                  raise: "Unexpected backup schedule resource name"
+    - identify_owned_recurrence:
+        return: $${map.get(schedule, "dailyRecurrence") == daily_recurrence and map.get(schedule, "weeklyRecurrence") == null and map.get(schedule, "retention") == "604800s"}
+
+delete_owned_backup_schedule:
+  params: [database_path, schedule, cutoff]
+  steps:
+    # Revalidate the listed metadata immediately at the mutation boundary.
+    - validate_target:
+        call: is_owned_daily_backup_schedule
+        args:
+          database_path: $${database_path}
+          schedule: $${schedule}
+        result: owned
+    - preserve_other_schedules:
+        switch:
+          - condition: $${not owned}
+            steps:
+              - preserve:
+                  return: "preserved"
+          - condition: $${sys.now() >= cutoff}
+            steps:
+              - expired:
+                  raise: "Backup schedule cleanup exceeded its bounded window"
+    - delete_schedule:
+        try:
+          call: http.delete
+          args:
+            url: $${"https://firestore.googleapis.com/v1/" + schedule.name}
+            auth: {type: OAuth2}
+            timeout: 10
+        except:
+          as: error
+          steps:
+            - accept_missing_schedule:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - already_gone:
+                          return: "absent"
+            - delete_failed:
+                raise: $${error}
+    - complete:
+        return: "deleted"

@@ -39,7 +39,7 @@ resource "google_project_iam_member" "generation_runtime" {
   count   = local.generation_enabled ? 1 : 0
   project = var.project_id
   role    = google_project_iam_custom_role.generation_runtime[0].name
-  member  = "serviceAccount:${google_service_account.runtime.email}"
+  member  = "serviceAccount:${google_service_account.generation_manager[0].email}"
   condition {
     title      = "generation_before_presentation_deadline"
     expression = "request.time < timestamp('${var.deadline}')"
@@ -49,7 +49,7 @@ resource "google_service_account_iam_member" "trainer_act_as" {
   count              = local.generation_enabled ? 1 : 0
   service_account_id = google_service_account.trainer[0].name
   role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.runtime.email}"
+  member             = "serviceAccount:${google_service_account.generation_manager[0].email}"
   condition {
     title      = "only_trainer_before_presentation_deadline"
     expression = "request.time < timestamp('${var.deadline}')"

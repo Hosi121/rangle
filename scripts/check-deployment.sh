@@ -2,6 +2,44 @@
 # Bounded HTTP smoke only. No asset uploads or infrastructure changes.
 set -euo pipefail
 
+# The deploy script streams the credential on stdin. It is never an argument,
+# exported environment variable, response artifact, or release receipt field.
+if [[ ${1:-} == manager ]]; then
+  base=${2:?Usage: check-deployment.sh manager https://ci-manager-candidate---SERVICE.run.app}
+  python3 - "$base" <<'PY'
+import os, re, sys
+from urllib.parse import urlsplit
+u = urlsplit(sys.argv[1])
+revision = os.environ.get('EXPECTED_REVISION', '')
+if (u.scheme != 'https' or not u.netloc.startswith('ci-manager-candidate---rangle-stg-generation-') or
+        not u.netloc.endswith('.run.app') or u.netloc != u.hostname or u.path or u.query or u.fragment or
+        not re.fullmatch(r'rangle-stg-generation-[a-z0-9-]+', revision) or len(revision) > 63):
+    raise SystemExit('Expected the dedicated manager candidate URL and revision.')
+PY
+  work=$(mktemp -d)
+  trap 'rm -rf "$work"' EXIT
+  status=$(curl --silent --show-error --fail-with-body --proto '=https' \
+    --connect-timeout 5 --max-time 20 --max-filesize 1024 \
+    --header @- --dump-header "$work/health.headers" --output "$work/health" \
+    --write-out '%{http_code}' "$base/health")
+  [[ $status == 200 ]] || { echo 'Manager candidate health did not return HTTP 200.' >&2; exit 1; }
+  python3 - "$work" <<'PY'
+import os, sys
+from pathlib import Path
+work = Path(sys.argv[1])
+revisions = []
+for line in work.joinpath('health.headers').read_text().splitlines():
+    if line.startswith('HTTP/'):
+        revisions = []
+    elif ':' in line and line.split(':', 1)[0].lower() == 'x-rangle-revision':
+        revisions.append(line.split(':', 1)[1].strip())
+if revisions != [os.environ['EXPECTED_REVISION']] or work.joinpath('health').read_bytes() != b'ok\n':
+    raise SystemExit('Manager health did not serve the selected application revision.')
+print('Manager candidate health and revision verified.')
+PY
+  exit 0
+fi
+
 # Share one domain contract with the deployment guard. No DNS lookup is needed
 # here: the new domain may not have records yet. HTTPS smoke verifies the edge.
 origins=$(python3 - <<'PY'

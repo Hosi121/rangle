@@ -30,12 +30,12 @@ run "enabled_polling_has_fixed_identity_audience_frequency_and_guard" {
     error_message = "Reconcile at most once per scheduled two-minute tick, without retry amplification."
   }
   assert {
-    condition     = google_cloud_scheduler_job.generation_sync[0].http_target[0].uri == "https://app.presentation.example.com/internal/generation/sync" && google_cloud_scheduler_job.generation_sync[0].http_target[0].oidc_token[0].audience == "https://app.presentation.example.com/internal/generation/sync" && google_cloud_scheduler_job.generation_sync[0].http_target[0].http_method == "POST"
+    condition     = google_cloud_scheduler_job.generation_sync[0].http_target[0].uri == "https://rangle-stg-generation-123456789012.asia-northeast1.run.app/internal/generation/sync" && google_cloud_scheduler_job.generation_sync[0].http_target[0].oidc_token[0].audience == "https://rangle-stg-generation-123456789012.asia-northeast1.run.app" && google_cloud_scheduler_job.generation_sync[0].http_target[0].http_method == "POST"
     error_message = "OIDC tokens must target the exact fixed endpoint, with no job-selecting query or payload."
   }
   assert {
-    condition     = contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-generation-sync-audience") && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "https://app.presentation.example.com/internal/generation/sync")
-    error_message = "Runtime verification must use the exact Scheduler audience."
+    condition     = contains(google_cloud_run_v2_service.generation[0].template[0].containers[0].args, "-generation-sync-audience") && contains(google_cloud_run_v2_service.generation[0].template[0].containers[0].args, "https://rangle-stg-generation-123456789012.asia-northeast1.run.app") && !contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-generation-sync-audience")
+    error_message = "Only the isolated manager verifies scheduled generation synchronization."
   }
   assert {
     condition     = one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.pause_generation_sync if can(step.pause_generation_sync)]).switch[0].condition && strcontains(google_workflows_workflow.guard.source_contents, "projects/rangle-example/locations/asia-northeast1/jobs/rangle-stg-generation-sync:pause") && strcontains(google_workflows_workflow.guard.source_contents, "observed_cost >= 15000") && strcontains(google_workflows_workflow.guard.source_contents, "2026-11-14T15:00:00Z")

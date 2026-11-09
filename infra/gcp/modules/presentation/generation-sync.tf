@@ -1,6 +1,6 @@
 locals {
   generation_sync_enabled = var.generation_sync_enabled && local.generation_enabled
-  generation_sync_uri     = local.app_origin == null ? null : "${local.app_origin}/internal/generation/sync"
+  generation_sync_uri     = "${local.generation_manager_origin}/internal/generation/sync"
   generation_sync_job     = "projects/${var.project_id}/locations/${var.region}/jobs/${local.prefix}-generation-sync"
 }
 
@@ -33,7 +33,7 @@ resource "google_cloud_scheduler_job" "generation_sync" {
     body        = base64encode("{}")
     oidc_token {
       service_account_email = google_service_account.generation_sync[0].email
-      audience              = local.generation_sync_uri
+      audience              = local.generation_manager_origin
     }
   }
   lifecycle {
@@ -43,5 +43,5 @@ resource "google_cloud_scheduler_job" "generation_sync" {
       error_message = "Do not create generation polling after the presentation deadline."
     }
   }
-  depends_on = [google_cloud_run_v2_service.app]
+  depends_on = [google_cloud_run_v2_service.generation, google_cloud_run_v2_service_iam_member.generation_sync_invoker]
 }
