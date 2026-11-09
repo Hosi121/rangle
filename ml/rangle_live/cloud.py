@@ -206,8 +206,8 @@ def remote_verified(origin, key, expected, content_type, deadline):
             time.sleep(deadline.remaining(0.5))
 
 
-def publish(args, path, cloud, deadline):
-    document = json.loads(read_json(path))
+def publish(args, path, cloud, deadline, document=None):
+    document = json.loads(read_json(path)) if document is None else document
     settings = SimpleNamespace(
         gate="/usr/local/bin/rangle-live-check",
         root=str(path.parent),
@@ -286,10 +286,57 @@ def publish(args, path, cloud, deadline):
     return receipt
 
 
+class LatestPublication:
+    """Coalesce atomic local updates; no queue or training/source backpressure.
+
+    GCS allows one write per second to the same object name. Wait 1.25s
+    *after* a successful publication, including final/terminal publications.
+    https://docs.cloud.google.com/storage/quotas#objects
+    """
+
+    def __init__(self, args, path, cloud, deadline):
+        self.args, self.path, self.cloud, self.deadline = args, path, cloud, deadline
+        self.seen, self.next_at = None, 0.0
+
+    def poll(self, wait=False):
+        if not self.path.exists():
+            return None
+        raw = read_json(self.path)
+        digest = hashlib.sha256(raw).hexdigest()
+        if digest == self.seen:
+            return None
+        delay = self.next_at - time.monotonic()
+        if delay > 0:
+            if not wait:
+                return None
+            if self.deadline.remaining(delay + 0.01) <= delay:
+                raise TimeoutError("Publication pacing exceeds live deadline")
+            time.sleep(delay)
+            # A source update may have arrived while a final/terminal call waited.
+            raw = read_json(self.path)
+            digest = hashlib.sha256(raw).hexdigest()
+        receipt = publish(
+            self.args, self.path, self.cloud, self.deadline, json.loads(raw)
+        )
+        self.next_at = time.monotonic() + 1.25
+        self.seen = digest
+        return receipt
+
+
 def supervise(args, client, cloud, deadline, root, started=None):
     started = time.monotonic() if started is None else started
     root = Path(root)
     (root / "receipts").mkdir()
+    # Provider restarts must fail before downloading, initializing CUDA or
+    # establishing a different capture epoch for this immutable session identity.
+    claim = cloud.claim_producer(
+        args.catalog_bucket, args.session_id, args.input_sha256
+    )
+    log(
+        "cloud_producer_claimed",
+        session_id=args.session_id,
+        generation=claim["generation"],
+    )
     proof = download(client, args, root / "source.zip", deadline)
     source = extract(root / "source.zip", root / "source")
     rig = Rig(source, source.parent)
@@ -322,7 +369,8 @@ def supervise(args, client, cloud, deadline, root, started=None):
         [sys.executable, "-m", "rangle_live.cloud_child", str(config_path)],
         start_new_session=True,
     )
-    seen, receipts, evidence, failure = None, [], {}, None
+    receipts, evidence, failure = [], {}, None
+    publications = LatestPublication(args, output / "index.json", cloud, deadline)
     terminal_publication = "not-needed"
     log(
         "cloud_worker_started",
@@ -336,34 +384,25 @@ def supervise(args, client, cloud, deadline, root, started=None):
                 raise TimeoutError(
                     "Cloud live work deadline reached; reserve cleanup time"
                 )
-            path = output / "index.json"
-            if path.exists():
-                raw = read_json(path)
-                digest = hashlib.sha256(raw).hexdigest()
-                if digest != seen:
-                    receipt = publish(args, path, cloud, deadline)
-                    if receipt.get("public_http_confirmed_monotonic"):
-                        receipts.append(receipt)
-                        for item in receipt.get("confirmed_segments", []):
-                            evidence.setdefault(item["sequence"], item)
-                    log(
-                        "cloud_live_published",
-                        session_id=args.session_id,
-                        state=receipt["state"],
-                        latest_sequence=receipt["latest_sequence"],
-                        public_http_confirmed="public_http_confirmed_monotonic"
-                        in receipt,
-                    )
-                    seen = digest
+            receipt = publications.poll()
+            if receipt is not None:
+                if receipt.get("public_http_confirmed_monotonic"):
+                    receipts.append(receipt)
+                    for item in receipt.get("confirmed_segments", []):
+                        evidence.setdefault(item["sequence"], item)
+                log(
+                    "cloud_live_published",
+                    session_id=args.session_id,
+                    state=receipt["state"],
+                    latest_sequence=receipt["latest_sequence"],
+                    public_http_confirmed="public_http_confirmed_monotonic" in receipt,
+                )
             if child.poll() is not None:
                 if child.returncode:
                     raise RuntimeError(f"Training subprocess exited {child.returncode}")
                 # A final write may race the preceding poll; publish its terminal index.
-                if (
-                    path.exists()
-                    and hashlib.sha256(read_json(path)).hexdigest() != seen
-                ):
-                    final_receipt = publish(args, path, cloud, deadline)
+                final_receipt = publications.poll(wait=True)
+                if final_receipt is not None:
                     receipts.append(final_receipt)
                     for item in final_receipt.get("confirmed_segments", []):
                         evidence.setdefault(item["sequence"], item)
@@ -396,7 +435,7 @@ def supervise(args, client, cloud, deadline, root, started=None):
 
                     signal.signal(signal.SIGALRM, terminal_timeout)
                     signal.setitimer(signal.ITIMER_REAL, deadline.remaining(5))
-                    publish(args, output / "index.json", cloud, deadline)
+                    publications.poll(wait=True)
                     terminal_publication = "confirmed"
                 except (
                     PublishError,
