@@ -23,6 +23,74 @@ class _AbortClient extends http.BaseClient {
 
 void main() {
   test(
+    'publication only acknowledges the requested job and boolean state',
+    () async {
+      for (final mutate in <void Function(Map<String, Object?>)>[
+        (job) => job.remove('published'),
+        (job) => job['published'] = false,
+        (job) => job['published'] = 'true',
+        (job) => job['id'] = 'another-job',
+        (job) => job['state'] = 'running',
+      ]) {
+        final result = generationResult('succeeded', published: true);
+        mutate(result['job'] as Map<String, Object?>);
+        final client = MockClient(
+          (_) async => http.Response.bytes(
+            utf8.encode(jsonEncode(result)),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          ),
+        );
+        addTearDown(client.close);
+        final api = GenerationApi(
+          endpoint: Uri.parse('https://app.example.invalid/api/v1/'),
+          client: client,
+        );
+        addTearDown(api.close);
+        await expectLater(
+          api.setPublished(generationJobId, published: true),
+          throwsA(
+            isA<GenerationFailure>().having(
+              (error) => error.code,
+              'code',
+              'publication_unavailable',
+            ),
+          ),
+        );
+      }
+    },
+  );
+
+  test(
+    'publication uses an idempotent boolean PUT and survives history',
+    () async {
+      final fixture = GenerationFixture()..state = 'succeeded';
+      final api = fixture.api;
+      final published = await api.setPublished(
+        generationJobId,
+        published: true,
+      );
+      expect(published.published, isTrue);
+      expect(published.viewerUrl, isNotNull);
+      expect(fixture.requests.last.method, 'PUT');
+      expect(
+        fixture.requests.last.url.path,
+        '/api/v1/generation/jobs/$generationJobId/publication',
+      );
+      expect(jsonDecode(fixture.requests.last.body), {'published': true});
+      expect(fixture.requests.last.url.query, isEmpty);
+      expect((await api.jobs()).single.published, isTrue);
+      expect(
+        (await api.setPublished(generationJobId, published: false)).published,
+        isFalse,
+      );
+      final legacy = generationJob('succeeded')..remove('published');
+      expect(GenerationJob.fromJson(legacy).published, isFalse);
+      api.close();
+    },
+  );
+
+  test(
     'reviewed dynamic mode survives presets, creation, polling and history',
     () async {
       final fixture = GenerationFixture()..mode = 'dynamic';

@@ -12,12 +12,14 @@ class GenerationScreen extends StatefulWidget {
   const GenerationScreen({
     required this.account,
     required this.onOpenResult,
+    this.onPublicationChanged,
     this.api,
     super.key,
   });
   final AccountController? account;
   final GenerationApi? api;
   final ValueChanged<Uri> onOpenResult;
+  final VoidCallback? onPublicationChanged;
 
   @override
   State<GenerationScreen> createState() => _GenerationScreenState();
@@ -251,10 +253,17 @@ class _GenerationScreenState extends State<GenerationScreen>
     return result;
   }, open: true);
 
+  Future<void> _setPublished(GenerationJob job) => _jobAction(
+    job,
+    () => _api.setPublished(job.id, published: !job.published),
+    onSuccess: widget.onPublicationChanged,
+  );
+
   Future<void> _jobAction(
     GenerationJob job,
     Future<GenerationJob> Function() action, {
     bool open = false,
+    VoidCallback? onSuccess,
   }) async {
     if (_busy || _loading || !_signedIn) return;
     final epoch = _epoch;
@@ -267,6 +276,7 @@ class _GenerationScreenState extends State<GenerationScreen>
       final result = await action();
       if (!mounted || epoch != _epoch) return;
       setState(() => _updateJob(result));
+      onSuccess?.call();
       if (open && _visible) widget.onOpenResult(result.viewerUrl!);
     } catch (error) {
       if (mounted && epoch == _epoch && _visible) {
@@ -452,13 +462,34 @@ class _GenerationScreenState extends State<GenerationScreen>
                                 child: const Text('生成を中止'),
                               ),
                             ),
-                          if (job.state == 'succeeded')
+                          if (job.state == 'succeeded') ...[
+                            if (job.published)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 8),
+                                child: Text('フィードに掲載中'),
+                              ),
                             FilledButton.tonal(
                               onPressed: _busy || _loading
                                   ? null
                                   : () => _open(job),
                               child: const Text('結果を見る'),
                             ),
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              onPressed: _busy || _loading
+                                  ? null
+                                  : () => _setPublished(job),
+                              child: Text(
+                                _busyJob == job.id
+                                    ? '状態を確認しています'
+                                    : job.published
+                                    ? '掲載を取り下げる'
+                                    : 'フィードに掲載',
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text('リンクを知っている人は、掲載前や取り下げ後も結果を開けます。'),
+                          ],
                           if (_jobErrors[job.id] != null)
                             _errorText(_jobErrors[job.id]!),
                         ],

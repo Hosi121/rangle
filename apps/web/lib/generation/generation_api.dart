@@ -16,6 +16,7 @@ class GenerationFailure implements Exception {
     'rate_limited' => '操作が続いています。少し時間をおいてお試しください。',
     'request_conflict' => '依頼を確認できませんでした。状態を再読み込みしてください。',
     'generation_unavailable' => '生成機能は準備中です。時間をおいて再読み込みしてください。',
+    'publication_unavailable' => '掲載するデータを確認できませんでした。時間をおいて再試行してください。',
     'not_found' => 'この生成結果は見つかりませんでした。',
     _ => '接続を確認して、もう一度お試しください。',
   };
@@ -57,10 +58,12 @@ class GenerationJob {
       preset = data['preset'] as String,
       state = data['state'] as String,
       mode = _mode(data['mode']),
+      published = data['published'] as bool? ?? false,
       createdAt = DateTime.parse(data['created_at'] as String);
   final String id, preset, state, mode;
   final DateTime createdAt;
   final Uri? viewerUrl;
+  final bool published;
 
   bool get active =>
       !const ['succeeded', 'failed', 'cancelled'].contains(state);
@@ -89,7 +92,7 @@ class GenerationApi {
   Future<Map<String, dynamic>> _request(
     String method,
     String path, [
-    Map<String, String>? body,
+    Map<String, Object?>? body,
   ]) async {
     final abort = Completer<void>();
     final message =
@@ -167,6 +170,24 @@ class GenerationApi {
       _job(await _request('GET', 'jobs/${Uri.encodeComponent(id)}'));
   Future<GenerationJob> cancel(String id) async =>
       _job(await _request('DELETE', 'jobs/${Uri.encodeComponent(id)}'));
+  Future<GenerationJob> setPublished(
+    String id, {
+    required bool published,
+  }) async {
+    final data = await _request(
+      'PUT',
+      'jobs/${Uri.encodeComponent(id)}/publication',
+      {'published': published},
+    );
+    final job = data['job'];
+    if (job is! Map<String, dynamic> ||
+        job['id'] != id ||
+        job['state'] != 'succeeded' ||
+        job['published'] != published) {
+      throw const GenerationFailure('publication_unavailable');
+    }
+    return _job(data);
+  }
 
   GenerationJob _job(Map<String, dynamic> data) {
     Uri? viewer;

@@ -7,11 +7,16 @@ import '../models/clip.dart';
 import 'clip_repository.dart';
 
 /// Loads one bounded public feed page. Media URLs come from the API catalog.
-class ApiClipRepository implements PagedClipRepository {
+class ApiClipRepository
+    implements PagedClipRepository, RefreshableClipRepository {
   ApiClipRepository({required this.endpoint, this.client});
 
   final String endpoint;
   final http.Client? client;
+  int _cacheEpoch = 0, _validatedCacheEpoch = 0;
+
+  @override
+  void invalidateCache() => _cacheEpoch++;
 
   @override
   Future<List<Clip>> load({
@@ -40,6 +45,8 @@ class ApiClipRepository implements PagedClipRepository {
     if (parsed == null) throw const FormatException('Invalid feed URL.');
     final source = Uri.base.resolveUri(parsed);
     _requireHttp(source);
+    final cacheEpoch = _cacheEpoch;
+    final revalidate = cursor == null && cacheEpoch != _validatedCacheEpoch;
     final httpClient = client ?? http.Client();
     final abort = Completer<void>();
     if (abortTrigger != null) {
@@ -55,6 +62,7 @@ class ApiClipRepository implements PagedClipRepository {
         uri,
         abortTrigger: abort.future,
       )..headers['Accept'] = 'application/json';
+      if (revalidate) request.headers['Cache-Control'] = 'no-cache';
       return http.Response.fromStream(await httpClient.send(request));
     }
 
@@ -148,6 +156,9 @@ class ApiClipRepository implements PagedClipRepository {
         }
         clips.removeWhere((clip) => clip.id == clipId);
         clips.insert(0, shared);
+      }
+      if (revalidate && cacheEpoch > _validatedCacheEpoch) {
+        _validatedCacheEpoch = cacheEpoch;
       }
       return ClipPage(clips, nextCursor: nextCursor as String?);
     } finally {
