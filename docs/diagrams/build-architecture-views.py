@@ -17,17 +17,19 @@ PIN = "5af3b095fff7109c905c5284dc510dc06588bade"
 WIDTH, HEIGHT = 1600, 900
 
 
-def node(icon, name, role, x, y):
+def node(icon, name, role, x, y, badge=None):
+    access = f'<div class="badge {badge[1]}">{badge[0]}</div>' if badge else ""
     return f"""<div class="node" style="left:{x - 110}px;top:{y}px">
       <div class="tile"><img src="%%ICON_{icon}%%" alt=""></div>
       <div class="name"><span>{name}</span></div>
-      <div class="role"><span>{role}</span></div></div>"""
+      <div class="role"><span>{role}</span></div>{access}</div>"""
 
 
-def group(name, x, y, w, h, icon=None, style="gb"):
+def group(name, x, y, w, h, icon=None, style="gb", boundary=None):
     mark = f'<img class="plate" src="%%ICON_{icon}%%" alt="">' if icon else ""
+    detail = f'<div class="boundary">{boundary}</div>' if boundary else ""
     return f"""<div class="group {style}" style="left:{x}px;top:{y}px;width:{w}px;height:{h}px">
-      <div class="g-label">{mark}{name}</div></div>"""
+      <div class="g-label">{mark}{name}</div>{detail}</div>"""
 
 
 def edge(path, text="", x=0, y=0, kind="e", both=False):
@@ -42,18 +44,35 @@ def edge(path, text="", x=0, y=0, kind="e", both=False):
 
 def overview():
     groups = [
-        group("Google Cloud · 発表用 presentation", 350, 110, 1200, 565, "gcp", "gcp")
+        group(
+            "Google Cloud · presentation",
+            350,
+            110,
+            1200,
+            565,
+            "gcp",
+            "gcp",
+            "利用者VPC/Subnet: 未構成（Google管理）",
+        )
     ]
     nodes = [
         node("flutter", "Flutter Web", "ブラウザUI / JS viewer", 130, 190),
         node("cloudflare", "Cloudflare DNS", "DNS only", 130, 455),
-        node("lb", "Cloud Load Balancing", "HTTPS / app・media", 490, 190),
+        node(
+            "lb",
+            "Cloud Load Balancing",
+            "公開VIP 34.96.101.8/32",
+            490,
+            190,
+            ("単一IP / 公開HTTPS", "public"),
+        ),
         node(
             "run",
             "Cloud Run · Go",
             "Tokyo / UI・API",
             790,
             190,
+            ("公開HTTPS / run.app", "public"),
         ),
         node(
             "firestore",
@@ -61,6 +80,7 @@ def overview():
             "交流・共通実行台帳",
             1080,
             190,
+            ("IAM", "iam"),
         ),
         node(
             "gcs",
@@ -68,6 +88,7 @@ def overview():
             "private inputs / catalog",
             1360,
             190,
+            ("IAM / PAP", "iam"),
         ),
         node(
             "cdn",
@@ -75,6 +96,7 @@ def overview():
             "index 1秒 / 資産24時間",
             490,
             455,
+            ("公開HTTPS", "public"),
         ),
         node(
             "gcs",
@@ -82,6 +104,7 @@ def overview():
             "private media",
             790,
             455,
+            ("IAM / CDN cache-fill", "iam"),
         ),
         node(
             "vertex",
@@ -89,6 +112,7 @@ def overview():
             "CustomJob / Spot T4 × 1",
             1080,
             455,
+            ("IAM", "iam"),
         ),
         node(
             "registry",
@@ -96,6 +120,7 @@ def overview():
             "digest固定image",
             1360,
             455,
+            ("IAM", "iam"),
         ),
         node(
             "githubactions",
@@ -106,13 +131,14 @@ def overview():
         ),
     ]
     edges = [
+        edge("M130 184 V88 H790 V184", "run.app 直接", 560, 78, both=True),
         edge("M172 226 H448", "HTTPS", 305, 214, both=True),
         edge("M532 226 H748", "app", 640, 214, both=True),
         edge("M832 226 H1038", "transaction", 937, 214, kind="n", both=True),
         edge("M130 346 V449", "DNS", 160, 398, kind="n", both=True),
         edge("M490 346 V449", "media", 530, 400, both=True),
         edge("M532 491 H748", "cache fill", 638, 479, both=True),
-        edge("M790 184 V158 H1360 V184", "catalog read-only", 1080, 149, kind="n"),
+        edge("M815 184 V174 H1360 V184", "catalog read-only", 1120, 165, kind="n"),
         edge(
             "M832 244 H945 V414 H1080 V449",
             "job開始 / 状態 / 中止",
@@ -344,6 +370,9 @@ body {padding:24px;}.page {max-width:none;}.head {max-width:1600px;}.lede {max-w
 .node {width:220px;}.tile {width:72px;height:72px;}.tile img {width:43px;height:43px;}
 .node .name {font-size:17px;line-height:23px;margin-top:9px;white-space:nowrap;}
 .node .role {font-family:var(--font-body);font-size:14px;line-height:20px;letter-spacing:0;margin-top:3px;}
+.node .badge {display:inline-block;margin-top:4px;padding:0 6px;border:1px solid var(--color-neutral);border-radius:4px;font-size:12px;line-height:18px;color:var(--color-neutral);background:var(--color-paper);}
+.node .badge.public {border-color:var(--color-accent);color:var(--color-accent);}
+.boundary {position:absolute;right:18px;top:14px;font-size:15px;color:var(--color-neutral);white-space:nowrap;}
 .g-label {font-size:16px;}.group.gcp {border-color:var(--color-gcp);}
 .e {stroke-width:2.2;}.n {stroke-width:1.7;}.el {font-size:14px;letter-spacing:0;stroke-width:6px;}
 .canvas-title {position:absolute;left:46px;top:25px;font-family:var(--font-display);font-size:30px;font-weight:700;}

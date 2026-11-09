@@ -1,6 +1,6 @@
 # rangle のクラウド構成
 
-発表用stgを、全体・ML・配信の3図で示す。2026-11-10時点の `origin/stg`（`10bd7cd`）のcode・IaCと既存の検証記録に基づき、クラウドの現在状態を再照会したものではない。正本は `infra/gcp/environments/presentation` → [presentation module](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。汎用stgのplatform moduleとは別の構成である。
+発表用stgを、全体・ML・配信の3図で示す。code・IaCは `origin/stg`（`10bd7cd`）に基づき、既存の検証記録と2026-11-09のDNS・Cloud Runネットワーク設定の確認を反映する。全資源の最新状態を網羅的に再照会した図ではない。正本は `infra/gcp/environments/presentation` → [presentation module](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。汎用stgのplatform moduleとは別の構成である。
 
 | 図 | 読み取ること | 実装の入口 |
 | --- | --- | --- |
@@ -18,6 +18,22 @@
 - 実GPUで入力→逐次生成→CDN公開は確認済みだが、**30秒の遅延を継続して満たす目標は未達**。起動待ち・画質・破棄window・測定範囲は[実測](cloud-live.md#2026-11-09の実gpu検証)を参照する。
 
 LIVEの処理待ちは最新window 1件で、評価4視点の画素は学習から除外する。配信側も待ち更新を最新1件にまとめ、新モデルの準備中は旧モデルと視点を保持する。通常のpreview動画はFlutter側の別経路で再生し、Goは大容量モデルを中継しない。
+
+## ネットワーク境界とアクセス制御
+
+全体図のGoogle Cloud枠はサービスの所属を示し、VPCやprivate subnetの境界ではない。presentation構成には利用者が指定するVPC・subnetwork・subnet CIDRがなく、Vertex CustomJobにも`Network`を指定していない。Cloud RunはVPC connector・Direct VPC interfacesともに未設定。図中の「Google管理」はこれらのmanaged serviceを表し、利用者専用のprivate subnetが存在するという意味ではない。
+
+| 対象 | 到達経路と制御 |
+| --- | --- |
+| LBの公開VIP | `34.96.101.8/32`。**単一hostの公開IP**をCIDR表記したもので、VPC subnetのCIDRではない。app / mediaのDNS A recordは2026-11-09 16:56 UTCにこのIPを確認 |
+| Cloud Run / UI・API | LB経由に加え、既定`run.app`とcandidate-tag URLへ直接到達できる。`ingress=ALL`、Cloud Runのinvoker IAMチェック無効（操作認可はGo）、default URI有効。LBだけを唯一の入口としない。CIも直接URLをsmokeする |
+| GCS inputs / catalog | PAP enforcedとIAMで保護。入力・設定・目録を匿名公開しない。Go runtimeやtrainerには用途別の権限を与える |
+| GCS media / Cloud CDN | bucket自体はPAP enforced / IAM保護。cache-fill identityが読み、**許諾済み素材だけをCDNの公開HTTPSで配信**する。入力bucketをCDN originへ流用しない |
+| Firestore / Vertex / Artifact Registry | Goの実行台帳・アカウント、job制御、image取得はIAMで制御。ネットワーク上のprivate subnetによる隔離を示したものではない |
+
+公開HTTPS入口があることと、すべてのデータを匿名で取得できることは別である。公開feed・mediaの閲覧に対し、生成・交流の操作はGoの認証、CSRF保護、管理者・所有者判定を使う。[受付の実装](../internal/generation/handler.go)・[アプリの接続](../cmd/rangle-server/application.go)・[IAM](generation-infrastructure.md)を参照。今回の図更新はネットワーク制限の追加やsecurity設定の変更を含まない。
+
+直通経路の制限とCIの検証経路を両立する改善は [#113](https://github.com/Hosi121/rangle/issues/113) で別に扱う。
 
 ## 旧配備図（2026-11-08）
 
