@@ -28,6 +28,11 @@ output "deployment" {
       session_ttl = "sessions.expires_at"
     } : null
     generation = local.generation_enabled ? {
+      sync = local.generation_sync_enabled ? {
+        scheduler = local.generation_sync_job
+        audience  = local.generation_sync_uri
+        identity  = google_service_account.generation_sync[0].email
+      } : null
       config_object           = "generation/${var.application.generation_config_sha256}.json"
       trainer_service_account = google_service_account.trainer[0].email
       region                  = var.region

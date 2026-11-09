@@ -18,17 +18,18 @@ import (
 )
 
 type config struct {
-	Web               appserver.Config
-	CatalogFile       string
-	AssetRoot         string
-	AssetOrigin       string
-	CommunityStore    community.Store
-	CommunityMemory   bool
-	FirestoreProject  string
-	FirestoreDatabase string
-	SecureCookies     bool
-	GenerationFile    string
-	GenerationService *generation.Service
+	Web                    appserver.Config
+	CatalogFile            string
+	AssetRoot              string
+	AssetOrigin            string
+	CommunityStore         community.Store
+	CommunityMemory        bool
+	FirestoreProject       string
+	FirestoreDatabase      string
+	SecureCookies          bool
+	GenerationFile         string
+	GenerationService      *generation.Service
+	GenerationSyncAudience string
 }
 
 type application struct {
@@ -52,6 +53,9 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	}
 	if (cfg.CommunityMemory || cfg.FirestoreProject != "" || cfg.CommunityStore != nil) && cfg.CatalogFile == "" {
 		return nil, fmt.Errorf("community requires a clip catalog")
+	}
+	if cfg.GenerationSyncAudience != "" && (cfg.CatalogFile == "" || cfg.GenerationFile == "" && cfg.GenerationService == nil) {
+		return nil, fmt.Errorf("generation sync requires configured generation")
 	}
 	if cfg.GenerationFile != "" && (cfg.FirestoreProject == "" || !cfg.SecureCookies || cfg.CatalogFile == "") {
 		return nil, fmt.Errorf("generation requires persistent accounts, secure cookies and a catalog")
@@ -175,6 +179,13 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		})
 		if err != nil {
 			return app, err
+		}
+		if cfg.GenerationSyncAudience != "" {
+			syncHandler, err := generation.NewSyncHandler(generationService, cfg.GenerationSyncAudience)
+			if err != nil {
+				return app, err
+			}
+			mux.Handle(generation.SyncPath, syncHandler)
 		}
 		mux.Handle("/api/v1/generation/", jobs)
 		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))

@@ -146,7 +146,7 @@ resource "google_cloud_run_v2_service" "app" {
         "-firestore-database", google_firestore_database.community[0].name
         ] : [], local.generation_enabled ? [
         "-generation-config", "/mnt/catalog/generation/${var.application.generation_config_sha256}.json"
-      ] : [])
+      ] : [], local.generation_sync_enabled ? ["-generation-sync-audience", local.generation_sync_uri] : [])
       ports { container_port = 8080 }
       resources {
         limits            = { cpu = "1", memory = "512Mi" }

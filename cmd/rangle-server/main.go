@@ -35,6 +35,7 @@ func main() {
 	firestoreDatabase := flag.String("firestore-database", "rangle-stg", "dedicated Firestore database ID")
 	insecureCookies := flag.Bool("insecure-local-cookies", false, "allow session cookies over HTTP on loopback only")
 	generationFile := flag.String("generation-config", "", "optional immutable generation configuration JSON")
+	generationSyncAudience := flag.String("generation-sync-audience", "", "optional exact HTTPS audience for managed generation state synchronization")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "rangle-server")
@@ -42,15 +43,16 @@ func main() {
 	defer stop()
 
 	cfg := config{
-		Web:               appserver.Config{UIRoot: *uiRoot, SceneDir: *sceneDir, SceneID: *sceneID},
-		CatalogFile:       *catalogFile,
-		AssetRoot:         *assetRoot,
-		AssetOrigin:       *assetOrigin,
-		CommunityMemory:   *communityMemory,
-		FirestoreProject:  *firestoreProject,
-		FirestoreDatabase: *firestoreDatabase,
-		SecureCookies:     !*insecureCookies,
-		GenerationFile:    *generationFile,
+		Web:                    appserver.Config{UIRoot: *uiRoot, SceneDir: *sceneDir, SceneID: *sceneID},
+		CatalogFile:            *catalogFile,
+		AssetRoot:              *assetRoot,
+		AssetOrigin:            *assetOrigin,
+		CommunityMemory:        *communityMemory,
+		FirestoreProject:       *firestoreProject,
+		FirestoreDatabase:      *firestoreDatabase,
+		SecureCookies:          !*insecureCookies,
+		GenerationFile:         *generationFile,
+		GenerationSyncAudience: *generationSyncAudience,
 	}
 
 	if err := run(ctx, *address, cfg, logger); err != nil {

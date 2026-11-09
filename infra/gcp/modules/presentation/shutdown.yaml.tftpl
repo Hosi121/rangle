@@ -163,6 +163,27 @@ main:
                       - record_generation_error:
                           assign:
                             - errors: $${list.concat(errors, error)}
+    - pause_generation_sync:
+        switch:
+          - condition: ${generation_sync_enabled}
+            steps:
+              - pause_active_job_polling:
+                  try:
+                    call: http.post
+                    args:
+                      url: "https://cloudscheduler.googleapis.com/v1/${generation_sync_job}:pause"
+                      auth: {type: OAuth2}
+                      body: {}
+                  except:
+                    as: error
+                    steps:
+                      - missing_sync_job_is_already_stopped:
+                          switch:
+                            - condition: $${map.get(error, "code") != 404}
+                              steps:
+                                - record_sync_pause_error:
+                                    assign:
+                                      - errors: $${list.concat(errors, error)}
     - check_shutdown:
         switch:
           - condition: $${len(errors) > 0}

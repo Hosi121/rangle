@@ -39,3 +39,17 @@ communityの存在確認はstatic ID集合に加え、掲載済みgenerated ID�
 CPU/API testsとloopback Firestore emulatorで、所有者・未完了・CSRF/入力制限、static/dynamic成果物、破損/欠損/別job/別出典/redirect拒否、冪等PUT、検索/paging/ETag/旧cursor、複数Firestore clientの同時掲載、再起動、コミュニティ操作と取り下げ後のdeep linkを検証する。
 
 この変更は外部cloud適用、GPU実行、デプロイ、実APIやブラウザの確認を実行しない。定期的なactive job同期は別の変更として扱い、この掲載処理へgoroutine timerを組み込まない。
+
+## リクエストに依存しない状態同期
+
+`-generation-sync-audience https://app.<domain>/internal/generation/sync` を指定したruntimeだけが、`POST /internal/generation/sync` を有効にする。cookieでは認証せず、Googleの署名を検証したOIDC tokenのaudience・issuer・有効期限・subject・verified emailを検査する。許可するemailは `rangle-stg-generation-sync@<project>.iam.gserviceaccount.com` の1つだけ。bodyは空または `{}`、任意jobや設定を受け取らず、tokenをログに出さない。
+
+処理はFirestore admission台帳のactive 1件だけを取得し、未終了なら既存のprovider状態同期を実行する。状態が終端になれば既存transactionがactive slotを解放する。Admit/Submit、attemptの追加や返金、掲載変更、model取得は行わない。既存30分上限のcancelは維持する。idle時はVertexへ問い合わせない。
+
+各要求は10秒、同じinstanceでは認証済み要求を1分に1件へ制限する。generation設定の期限と固定の2026-11-14T15:00:00Zの早い方を上限とし、それ以後はtoken検証やVertex呼び出しより前に410で拒否する。常駐goroutineやrequests-only CPUのtimerを使わず、Cloud Schedulerの2分間隔・自動retryなしのリクエストで進める。
+
+IaCの `generation_sync_enabled` は既定false。明示enable時だけ専用SAとScheduler、runtime audienceを追加する。専用SAにVertex・Firestore・IAM・配備の権限を与えない。token発行には既存のCloud Scheduler service agentの権限を使い、public app内の専用endpointが署名とidentityを検証する。[HTTP target認証の公式契約](https://docs.cloud.google.com/scheduler/docs/http-target-auth)
+
+既存の期限・JPY予算guardの停止分岐は、所有するgeneration-sync Schedulerもpauseする。pause失敗は既存の失敗記録へ集約し、旧来のCloud Run/Vertex停止手順と台帳を維持する。pauseをTerraform applyで勝手に解除しない。IAMやquota・費用の厳密なhard capを新たに主張するものではない。
+
+適用はrootが新image/固定audience・plan・実Workflows compilerを確認してから行う。旧imageへ未対応flagを渡さず、既存の明示traffic固定と候補検証手順を守る。ローカルではGoのOIDC拒否・同期・上限・期限のテスト、Terraform validate/mock planとrender済みWorkflowの400文字制限を確認する。実Scheduler/token/Workflows compilerはこの変更では呼び出さない。

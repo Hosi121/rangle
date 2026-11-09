@@ -85,3 +85,9 @@ variable "create_artifact_repository" {
   type        = bool
   default     = false
 }
+
+variable "generation_sync_enabled" {
+  description = "Explicitly enable deadline-bound authenticated active-job polling after server/runtime review."
+  type        = bool
+  default     = false
+}
