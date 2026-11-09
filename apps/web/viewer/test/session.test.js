@@ -30,7 +30,7 @@ function harness() {
   };
   const frameLoader = { async load(url) { return { url }; }, cancel() {}, dispose() {} };
   const session = new SceneSession({ createViewer: () => viewer, frameLoader,
-    fetchManifest: async () => ({ ok: true, url: source, json: async () => manifest() }),
+    fetchManifest: async () => ({ ok: true, url: source, text: async () => JSON.stringify(manifest()) }),
     notify: (message) => messages.push(message) });
   return { session, viewer, messages, frameLoader };
 }
@@ -43,7 +43,7 @@ test('default manifest fetch retains the global receiver required by browser fet
     assert.equal(this, globalThis, 'Illegal invocation: fetch requires its global receiver');
     assert.ok(signal instanceof AbortSignal);
     requestedUrl = url;
-    return { ok: true, url: source, json: async () => manifest() };
+    return { ok: true, url: source, text: async () => JSON.stringify(manifest()) };
   };
   const session = new SceneSession({ createViewer: () => viewer, frameLoader, notify: (message) => messages.push(message) });
   try {
@@ -65,7 +65,7 @@ test('manifest resolves frames relative to its final URL and rejects invalid inp
 
 test('manifest frame count and fractional frame rate determine the seek range', async () => {
   const { session, messages } = harness();
-  session.fetchManifest = async () => ({ ok: true, url: source, json: async () => ({ ...manifest(), frameRate: 12.5, frames: ['0.splat', '1.splat', '2.splat'] }) });
+  session.fetchManifest = async () => ({ ok: true, url: source, text: async () => JSON.stringify({ ...manifest(), frameRate: 12.5, frames: ['0.splat', '1.splat', '2.splat'] }) });
   await session.load(source);
   await session.seek(100);
   assert.equal(messages.at(-1).frame, 2);

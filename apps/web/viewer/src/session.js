@@ -2,6 +2,7 @@ import { validIntrinsics } from './camera-intrinsics.js';
 import { TemporalSession } from './temporal-session.js';
 import { liveSceneUrl } from './live-model.js';
 import { handoffTimeline } from './playback-handoff.js';
+import { strictJson, exactFields } from './strict-json.js';
 
 export const CHANNEL = 'rangle-scene-v1';
 
@@ -15,10 +16,17 @@ export function parseManifest(input, source) {
   const vector = (value) => Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
   const camera = input?.camera;
   const temporal = input?.temporal;
-  const temporalValid = temporal && typeof temporal.url === 'string' &&
+  const temporalValid = exactFields(temporal, ['url']) && temporal.url === 'model.rgs' &&
     Number.isInteger(input.frameCount) && input.frameCount >= 2 && input.frameCount <= 15000 &&
     input.frameRate <= 240;
-  if (input?.version !== 1 || !Number.isFinite(input.frameRate) || input.frameRate <= 0 ||
+  const shape = exactFields(input, ['version', 'frameRate', 'camera', 'attribution', ...(temporal ? ['temporal', 'frameCount'] : ['frames'])], ['timeline']) &&
+    exactFields(camera, ['position', 'lookAt', 'up', 'fovYDegrees'], ['referenceImageHeight', 'intrinsics']) &&
+    exactFields(input.attribution, ['label', 'source', 'license']) &&
+    (camera.intrinsics === undefined || exactFields(camera.intrinsics, ['width', 'height', 'fx', 'fy', 'cx', 'cy'])) &&
+    (input.timeline === undefined || (exactFields(input.timeline, ['previewUrl', 'previewStartSeconds', 'sceneStartSeconds']) &&
+      typeof input.timeline.previewUrl === 'string' && input.timeline.previewUrl.length > 0 &&
+      [input.timeline.previewStartSeconds, input.timeline.sceneStartSeconds].every(value => Number.isFinite(value) && value >= 0)));
+  if (!shape || input?.version !== 1 || !Number.isFinite(input.frameRate) || input.frameRate <= 0 ||
       (temporal ? !temporalValid : !Array.isArray(input.frames) || input.frames.length === 0) ||
       !vector(camera?.position) || !vector(camera?.lookAt) || !vector(camera?.up) ||
       !camera.up.some((value) => value !== 0) ||
@@ -93,8 +101,8 @@ export class SceneSession {
       const bytes = new Uint8Array(size);
       let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
-      json = JSON.parse(new TextDecoder().decode(bytes));
-    } else json = await response.json();
+      json = strictJson(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    } else json = strictJson(await response.text());
     const manifest = parseManifest(json, response.url || source);
     if (this.liveOptions.live) {
       const model = new URL(manifest.temporal?.url ?? '');

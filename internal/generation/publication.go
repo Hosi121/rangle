@@ -5,18 +5,17 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/Hosi121/rangle/internal/catalog"
+	"github.com/Hosi121/rangle/internal/publication"
 )
 
 // Publication is separate from the transport catalog. These are validated,
@@ -328,36 +327,8 @@ func (s *Service) validatePublication(ctx context.Context, job Job) (Publication
 // Validate the pinned RGS1 container without rendering or proxying it. The
 // compressed payload is bounded by the declared Gaussian count before hashing.
 func validateTemporalOutput(data []byte, frames int, fps float64) error {
-	const header = 32
-	const stride = 56
-	if len(data) < header {
-		return fmt.Errorf("invalid temporal model header")
+	if frames < 2 || frames > 32 {
+		return fmt.Errorf("invalid generated temporal frame count")
 	}
-	magic := string(data[:8])
-	count := int64(binary.LittleEndian.Uint32(data[8:12]))
-	declaredStride := binary.LittleEndian.Uint32(data[12:16])
-	declaredFrames := int(binary.LittleEndian.Uint32(data[16:20]))
-	declaredFPS := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[20:24])))
-	duration := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[24:28])))
-	if (magic != "RANGL4D1" && magic != "RANGL4Z1") || count < 1 || count > 500000 || declaredStride != stride ||
-		declaredFrames != frames || frames < 2 || frames > 32 || math.IsNaN(declaredFPS) || math.Abs(declaredFPS-fps) > 1e-5 ||
-		math.IsNaN(duration) || math.Abs(duration-float64(frames-1)/fps) > 1e-5 || binary.LittleEndian.Uint32(data[28:32]) != 0 || count*stride+header > 32<<20 {
-		return fmt.Errorf("invalid temporal model header")
-	}
-	if magic == "RANGL4D1" {
-		if int64(len(data)) != header+count*stride {
-			return fmt.Errorf("invalid temporal model size")
-		}
-		return nil
-	}
-	reader, err := gzip.NewReader(bytes.NewReader(data[header:]))
-	if err != nil {
-		return err
-	}
-	defer reader.Close()
-	size, err := io.Copy(io.Discard, io.LimitReader(reader, count*stride+1))
-	if err != nil || size != count*stride {
-		return fmt.Errorf("invalid temporal model payload size")
-	}
-	return nil
+	return publication.ValidateTemporalModel(data, frames, fps)
 }

@@ -54,10 +54,13 @@ class _LiveFeed {
             'started_at': '2026-11-09T00:00:00Z',
             'updated_at': '2026-11-09T00:00:01Z',
             'latest_input_time_seconds': .76,
+            'target_latency_seconds': 30,
+            'dropped_windows': 0,
             'source': {
               'label': 'Test source',
               'url': 'https://source.example.invalid',
               'license': 'CC BY 4.0',
+              'caveat': 'Synthetic test source.',
             },
             'segments': [
               {
@@ -70,6 +73,9 @@ class _LiveFeed {
                 'model_bytes': 1000,
                 'captured_at': '2026-11-09T00:00:00Z',
                 'available_at': '2026-11-09T00:00:01Z',
+                'training_seconds': 0.1,
+                'mean_packed_psnr': 20,
+                'mean_packed_ssim': 0.8,
               },
             ],
           }),

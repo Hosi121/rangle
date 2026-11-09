@@ -1,0 +1,148 @@
+{
+  "type": "object",
+  "required": [
+    "version",
+    "clips"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "integer"
+    },
+    "clips": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "title",
+          "sport",
+          "manifest"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "sport": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "manifest": {
+            "type": "object",
+            "required": [
+              "version",
+              "clip_id",
+              "revision",
+              "codec",
+              "representations"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "version": {
+                "type": "integer"
+              },
+              "clip_id": {
+                "type": "string"
+              },
+              "revision": {
+                "type": "string"
+              },
+              "codec": {
+                "type": "string"
+              },
+              "representations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "id",
+                    "bitrate_bps",
+                    "peak_decoded_bytes",
+                    "decode_time_ms",
+                    "segments"
+                  ],
+                  "additionalProperties": false,
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "bitrate_bps": {
+                      "type": "integer"
+                    },
+                    "peak_decoded_bytes": {
+                      "type": "integer"
+                    },
+                    "decode_time_ms": {
+                      "type": "integer"
+                    },
+                    "segments": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "index",
+                          "start_seconds",
+                          "duration_seconds",
+                          "url",
+                          "size_bytes",
+                          "independent",
+                          "sha256"
+                        ],
+                        "additionalProperties": false,
+                        "properties": {
+                          "index": {
+                            "type": "integer"
+                          },
+                          "start_seconds": {
+                            "type": "integer"
+                          },
+                          "duration_seconds": {
+                            "type": "number"
+                          },
+                          "url": {
+                            "type": "string"
+                          },
+                          "size_bytes": {
+                            "type": "integer"
+                          },
+                          "independent": {
+                            "type": "boolean"
+                          },
+                          "sha256": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "init_url": {
+                      "type": "string"
+                    },
+                    "init_size_bytes": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "preview_url": {
+            "type": "string"
+          },
+          "scene_url": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rangle:contracts:v1:manifest"
+}
