@@ -1,6 +1,6 @@
 # Media boundary contracts v1
 
-50個の合成fixtureを、各言語の実際のparser・loader・publication gateへ渡す。画像・学習済みmodel・外部URLへの通信は含まない。`cases.json`がcase ID、入力file、適用profile、context、採否、正規化値の正本。JSONの重複fieldを保持するため、入力を読み直してserializeしてはいけない。過大JSONは524289 byteの空白を生成する小さなrecipeで表す。
+74個の合成fixtureを、各言語の実際のparser・loader・publication gateへ渡す。画像・学習済みmodel・外部URLへの通信は含まない。`cases.json`がcase ID、入力file、適用profile、context、採否、正規化値の正本。JSONの重複fieldを保持するため、入力を読み直してserializeしてはいけない。過大JSONは524289 byteの空白、過大wireは既存RGSへNULを追加する`pad-to-size`の小さなrecipeで表す。
 
 ## Shapeと意味制約
 
@@ -19,7 +19,7 @@
 
 | profile / cases | Go production | Python production | JavaScript production | Dart production |
 | --- | --- | --- | --- | --- |
-| rgs: R01–R14 | publication temporalModel、generation.validateTemporalOutput | packing.unpack_temporal/decode_temporal | decodeTemporal→prepareTemporal | N/A: binaryを読まない |
+| rgs: R01–R38 | publication temporalModel、generation.validateTemporalOutput | packing.unpack_temporal/decode_temporal | decodeTemporal→prepareTemporal | N/A: binaryを読まない |
 | scene: S01–S13 | ValidateLiveScene | LIVE bundle gate経由のみ。独立scene validatorなし | SceneSession.manifestFrom→parseManifest、model timeline binding | N/A: scene JSONを読まない |
 | live: L01–L13 | live.ParseIndex / rangle-live-check | producer object→publish-live.verify→同じGo CLI | N/A: indexを読まない | LiveApi.pollのraw HTTP JSON |
 | manifest: M01–M06 | catalog.Load→stream.Manifest.Validate | N/A | N/A | N/A: transport manifestを読まない |
@@ -30,7 +30,9 @@ PythonのLIVE入力は既に構築済みobject。raw構文だけのL05（escaped
 
 RGSの共通profileは学習出力window（2–32 frames）。汎用Go publication/JS viewerは15000 framesまで扱うが、Python trainer/generationの入力・出力制限を緩めない。このcorpusは未列挙の全JSON/全形式について完全な等価性を証明するものではない。
 
-既知の未カバー差分: 正しいZ1の後ろに空のgzip memberを追加すると、Python gzipとnative JS DecompressionStreamは受理し、Goのsingle-member検証は拒否する。合成1 primitiveの単発oracleで確認済み。R10の非gzip余剰byte拒否とは別であり、RGS wire全体の採否一致は未達。既存の展開長上限・CRC・primitive検証は維持する。canonical gzip container policyの統一は[Issue #101](https://github.com/Hosi121/rangle/issues/101)で追跡し、今回は独自Deflate parserを追加しない。
+Z1は従来の[単一gzip member契約](../../../../docs/rgs-gzip-contract.md)を実decoderでも強制する。R15–R38は、追加/反復member、NUL padding、非gzip余剰、CRC/ISIZE/FHCRC、optional header、予約flag、宣言長・wire上限を固定する。正しいoptional headerとdeflate内のmagic byte列は受理する。これは既知の実decoder差を直す追加coverageで、v1 corpusによる全RGS wireの完全等価性の証明ではない。独自Deflate parserは追加しない。
+
+`python3 testdata/contracts/v1/generate_rgs_gzip.py`で新しい合成caseを再生成できる。既存R01を元にし、実画像・学習済みmodelは用いない。R36は32MiB+1のwireを各adapterで生成する。R30/R38は小さな圧縮入力で32MiB超の展開を表し、R38はISIZEも偽装して展開中の上限を通すことができないか確認する。
 
 ## 実行と変更
 

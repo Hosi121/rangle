@@ -18,6 +18,8 @@ class SharedWireContracts(unittest.TestCase):
                 continue
             with self.subTest(case=case["id"]):
                 payload = (ROOT / case["file"]).read_bytes()
+                if case.get("recipe", {}).get("kind") == "pad-to-size":
+                    payload = payload.ljust(case["recipe"]["bytes"], b"\0")
                 if not case["accept"]:
                     with self.assertRaises((ValueError, OSError, EOFError)):
                         unpack_temporal(payload)

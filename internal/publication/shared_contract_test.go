@@ -21,8 +21,11 @@ func TestSharedMediaContracts(t *testing.T) {
 		Cases   []struct {
 			ID, Profile, File, Model, Origin string
 			Accept                           bool
-			Recipe                           struct{ Bytes int }
-			Context                          struct {
+			Recipe                           struct {
+				Kind  string
+				Bytes int
+			}
+			Context struct {
 				FrameCount int
 				FrameRate  float64
 			}
@@ -53,7 +56,10 @@ func TestSharedMediaContracts(t *testing.T) {
 		}
 		t.Run(c.ID, func(t *testing.T) {
 			var body []byte
-			if c.Recipe.Bytes > 0 {
+			if c.Recipe.Kind == "pad-to-size" {
+				body = make([]byte, c.Recipe.Bytes)
+				copy(body, read(c.File))
+			} else if c.Recipe.Bytes > 0 {
 				body = []byte(strings.Repeat(" ", c.Recipe.Bytes))
 			} else {
 				body = read(c.File)

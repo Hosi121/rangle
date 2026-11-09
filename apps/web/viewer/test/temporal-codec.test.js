@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { constants, gzipSync } from 'node:zlib';
+import { constants, deflateSync, gzipSync } from 'node:zlib';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +17,16 @@ function fixture(count = 4099) {
   return data;
 }
 const pack = data => packTemporal(data, bytes => gzipSync(bytes, { level: 6 }));
+
+test('native zlib boundary verification rejects bytes after its checksum', async () => {
+  const source = Buffer.from('boundary-check'), encoded = deflateSync(source);
+  const inflate = bytes => new Response(new Blob([bytes]).stream()
+    .pipeThrough(new DecompressionStream('deflate'))).arrayBuffer();
+  assert.deepEqual(Buffer.from(await inflate(encoded)), source);
+  for (const tail of [Buffer.from([0]), Buffer.from('garbage'), encoded]) {
+    await assert.rejects(inflate(Buffer.concat([encoded, tail])));
+  }
+});
 
 test('compressed temporal bytes recover every original byte and canonical ID across chunks', async () => {
   for (const count of [1, 4099]) {
@@ -49,6 +59,73 @@ test('declared expansion limits and exact decoded lengths are enforced', async (
   const long = pack(fixture(2));
   new DataView(long).setUint32(8, 1, true);
   await assert.rejects(decodeTemporal(long), /exceeds declared size/);
+});
+
+test('native passes cancel failures and always release reader locks', async () => {
+  const Native = globalThis.DecompressionStream, streams = [];
+  globalThis.DecompressionStream = class {
+    constructor(format) {
+      const decoder = new Native(format), state = { format, canceled: 0, released: 0 };
+      streams.push(state);
+      const getReader = decoder.readable.getReader.bind(decoder.readable);
+      decoder.readable.getReader = (...args) => {
+        const reader = getReader(...args), cancel = reader.cancel.bind(reader), release = reader.releaseLock.bind(reader);
+        reader.cancel = (...values) => { state.canceled++; return cancel(...values); };
+        reader.releaseLock = () => { state.released++; return release(); };
+        return reader;
+      };
+      return decoder;
+    }
+  };
+  try {
+    const valid = pack(fixture(1)), corrupt = valid.slice(0);
+    new Uint8Array(corrupt)[corrupt.byteLength - 8] ^= 1;
+    await assert.rejects(decodeTemporal(corrupt));
+    assert.deepEqual(streams.splice(0), [{ format: 'gzip', canceled: 1, released: 1 }]);
+    const extra = new Uint8Array(valid.byteLength + gzipSync(new Uint8Array()).length);
+    const empty = gzipSync(new Uint8Array());
+    extra.set(new Uint8Array(valid, 0, 32));
+    extra.set(empty, 32); extra.set(new Uint8Array(valid, 32), 32 + empty.length);
+    await assert.rejects(decodeTemporal(extra.buffer));
+    assert.deepEqual(streams.splice(0), [
+      { format: 'gzip', canceled: 0, released: 1 },
+      { format: 'deflate', canceled: 1, released: 1 },
+    ]);
+    const expansion = pack(fixture(2));
+    new DataView(expansion).setUint32(8, 1, true);
+    // A forged ISIZE bypasses the cheap check; stream/native integrity rejects it.
+    new DataView(expansion).setUint32(expansion.byteLength - 4, 56, true);
+    await assert.rejects(decodeTemporal(expansion));
+    assert.deepEqual(streams, [{ format: 'gzip', canceled: 1, released: 1 }]);
+  } finally { globalThis.DecompressionStream = Native; }
+});
+
+test('abort and timeout signals cancel native reads, including the boundary pass', async () => {
+  const packed = pack(fixture(4099));
+  await assert.rejects(decodeTemporal(packed, { signal: AbortSignal.abort() }), { name: 'AbortError' });
+  await assert.rejects(decodeTemporal(packed, { signal: AbortSignal.timeout(0) }), { name: 'TimeoutError' });
+  const Native = globalThis.DecompressionStream, controller = new AbortController();
+  let canceled = 0, released = 0;
+  globalThis.DecompressionStream = class {
+    constructor(format) {
+      const decoder = new Native(format);
+      if (format === 'deflate') {
+        const getReader = decoder.readable.getReader.bind(decoder.readable);
+        decoder.readable.getReader = (...args) => {
+          const reader = getReader(...args), cancel = reader.cancel.bind(reader), release = reader.releaseLock.bind(reader);
+          reader.cancel = (...values) => { canceled++; return cancel(...values); };
+          reader.releaseLock = () => { released++; return release(); };
+          return reader;
+        };
+        queueMicrotask(() => controller.abort());
+      }
+      return decoder;
+    }
+  };
+  try {
+    await assert.rejects(decodeTemporal(packed, { signal: controller.signal }), { name: 'AbortError' });
+    assert.ok(canceled >= 1); assert.equal(released, 1);
+  } finally { globalThis.DecompressionStream = Native; }
 });
 
 test('malformed timeline and unknown formats are rejected before decompression', async () => {

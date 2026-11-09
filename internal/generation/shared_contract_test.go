@@ -14,7 +14,11 @@ func TestSharedGeneratedWireContract(t *testing.T) {
 			ID, Profile, File, Model string
 			Accept                   bool
 			WireBinding              bool `json:"wire_binding"`
-			Context                  struct {
+			Recipe                   struct {
+				Kind  string
+				Bytes int
+			}
+			Context struct {
 				FrameCount int
 				FrameRate  float64
 			}
@@ -39,6 +43,11 @@ func TestSharedGeneratedWireContract(t *testing.T) {
 			data, err := os.ReadFile(filepath.Join(root, path))
 			if err != nil {
 				t.Fatal(err)
+			}
+			if c.Recipe.Kind == "pad-to-size" {
+				padded := make([]byte, c.Recipe.Bytes)
+				copy(padded, data)
+				data = padded
 			}
 			err = validateTemporalOutput(data, frames, fps)
 			if (err == nil) != c.Accept {

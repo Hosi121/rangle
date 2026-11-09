@@ -40,5 +40,14 @@
     ]
   ],
   "primitive_count_max": 500000,
-  "wire_and_raw_bytes_max": 33554432
+  "wire_and_raw_bytes_max": 33554432,
+  "gzip_container": {
+    "members": 1,
+    "trailing_bytes": "forbidden, including NUL padding and empty members",
+    "method": 8,
+    "reserved_flags": 0,
+    "crc32_and_isize": "required and verified",
+    "fhcrc": "verified when present",
+    "decoded_bytes": "exactly count * stride_bytes"
+  }
 }
