@@ -15,6 +15,9 @@ import (
 	"github.com/Hosi121/rangle/internal/community"
 	"github.com/Hosi121/rangle/internal/delivery"
 	"github.com/Hosi121/rangle/internal/generation"
+	"github.com/Hosi121/rangle/internal/live"
+	"github.com/Hosi121/rangle/internal/liveassets"
+	"github.com/Hosi121/rangle/internal/livesource"
 )
 
 type config struct {
@@ -30,6 +33,8 @@ type config struct {
 	GenerationFile         string
 	GenerationService      *generation.Service
 	GenerationSyncAudience string
+	LiveIndex              string
+	LiveAssetsRoot         string
 }
 
 type application struct {
@@ -56,6 +61,9 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	}
 	if cfg.GenerationSyncAudience != "" && (cfg.CatalogFile == "" || cfg.GenerationFile == "" && cfg.GenerationService == nil) {
 		return nil, fmt.Errorf("generation sync requires configured generation")
+	}
+	if cfg.LiveAssetsRoot != "" && cfg.LiveIndex == "" {
+		return nil, fmt.Errorf("local live assets require a live index")
 	}
 	if cfg.GenerationFile != "" && (cfg.FirestoreProject == "" || !cfg.SecureCookies || cfg.CatalogFile == "") {
 		return nil, fmt.Errorf("generation requires persistent accounts, secure cookies and a catalog")
@@ -130,6 +138,33 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			w.Header().Set("Cache-Control", "no-store")
 			http.NotFound(w, r)
 		})
+	}
+	readLive := func(context.Context) ([]byte, error) { return []byte(`{"version":1,"sessions":[]}`), nil }
+	liveOrigin := ""
+	if cfg.LiveIndex != "" {
+		liveOrigin = cfg.AssetOrigin
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		reader, err := livesource.Open(ctx, cfg.LiveIndex)
+		cancel()
+		if err != nil {
+			return app, fmt.Errorf("initialize live index: %w", err)
+		}
+		app.closers = append(app.closers, reader)
+		readLive = reader.Read
+	}
+	liveHandler, err := live.NewHandler(live.Config{Read: readLive, AssetOrigin: liveOrigin, Logger: logger})
+	if err != nil {
+		return app, err
+	}
+	mux.Handle("/api/v1/live", liveHandler)
+	mux.Handle("/api/v1/live/", liveHandler)
+	if cfg.LiveAssetsRoot != "" {
+		assets, err := liveassets.New(cfg.LiveAssetsRoot)
+		if err != nil {
+			return app, fmt.Errorf("initialize local live assets: %w", err)
+		}
+		app.closers = append(app.closers, assets)
+		mux.Handle("/live-assets/", assets)
 	}
 	if cfg.CatalogFile == "" {
 		return app, nil
