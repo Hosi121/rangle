@@ -14,6 +14,8 @@ import 'generation/generation_api.dart';
 import 'generation/generation_screen.dart';
 import 'generation/open_result.dart';
 import 'sharing/share_clip.dart';
+import 'live/live_api.dart';
+import 'live/live_screen.dart';
 import 'widgets/search_dialog.dart';
 import 'models/clip.dart';
 import 'viewer/viewer_adapter.dart';
@@ -31,6 +33,9 @@ class ClipFeedScreen extends StatefulWidget {
     this.generation,
     this.initialGeneration = false,
     this.initialClipId,
+    this.live,
+    this.liveFactory,
+    this.initialLiveId,
     this.shareAction = shareClip,
     super.key,
   });
@@ -41,6 +46,9 @@ class ClipFeedScreen extends StatefulWidget {
   final GenerationApi? generation;
   final bool initialGeneration;
   final String? initialClipId;
+  final LiveApi? live;
+  final ViewerFactory? liveFactory;
+  final String? initialLiveId;
   final ClipShareAction shareAction;
 
   @override
@@ -52,7 +60,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   String? _clipId;
   AccountController? _account;
   String _query = '', _tag = '';
-  bool _generationOpen = false;
+  bool _generationOpen = false, _liveOpen = false;
 
   @override
   void initState() {
@@ -64,11 +72,30 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
       _account = AccountController(widget.community!);
       unawaited(_account!.initialize());
     }
-    if (widget.initialGeneration) {
+    if (widget.initialLiveId != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_openLive(widget.initialLiveId));
+      });
+    } else if (widget.initialGeneration) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) unawaited(_openGeneration());
       });
     }
+  }
+
+  Future<void> _openLive([String? id]) async {
+    if (_liveOpen || _generationOpen) return;
+    setState(() => _liveOpen = true);
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (context) => LiveScreen(
+          api: widget.live,
+          initialId: id,
+          viewerFactory: widget.liveFactory,
+        ),
+      ),
+    );
+    if (mounted) setState(() => _liveOpen = false);
   }
 
   Future<void> _openGeneration() async {
@@ -166,10 +193,20 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => _generationOpen
+  Widget build(BuildContext context) => _generationOpen || _liveOpen
       ? const SizedBox.expand()
       : Scaffold(
           backgroundColor: Colors.black,
+          floatingActionButton: ListenableBuilder(
+            listenable: _paging,
+            builder: (context, _) => _paging.clips.isEmpty
+                ? FloatingActionButton.extended(
+                    onPressed: _openLive,
+                    icon: const Icon(Icons.live_tv),
+                    label: const Text('LIVE'),
+                  )
+                : const SizedBox.shrink(),
+          ),
           body: SafeArea(
             child: ListenableBuilder(
               listenable: _paging,
@@ -242,6 +279,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                   onClearSearch: _clearSearch,
                   filterLabel: _tag.isEmpty ? _query : '#$_tag',
                   onGenerate: _openGeneration,
+                  onLive: _openLive,
                   initialFreeView:
                       RegExp(r'^generated-[a-f0-9]{32}$')
                           .hasMatch(_clipId ?? '') &&
@@ -271,6 +309,7 @@ class _HighlightFeed extends StatefulWidget {
     required this.shareAction,
     required this.onSearch,
     required this.onGenerate,
+    required this.onLive,
     required this.onTag,
     required this.onClearSearch,
     required this.filterLabel,
@@ -283,7 +322,7 @@ class _HighlightFeed extends StatefulWidget {
   final ViewerFactory sceneFactory;
   final AccountController? account;
   final ClipShareAction shareAction;
-  final VoidCallback onSearch, onClearSearch, onGenerate;
+  final VoidCallback onSearch, onClearSearch, onGenerate, onLive;
   final ValueChanged<String> onTag;
   final String filterLabel;
   final bool initialFreeView;
@@ -454,20 +493,32 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                               ),
                             ),
                           ),
-                          Semantics(
-                            liveRegion: true,
-                            label:
-                                '取得済み${widget.paging.endIndex}件中${_selected + 1}件目${widget.paging.hasMore ? '、続きがあります' : ''}',
-                            child: ExcludeSemantics(
-                              child: Text(
-                                '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.paging.endIndex.toString().padLeft(2, '0')}${widget.paging.hasMore ? '+' : ''}',
-                                style: Theme.of(context).textTheme.labelMedium
-                                    ?.copyWith(
-                                      fontFeatures: const [
-                                        FontFeature.tabularFigures(),
-                                      ],
-                                    ),
+                          Flexible(
+                            child: Semantics(
+                              liveRegion: true,
+                              label:
+                                  '取得済み${widget.paging.endIndex}件中${_selected + 1}件目${widget.paging.hasMore ? '、続きがあります' : ''}',
+                              child: ExcludeSemantics(
+                                child: Text(
+                                  '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.paging.endIndex.toString().padLeft(2, '0')}${widget.paging.hasMore ? '+' : ''}',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: Theme.of(context).textTheme.labelMedium
+                                      ?.copyWith(
+                                        fontFeatures: const [
+                                          FontFeature.tabularFigures(),
+                                        ],
+                                      ),
+                                ),
                               ),
+                            ),
+                          ),
+                          PointerInterceptor(
+                            intercepting: _freeView,
+                            child: IconButton(
+                              tooltip: 'LIVEを開く',
+                              onPressed: widget.onLive,
+                              icon: const Icon(Icons.live_tv),
                             ),
                           ),
                           PointerInterceptor(

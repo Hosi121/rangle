@@ -125,3 +125,21 @@ flutter --suppress-analytics build web --no-web-resources-cdn
 JSテストはmanifest、異なるframe数/rate、最新seekへの集約、カメラ保持、失敗・離脱中の破棄をGPUなしで検証します。Flutterテストは既存のフィードと動画操作に加え、asset参照、動画と自由視点の切替、seek、再試行、離脱時の破棄を検証します。実ブラウザのWebGL描画、orbit、コーデック、HTTP/CORS、worker解放は、実際の配信資産を使うブラウザ確認が必要です。
 
 `ViewerAdapter`は従来の動画APIを保ち、`Clip.sceneUrl`で自由視点の参照を追加しています。APIモードは`scene_url`、デモモードは`RANGLE_SCENE_URL`が未設定なら自由視点ボタンを無効にします。Goの`/manifests/{clip_id}/{revision}.json`は配信契約です。描画用scene manifestとは役割が異なり、この画面ではABR判断にまだ使いません。
+
+## LIVEの自由視点
+
+フィードのLIVE操作から配信一覧を開けます。`/demo/?live=配信ID` は直接その配信を開きます。LIVEのAPIは `RANGLE_API_URL` と同じoriginの `/api/v1/live`・`/api/v1/live/{id}` を使い、既存のフィード・動画URLは変えません。
+
+`RANGLE_LIVE_MEDIA_ORIGIN` を指定すると、一覧はAPI、選択後の状態確認はそのoriginの `/live-index/{id}.json` へ分離します。この可変JSONはAPIのsessionと同じ形式で、短いキャッシュ期間とCORSが必要です。モデル・sceneも設定済みoriginに限定します。未指定のローカル構成ではAPIへ問い合わせます。
+
+```bash
+flutter --suppress-analytics build web --no-web-resources-cdn \
+  --dart-define=RANGLE_API_URL=/api/v1/clips \
+  --dart-define=RANGLE_LIVE_MEDIA_ORIGIN=https://media.example.test
+```
+
+状態確認は表示中だけ1秒間隔で、その同時HTTP要求は1つです。通信失敗や新しいモデルの準備中も、表示済みモデルと視点操作を残します。新しいモデルは同じiframe・カメラ・操作状態へ切り替え、取得先・サイズ・SHA256を検証します。保持するGPUモデルは表示中と準備中の最大2個です。初期ロード時を除き、変更失敗で既存モデルを破棄しません。
+
+各LIVE区間は自動で一度再生して最終フレームで待ち、次の区間が届くと更新します。手動の一時停止は更新後も保ち、通常動画のループ動作は変えません。表示する元映像の時刻範囲と、表示済み区間の `captured_at` から求めた概算遅延を示します。欠けた区間を補間せず、連続した25fps配信や一定遅延を保証しません。遅延表示は端末時計のずれの影響を受けます。生成・公開までの実測品質と時間は配信側で評価します。
+
+モデル切替には固定校正・共通world座標が必要です。固定したGaussianSplats3D 0.4.7のmesh生成を小さなadapterから使用し、準備したmeshの描画後に旧資源を解放します。Nodeテストはカメラ保持・最新更新への集約・失敗時の保持・LIVEの最終フレーム待機を、DartテストはHTTP上限・ETag・再接続・表示継続を検証します。実ブラウザのGPU描画と端末上の遅延確認は別途必要です。

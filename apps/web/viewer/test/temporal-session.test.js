@@ -108,3 +108,37 @@ test('leaving during loading releases the worker and ignores late completion', a
   assert.equal(h.messages.some(message => message.type === 'ready'), false);
   assert.equal(h.worker.terminated, true);
 });
+
+test('hidden live initialization defers model installation until visibility returns', async () => {
+  const h = harness();
+  h.session.pause(true);
+  const loading = h.session.load(manifest, { strict: true, autoplay: true });
+  assert.equal(h.commands[0].hidden, true);
+  h.worker.emit(h.model);
+  await flush();
+  assert.equal(h.counts.builds, 0);
+  h.session.pause(false);
+  await flush();
+  h.respond(h.commands.at(-1));
+  await loading;
+  assert.equal(h.counts.builds, 1);
+  assert.equal(h.session.clock.loop, false);
+  assert.equal(h.session.clock.playing, true);
+  await h.session.dispose();
+});
+
+test('hiding during initial GPU preparation does not sort or draw until resumed', async () => {
+  const h = harness();
+  let finishBuild;
+  h.viewer.addSplatBuffers = () => new Promise(resolve => { finishBuild = resolve; });
+  const loading = h.session.load(manifest, { strict: true, autoplay: true });
+  h.worker.emit(h.model);
+  h.session.pause(true);
+  finishBuild(); await flush();
+  assert.equal(h.commands.some(command => command.type === 'sort'), false);
+  assert.equal(h.renders.length, 0);
+  h.session.pause(false); await flush();
+  h.respond(h.commands.at(-1)); await loading;
+  assert.ok(h.renders.length > 0);
+  await h.session.dispose();
+});

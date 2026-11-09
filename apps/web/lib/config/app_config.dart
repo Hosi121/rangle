@@ -3,6 +3,7 @@ import 'package:http/http.dart' as http;
 import '../data/api_clip_repository.dart';
 import '../data/clip_repository.dart';
 import '../models/clip.dart';
+import '../live/live_api.dart';
 
 /// Compile-time Web configuration. Only an explicit demo build uses samples.
 class AppConfig {
@@ -11,18 +12,23 @@ class AppConfig {
     this.apiUrl = '',
     this.previewUrl = '',
     this.sceneUrl = '',
+    this.liveMediaOrigin = '',
   });
 
   const AppConfig.fromEnvironment()
     : demo = const bool.fromEnvironment('RANGLE_DEMO'),
       apiUrl = const String.fromEnvironment('RANGLE_API_URL'),
       previewUrl = const String.fromEnvironment('RANGLE_PREVIEW_URL'),
-      sceneUrl = const String.fromEnvironment('RANGLE_SCENE_URL');
+      sceneUrl = const String.fromEnvironment('RANGLE_SCENE_URL'),
+      liveMediaOrigin = const String.fromEnvironment(
+        'RANGLE_LIVE_MEDIA_ORIGIN',
+      );
 
   final bool demo;
   final String apiUrl;
   final String previewUrl;
   final String sceneUrl;
+  final String liveMediaOrigin;
 
   ClipRepository createClipRepository({Uri? baseUri, http.Client? client}) {
     if (demo) {
@@ -36,6 +42,21 @@ class AppConfig {
     } on FormatException catch (error) {
       // Report configuration errors through the feed's existing error state.
       return _InvalidFeedRepository(error);
+    }
+  }
+
+  LiveApi? createLiveApi({Uri? baseUri, http.Client? client}) {
+    try {
+      final base = baseUri ?? Uri.base;
+      final api = _feedEndpoint(base);
+      return LiveApi(
+        endpoint: api.resolve('/api/v1/live'),
+        mediaOrigin: liveMediaOrigin,
+        appUri: base,
+        client: client,
+      );
+    } on FormatException {
+      return null;
     }
   }
 

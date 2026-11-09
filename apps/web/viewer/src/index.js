@@ -34,7 +34,15 @@ window.addEventListener('message', async (event) => {
         return viewer;
       },
     });
-    await session.load(message.url);
+    await session.load(message.url, { live: message.live === true,
+      origins: Array.isArray(message.origins) ? message.origins : [], sha256: message.sha256 });
+  } else if (message.type === 'cancelReplace') {
+    session?.cancelReplacement();
+  } else if (message.type === 'replace' && Number.isSafeInteger(message.requestId)) {
+    const active = session;
+    const ready = await active?.replace(message.url, message.sha256);
+    if (session === active) send({ type: ready ? 'modelReady' : 'replaceError',
+      requestId: message.requestId, url: message.url, ...(ready ? active.readyMessage() : {}) });
   } else if (message.type === 'seek') {
     await session?.seek(message.frame);
   } else if (message.type === 'togglePlayback') {
