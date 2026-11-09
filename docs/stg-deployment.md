@@ -1,8 +1,8 @@
 # 発表用 stg の配備
 
-対象は `comin-up`（project number `113704194486`）、Tokyo `asia-northeast1`。承認済み総予算は USD300、停止期限は **2026-11-14 15:00 UTC / 11月15日00:00 JST**。購入ドメインの確定を待ちながら Cloud Run＋Cloud CDN の配信を準備する。Firebase は使用しない。10万同時視聴の容量実証とは区別する。
+対象は `comin-up`（project number `113704194486`）、Tokyo `asia-northeast1`。承認済み総予算は USD300、停止期限は **2026-11-14 15:00 UTC / 11月15日00:00 JST**。Cloud Run＋Cloud CDNを配備し、`app.rangleplay.stream` と `media.rangleplay.stream` へ接続している。Firebase は使用しない。10万同時視聴の容量実証とは区別する。
 
-## 配信と未確定入力
+## 配信と初回配備の入力
 
 `base_domain` は nullable で既定 `null`。実ドメインを推測した値や仮のホスト名を実設定へ入れない。確定後は `app.<base_domain>` と `media.<base_domain>` を使う。
 
@@ -67,7 +67,7 @@ JPY30000 は日本銀行2026-11-06中心相場157.69円/USDで参考約190ドル
 
 ローカルでは fmt、init `-backend=false`、validate、mock provider の3 plan（domain未定、domain確定＋media/budget、domain確定＋app）と rendered Workflow YAML を確認する。serverless NEG は Compute health check / backend timeout を設定せず、アプリ startup probe は `/healthz`。実 Google API の compiler、IAM 実効、TLS、Range/CORS/hash、quota・費用・停止完了は別の実環境確認で判断する。特に、期限・予算到達時の破壊的な削除分岐とその実 IAM は未検証で、無断の停止 drill は実行していない。
 
-2026-11-08 に Cloud Run・NEG・LB・CDN・private GCS を構築した。Cloud Run URL の health/UI/API、media の HTTPS・Range・CORS・ETag・実ファイルのハッシュ一致と、private origin の匿名アクセス拒否を確認済み。app の Google-managed certificate 発行と GitHub WIF 経由の初回配備は確認中。
+2026-11-08 に Cloud Run・NEG・LB・CDN・private GCS を構築した。Cloud Run URL の health/UI/API、media の HTTPS・Range・CORS・ETag・実ファイルのハッシュ一致と、private origin の匿名アクセス拒否を確認済み。その後、appのGoogle-managed certificateと独自ドメインのHTTPS、GitHub WIF経由の配備も確認した。image・catalog・configごとの配備記録は[CI/CDのrelease receipt](cicd.md#release-receipt)に従い、ActionsのSummaryとartifactへ残す。
 
 Workflow compiler、Scheduler の OAuth 起動、期限前の `stopped=false / reason=not_due`、費用0円の検証通知の decode・閾値判定・ack を確認済み。GCS PAP/UBLA・public IAM 不在、cache-fill viewer、TTL86400秒、project 全 service の JPY30000 budget と通知先も API で確認した。検証通知の値は実請求額を表さない。
 

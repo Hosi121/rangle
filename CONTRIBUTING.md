@@ -1,5 +1,7 @@
 # rangle 開発ルール
 
+[製品概要](README.md) · [ドキュメント一覧](docs/README.md)
+
 常設ブランチは `stg` と `main` の2本です。
 
 | ブランチ | 役割 |
