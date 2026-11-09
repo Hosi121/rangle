@@ -91,3 +91,9 @@ variable "generation_sync_enabled" {
   type        = bool
   default     = false
 }
+
+variable "live_streaming_enabled" {
+  description = "Enable the reviewed live-capable server against the existing private catalog bucket."
+  type        = bool
+  default     = false
+}

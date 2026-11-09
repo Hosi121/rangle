@@ -141,7 +141,9 @@ resource "google_cloud_run_v2_service" "app" {
         "-listen", "0.0.0.0:8080", "-ui-root", "/app/web",
         "-catalog", "/mnt/catalog/snapshots/${var.application.catalog_sha256}.json",
         "-asset-origin", local.media_origin
-        ], local.community_enabled ? [
+        ], var.live_streaming_enabled ? [
+        "-live-index", "gs://${google_storage_bucket.private["catalog"].name}/live/index.json"
+        ] : [], local.community_enabled ? [
         "-firestore-project", var.project_id,
         "-firestore-database", google_firestore_database.community[0].name
         ] : [], local.generation_enabled ? [

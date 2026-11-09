@@ -63,7 +63,9 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
-          build-args: RANGLE_API_URL=/api/v1/clips
+          build-args: |
+            RANGLE_API_URL=/api/v1/clips
+            RANGLE_LIVE_MEDIA_ORIGIN=https://media.${{ vars.RANGLE_STG_DOMAIN }}
           cache-from: type=gha,scope=rangle-docker
           cache-to: type=gha,scope=rangle-docker,mode=max
           provenance: false

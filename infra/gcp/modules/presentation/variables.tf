@@ -95,3 +95,13 @@ variable "generation_sync_enabled" {
     error_message = "Generation sync requires the configured domain and immutable generation config."
   }
 }
+
+variable "live_streaming_enabled" {
+  description = "Read the private live/index.json over authenticated GCS HTTP, using the existing catalog reader identity. No GPU or upload endpoint is provisioned."
+  type        = bool
+  default     = false
+  validation {
+    condition     = !var.live_streaming_enabled || (var.application != null && var.base_domain != null)
+    error_message = "Live metadata requires a configured application and domain."
+  }
+}
