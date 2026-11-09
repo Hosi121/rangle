@@ -116,6 +116,21 @@ resource "google_compute_url_map" "https" {
       default_service = google_compute_backend_service.app[0].id
     }
   }
+  # Google rejects URL map updates if these routing tests fail. Keep mutable
+  # discovery off the day-long media cache and immutable payloads off the
+  # one-second discovery cache.
+  dynamic "test" {
+    for_each = var.live_streaming_enabled ? {
+      "/live-index/example.json"                         = google_compute_backend_bucket.live_index[0].id
+      "/live/example/000001-aaaaaaaaaaaaaaaa/scene.json" = google_compute_backend_bucket.media.id
+      "/live/example/000001-aaaaaaaaaaaaaaaa/model.rgs"  = google_compute_backend_bucket.media.id
+    } : {}
+    content {
+      host    = local.media_host
+      path    = test.key
+      service = test.value
+    }
+  }
   depends_on = [google_storage_bucket_iam_member.cache_fill]
 }
 
