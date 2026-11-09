@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -27,6 +28,25 @@ func marshal(t *testing.T, v any) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestSessionIDMatchesSchemaGrammar(t *testing.T) {
+	grammar := regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+	values := []string{"", "basketball-live", "AZaz09_-", "日本語", "é", "a/b", "a%2Fb", "a\nb", "a\x00b"}
+	// Exercise every byte at both edges and inside a valid ID, plus lengths
+	// surrounding both schema bounds. The regexp is an independent oracle.
+	for n := 0; n <= 65; n++ {
+		values = append(values, strings.Repeat("a", n))
+	}
+	for n := 0; n < 256; n++ {
+		value := string([]byte{byte(n)})
+		values = append(values, value, value+"valid", "valid"+value, "valid"+value+"id")
+	}
+	for _, value := range values {
+		if got, want := validID(value), grammar.MatchString(value); got != want {
+			t.Fatalf("validID(%q) = %t, schema wants %t", value, got, want)
+		}
+	}
 }
 
 func TestParseLiveIndexAndCloudIdentity(t *testing.T) {

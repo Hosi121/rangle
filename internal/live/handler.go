@@ -117,7 +117,7 @@ func route(r *http.Request) (string, bool) {
 		return "", true
 	}
 	id, ok := strings.CutPrefix(r.URL.Path, "/api/v1/live/")
-	return id, ok && idPattern.MatchString(id)
+	return id, ok && validID(id)
 }
 
 func writeError(w http.ResponseWriter, r *http.Request, status int, message string) {
