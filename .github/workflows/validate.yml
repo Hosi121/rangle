@@ -97,3 +97,5 @@ jobs:
               terraform -chdir="$root" test
             fi
           done < <(find infra/gcp -name .terraform.lock.hcl -not -path '*/.terraform/*' -print0 | sort -z)
+      - name: Exercise shutdown guard failure continuation offline
+        run: python3 infra/gcp/modules/presentation/tests/shutdown_guard_test.py
