@@ -1,55 +1,39 @@
 # rangle 配信部品の初期契約
 
-Goのmanifest・HTTP配信・ABR基準実装の初期契約を記録する。実Gaussianの再生・圧縮は[再生](temporal-playback.md)・[圧縮形式](gaussian-compression.md)、言語間のmedia境界は[共通fixture](../testdata/contracts/v1/README.md)を参照。ABRの実モデル再生への接続、HLS/DASH準拠、スマートフォン実機での性能は未検証。検証に使う合成バイト列は4DGSデータを名乗らない。
+Goのmanifest・HTTP・ABR基準実装の契約。[実再生](temporal-playback.md)・[packing](gaussian-compression.md)・[言語間fixture](../testdata/contracts/v1/README.md)とは分ける。合成入力は4DGS映像ではなく、実ABR再生・HLS/DASH準拠・スマートフォン性能は未検証。
 
 ## 共通の型
 
-`internal/stream/manifest.go` を実装間の正本にする。モジュール名は `github.com/Hosi121/rangle`。Go 1.27.3以降の標準ライブラリだけで初期実装を動かす。
+正本は`internal/stream/manifest.go`。moduleは`github.com/Hosi121/rangle`、初期実装はGo1.27.3以降の標準ライブラリを使用する。
 
-- 品質ごとに同じ時刻・長さ・区間数を持つ。
-- 各区間は独立に復号可能とする。独立でない資産は初期形式で受け付けない。
-- URLにはクリップ、版、品質を含める。公開した同じURLの内容は変更しない。
-- `bitrate_bps` はbits/second、資産サイズはbytes、時刻はseconds、復号時間はmillisecondsで表す。
-- `peak_decoded_bytes` は端末側の復号・描画用作業メモリの推定値で、圧縮ファイルのサイズとは異なる。
-- `decode_time_ms` は区間の復号所要時間の推定値。GPU描画時間を測定した値ではない。初期の合成データには仮の値を付ける。
-- 初期化資産が必要な品質は、そのURLとサイズを広告する。品質切り替えの取得予算に含める。
-- この版の資産URLは `/assets/{clip_id}/{revision}/{representation_id}/{filename}` とする。
+- 全品質で時刻・長さ・区間数を揃え、各区間を独立復号可能にする。
+- 資産URLは`/assets/{clip_id}/{revision}/{representation_id}/{filename}`。同一URLの公開bytesを変更しない。
+- bitrateはbits/s、sizeはbytes、時刻はseconds、復号時間はmilliseconds。
+- `peak_decoded_bytes`は復号/描画の作業メモリ推定、`decode_time_ms`は復号時間推定。file sizeやGPU描画実測とは別で、合成入力では仮値。
+- 初期化資産のURL/sizeを広告し、切替時の取得予算へ含める。
 
 ## HTTP配信
 
-`internal/delivery.NewHandler(manifest stream.Manifest, assets map[string][]byte) (http.Handler, error)` を入口にする。
+入口：`internal/delivery.NewHandler(manifest stream.Manifest, assets map[string][]byte) (http.Handler, error)`。
 
-- マニフェストは `manifest.URL()`、つまり `/manifests/{clip_id}/{revision}.json` で提供する。
-- 広告したURLと一致する資産だけを提供する。任意のファイルシステムを公開しない。
-- 起動時にマニフェスト、サイズ、区間のSHA256と実バイト列を照合する。
-- 不変資産と版付きマニフェストには明示的なキャッシュ指示とETagを付ける。
-- GET、HEAD、Range、条件付きリクエストを扱う。エラー応答には長期キャッシュを付けない。
-- `cmd/rangle-dev` はループバックを既定とするローカル配信デモ。資産は小さな合成データとし、その旨を表示する。
+- manifestは`/manifests/{clip_id}/{revision}.json`。広告URLの資産だけを提供する。
+- 起動時にmanifest・実bytes・size/SHA256を照合する。
+- 不変資産/manifestにcache指示・ETagを付け、GET/HEAD/Range/条件付き要求を扱う。errorを長期cacheしない。
 
-大容量ファイルには `delivery.NewFileHandler` を用い、広告資産を起動時にストリームで照合して、要求ごとに読み出す。フィードAPIと外部配信originの接続は [APIと版付き資産の配信](api-delivery.md) を参照する。既存のメモリ上のhandlerは合成データの基準実装として残す。
+大きいfileは`delivery.NewFileHandler`で起動時stream照合し、要求ごとに読む。memory handlerとloopback既定の`cmd/rangle-dev`は小さな合成デモとして残す。[feed/外部origin](api-delivery.md)
 
 ## ABR制御
 
-`internal/abr` は上の型を読み、次に取る品質を返す。具体的なGo APIと設定は担当者が定め、利用例を付ける。
+`internal/abr`が次の品質を選び、`cmd/abr-sim`が有限の合成系列で示す。
 
-- 複数の時定数を持つEWMAによる保守的な帯域推定を基準にする。
-- キャッシュヒット、失敗、中断などのサンプルを帯域推定へ無条件に混ぜない。
-- 選択では帯域、再生バッファ、次区間の実サイズ、未取得の初期化資産、復号予算、作業メモリ予算を考慮する。
-- 起動直後は保守的に開始する。上げる際には余裕とヒステリシスを持たせ、悪化時は下げる。
-- メモリなどのハード制約を満たす品質がない場合は、制約を破る品質を黙って返さず、選択不能を返す。
-- 初期化資産のキャッシュ状態は、このマニフェストのクリップと版の中でだけ解釈する。同じ品質IDを別の版で再利用しても、取得済みと見なさない。
-- 初期実装のメモリ判定は、品質別メタデータに対するものとする。実クライアントでは旧品質・新品質の同時保持と先読み資産を含む全体のメモリ管理を別途行う。
-- BOLA等の既存アルゴリズムそのものを実装していない場合は、その名前で呼ばない。
-- `cmd/abr-sim` は有限の合成ネットワーク系列で挙動を示す。実回線の性能測定や改善実績とは区別する。
+- 異なる時定数のEWMAで帯域を保守的に推定し、cache/失敗/中断sampleを無条件に混ぜない。
+- 帯域・再生buffer・次区間の実bytes・未取得初期化・復号時間・作業メモリを考慮する。
+- 起動時と上昇時は慎重に、悪化時は下げる。hard制約を満たす品質がなければ選択不能を返す。
+- 初期化cacheはclip/revision内だけで有効。同じ品質IDでも別版へ持ち越さない。
+- metadata判定とは別に、実clientは旧/新品質と先読みを含む総メモリを管理する。
+
+BOLAを実装していない規則をBOLAと呼ばず、合成simulatorを実回線の改善実績とは扱わない。
 
 ## 初期実装時の分担と完了条件
 
-以下は初期実装の委任範囲を残す履歴。現在の開発・検証・PRの手順は[開発ルール](../CONTRIBUTING.md)に従う。
-
-| 担当 | 変更範囲 | 完了条件 |
-| --- | --- | --- |
-| 統合担当 | 共通型、調査資料、既存資料、統合テスト | 型の検証と両部品の接続を確認する |
-| ABR担当 | `internal/abr/` と `cmd/abr-sim/` | 推定・選択・制約のテストと動く利用例 |
-| HTTP担当 | `internal/delivery/` と `cmd/rangle-dev/` | 資産配信・Range・ETag・不正要求のテストと動くローカルサーバー |
-
-既存ファイルや別担当の範囲は変更しない。外部依存の追加、クラウド作成、データセットの取得、GPU実行、Gitのコミット・pushは今回の委任範囲に含めない。統合担当が `go test -race ./...` と `go vet ./...` を実行し、変更をレビューする。
+`internal/stream`が共通型、`internal/abr`が推定/選択、`internal/delivery`がHTTPを担当。型・制約・Range/ETag・不正要求と部品間接続を検証する。現在の統合・race/vet・PR手順は[開発ルール](../CONTRIBUTING.md)に従う。

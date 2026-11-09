@@ -1,12 +1,10 @@
 # アーキテクチャ図の再生成
 
-[全体](overview.html)・[ML処理](ml-pipeline.html)・[配信処理](delivery.html)・[ログ監視](observability.html)は、発表用presentation構成を分けた4図。各HTMLが閲覧・PNG出力の正本で、ネットワークなしで開ける。PNGは別の描画コードから作らず、同じHTMLを静的renderする。旧`cloud-architecture.svg/png/py`は2026-11-08の初期配備図として残す。
-
-内容と配置を変更するときだけ`build-architecture-views.py`からHTMLを再生成する。この小さいrecipeは、指定した[stack-diagram](https://github.com/caru-ini/stack-diagram)のtemplate / geometryを基に座標を定義し、同repoの`build.py`でアイコン・フォントを埋め込む。HTMLだけを直接変更した場合は、recipeにも対応する変更を入れてから再生成する。生成後にlight/darkを目視する。
+[全体](overview.html)・[ML](ml-pipeline.html)・[配信](delivery.html)・[監視](observability.html)の4図。HTMLが閲覧/PNG出力の正本で、アイコン・フォントを内包する。旧`cloud-architecture.svg/png/py`は2026-11-08の配備図。
 
 ## PNGだけを生成する
 
-HTML生成に使用したtool commitは **`5af3b095fff7109c905c5284dc510dc06588bade`**。PNG出力はrepoの`render-architecture-views.py`を使い、Python 3.14.9、Playwright 1.64.1、Chromium revision 1248で確認した。必要な依存は一時venvに置き、projectのruntimeやCI依存は増やさない。以下はrepo rootで実行する。`uv`がない環境では通常のvenvとpipでも同じversionを使用できる。
+repo rootで実行する。確認版はPython3.14.9、Playwright1.64.1、Chromium1248。依存は一時venvに置き、runtime/CIへ追加しない。uvの代わりに同版のvenv/pipも使える。
 
 ```bash
 diagram_work=$(mktemp -d)
@@ -23,11 +21,11 @@ for diagram in overview ml-pipeline delivery observability; do
 done
 ```
 
-1枚1600×900 CSS pixels、PNGは3200×1800。`*-dark.png`も作る。PNG・一時環境・loose icon・font binaryはcommitしない。今回は既存のChromium cacheを利用し、アプリの操作やGUIテストは行っていない。
+HTMLは1600×900 CSS pixels、PNGは3200×1800。light/darkの8枚を生成する。PNG、一時環境、取得したicon/fontはcommitせず、確認後に片付ける。アプリのGUIテストとは別の静的render。
 
 ## 内容・配置からHTMLを作り直す
 
-上で取得したtoolを使い、`fetch_icons.py`で公式製品アイコンとLucideを取得する。パッケージ全体・個別アイコンは作業用directoryに留める。[icon-sources.json](icon-sources.json)は今回の取得元・SHAであり、アイコン本体ではない。再取得先の更新でSHAが変わったら、外観と出典を確認する。既存HTMLからのPNG生成は再取得の影響を受けない。
+[stack-diagram](https://github.com/caru-ini/stack-diagram)のcommit `5af3b095fff7109c905c5284dc510dc06588bade`を使用。`build-architecture-views.py`で座標/内容を変更し、toolのtemplate/geometryと`build.py`で埋め込む。HTMLを直接直した場合もrecipeへ反映する。
 
 ```bash
 python3 "$diagram_work/stack-diagram/skills/stack-diagram/scripts/fetch_icons.py" \
@@ -47,8 +45,12 @@ python3 "$diagram_work/stack-diagram/skills/stack-diagram/scripts/fetch_icons.py
   --cjk-font /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
 ```
 
-JPフォントはNoto Sans CJK Regularのcollection 0（`Noto Sans CJK JP`）を使う。使用字形だけをWOFF2へsubset化してHTMLに内包し、Geist・JetBrains Monoもtool付属版を埋め込む。別fontへ変える場合は字形とlicenseを確認する。[第三者notice](THIRD-PARTY-NOTICES.txt)はHTMLの折り畳み欄にも埋め込んでいる。Google製品アイコンは[公式package](https://cloud.google.com/icons)、Goは[公式ブランド素材](https://go.dev/blog/go-brand)の青版、Flutter/Python等はfetch scriptのbrand source、抽象処理は[Lucide](https://lucide.dev/)を使用。ロゴの色・形は変更しない。
+[icon-sources.json](icon-sources.json)に取得元/SHAを記録する。再取得時のSHA変更は外観・出典を確認する。既存HTMLからのPNG出力には再取得不要。
 
-最終確認では、全8PNGの文字・線・group padding・dark時のロゴを読む。HTMLに未解決token、外部script/CSS/画像依存、私的環境情報がないことも確認する。公開galleryへの送信は行わない。
+Noto Sans CJK Regularのcollection0（JP）を使用字形だけWOFF2化し、tool付属のGeist/JetBrains Monoと内包する。Googleは[公式icon](https://cloud.google.com/icons)、Goは[公式青ロゴ](https://go.dev/blog/go-brand)、抽象処理は[Lucide](https://lucide.dev/)。色・形・比率と[第三者notice](THIRD-PARTY-NOTICES.txt)を保持する。
 
-PNG出力はlight/darkを別pageへ読み込み、フォントと全画像のdecode完了を待って撮影する。PNG専用のdocumentではページ見出し・nav・footer等を非表示にしてcanvas全体をviewport内へ収める。Chromiumのimage cacheによる欠けを避けるため、出力時だけ埋め込みアイコンをCairoSVG 2.9.1で正規化してinline SVG要素へ展開する。色・縦横比を維持し、clip path等のIDは要素ごとに分ける。HTMLの正本には公式SVGを保持し、canvasの配置・文字・線は共通である。閲覧用HTMLのページ要素は残す。
+## 出力の確認
+
+- 全8PNGの文字・線・group padding・dark時ロゴを確認する。
+- HTMLの未解決token、外部script/CSS/画像依存、私的環境情報がないことを確認する。公開galleryへ送信しない。
+- light/darkを別pageで読み、font/画像decode後にcanvasだけを撮影する。render時はCairoSVG2.9.1で埋込iconをinline SVG化し、Chromium cacheによる欠けを防ぐ。ID衝突を避け、HTML正本の公式SVG・配置・文字・線は維持する。

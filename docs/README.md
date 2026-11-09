@@ -2,60 +2,64 @@
 
 [製品概要・最初の起動](../README.md) · [公開アプリ](https://app.rangleplay.stream/) · [開発ルール](../CONTRIBUTING.md)
 
-初めて読む方・審査員は製品概要から、実装を追う方は目的に合う入口から進んでください。実装状況は[バックエンドの現状](backend-status.md)、実験の数値は各資料のデータ・ハードウェア・評価条件と合わせて確認します。
-
-| 読みたいこと | 入口 |
-| --- | --- |
-| 手元でアプリや配信を動かす | [起動手順](#起動手順) |
-| 全体構成と自由視点再生を理解する | [構成・再生](#構成再生) |
-| API・資産公開・互換性を確認する | [API・配信](#api配信) |
-| 入力データ・学習・画質・容量を確認する | [ML・データ](#mlデータ) |
-| 配備・権限・運用を確認する | [インフラ・配備](#インフラ配備) |
-| 到達点・未解決課題・初期判断を読む | [研究・現状](#研究現状) |
+現状は[バックエンド](backend-status.md)、全体像は[クラウド構成](cloud-architecture.md)から確認できます。
 
 ## 起動手順
 
-- [Flutter Web](../apps/web/README.md)：SDK、viewerのbuild、内蔵デモとAPIモード、操作方法。
-- [Docker](docker.md)：GoとWebを一緒にbuild・起動する。最小起動とフィード接続の確認を分ける。
-- [ローカルsceneのGo配信](local-server.md)：手元のWebビルド・`.splat`フレーム列の配信と公開範囲。RGS1やcatalogを使う場合は[APIの起動例](api-delivery.md#公開するcatalog)。
+| 資料 | 用途 |
+| --- | --- |
+| [Flutter Web](../apps/web/README.md)・[Docker](docker.md) | 開発・ビルド・APIモード |
+| [ローカルscene配信](local-server.md)・[私有model preview](private-preview.md) | 手元の資産確認、管理者限定preview |
 
 ## 構成・再生
 
-- [クラウド構成](cloud-architecture.md)：[全体](diagrams/overview.html)・[ML処理](diagrams/ml-pipeline.html)・[配信処理](diagrams/delivery.html)・[ログ監視](diagrams/observability.html)の4図。Go/UI、Vertex AI、CDN・Storage、クライアント描画とログ収集・可視化を読む。逐次生成の実測は[クラウドLIVE](cloud-live.md)。
-- [自由視点の連続再生](temporal-playback.md)：RGS1形式、時間評価、GPU描画、資源管理と測定条件。[クライアント処理](client-processing.md)は取得・復号・Workerの分担を扱う。
-- [LIVE配信](live-streaming.md)：index・モデル更新・クライアントの再接続契約。学習と起動待ちを含む実測は[クラウドLIVE](cloud-live.md#2026-11-09の実gpu検証)。
+| 資料 | 用途 |
+| --- | --- |
+| [クラウド構成](cloud-architecture.md) | [全体](diagrams/overview.html)・[ML](diagrams/ml-pipeline.html)・[配信](diagrams/delivery.html)・[監視](diagrams/observability.html)の4図 |
+| [連続再生](temporal-playback.md)・[クライアント処理](client-processing.md) | RGS1、Worker、GPU描画・資源管理 |
+| [没入UI](immersive-ui.md) | 動画/3D切替、時刻・視点・再生意図 |
+| [LIVE配信](live-streaming.md) | index、model交換、再接続 |
 
 ## API・配信
 
-- [APIと版付き資産](api-delivery.md)：catalog、manifest、URL、Range・ETag・cache。[フィード継続取得](feed-pagination.md)と[過負荷時の動作](api-overload.md)は個別の契約。
-- [LIVE配信の測定](live-delivery-measurements.md)：APIの変更前後、実HTTP、CDNの少数取得。測れた範囲と未検証の規模を分ける。
-- [アカウントと交流API](accounts.md)：認証、いいね、コメント。[交流データの保存先](community-storage.md)に永続化と分離の条件を記載。
-- [生成API](generation.md)：preset、状態確認、中止、予算。[生成結果の掲載](generated-publication.md)と[掲載UI](generation-publication-ui.md)は成功後の公開操作を扱う。
-- [資産公開preflight](asset-publication.md)：許諾台帳・許可リスト・bytes検証・公開順。[不変catalog](catalog-snapshots.md)は選択・切替・復帰の手順。
-- [配信部品の共通契約](streaming-contract.md)：Goのmanifest・HTTP・ABRの境界。[HTTP採用理由](http-delivery-decision.md)も参照。
-- [言語間のmedia契約fixture](../testdata/contracts/v1/README.md)：schema、50件の合成入力、実consumerの適用範囲と既知の差分。形式の正本はこのディレクトリとproduction validatorに置く。
+| 資料 | 用途 |
+| --- | --- |
+| [APIと版付き資産](api-delivery.md) | catalog、manifest、Range/ETag/cache |
+| [ページング](feed-pagination.md)・[過負荷](api-overload.md) | cursorと要求制限 |
+| [アカウント/交流](accounts.md)・[保存先](community-storage.md) | 認証・いいね・コメント・永続化 |
+| [生成API](generation.md)・[結果掲載](generated-publication.md)・[掲載UI](generation-publication-ui.md) | preset、job、公開操作 |
+| [資産公開](asset-publication.md)・[不変catalog](catalog-snapshots.md) | 許諾・bytes検証、配置・切替・復帰 |
+| [配信部品の契約](streaming-contract.md)・[HTTP選択](http-delivery-decision.md) | GoのHTTP/ABR基準実装 |
+| [言語間fixture](../testdata/contracts/v1/README.md) | schema、50入力、consumer差分 |
 
 ## ML・データ
 
-- [入力前処理](dataset-preprocessing.md)：校正済み画像・動画・点群の準備と来歴。[MLコンテナ](../ml/container.md)は再現環境のbuildとテスト。
-- [動的4DGS学習](dynamic-gs-training.md)：共同学習、入力制約、評価、保存形式。[生成仕様](generation.md#学習と結果)から静的3DGSとの違いを確認できる。
-- [学習品質の比較](training-quality.md)：現行profileの採用判断とheld-out評価。[時間付きモデルの圧縮比較](temporal-compression-comparison.md)は同じモデルでの容量・誤差を扱う。
-- [可逆圧縮の形式](gaussian-compression.md)：RGS1-Zのpacking・復号条件。元のfloatモデルから保存形式への量子化とは区別する。
-- [到着画像によるライブ学習](live-training.md)：オンライン更新、録画入力、測定範囲。[クラウドLIVEの実測](cloud-live.md)は起動待ち・公開遅延・破棄windowを含む。
-- [初期VRUの画質・描画比較](gaussian-quality.md)と[UVG-GS人物シーンの学習比較](gaussian-training.md)：素材・方式の異なる過去の実験記録。数値を直接横比較しない。
+| 資料 | 用途 |
+| --- | --- |
+| [前処理](dataset-preprocessing.md)・[MLコンテナ](../ml/container.md) | 校正画像・動画・点群、再現環境 |
+| [動的4DGS](dynamic-gs-training.md)・[ライブ学習](live-training.md) | 共同学習と到着画像による更新 |
+| [学習品質](training-quality.md)・[時間モデル圧縮](temporal-compression-comparison.md) | 現行profile・held-out・容量/誤差比較 |
+| [可逆packing形式](gaussian-compression.md) | RGS1-Z。float→保存形式の量子化とは別 |
+| [初期VRU比較](gaussian-quality.md)・[UVG-GS比較](gaussian-training.md) | 素材・条件の異なる過去実験 |
 
 ## インフラ・配備
 
-- [発表用stgの配備](stg-deployment.md)：対象環境、IAM、予算・期限停止、検証の到達点。[Terraform README](../infra/gcp/README.md)はroot/moduleとローカル検証の入口。
-- [CI/CD](cicd.md)：PR検証、image digest、candidate確認・traffic昇格・復帰。[Docker](docker.md#imageと配信設定の対応)にbuildとruntime設定の対応を記載。
-- [生成基盤](generation-infrastructure.md)：有限GPU job、入力・結果の権限とconfig。[クラウドLIVE](cloud-live.md#権限と配備)はLIVE専用の拡張。
-- [ログ方針](logging.md)：Go・Pythonの出力と属性、記録する境界。[ログ監視](observability.md)は専用30日保持・ダッシュボード・検索と配備手順。
+| 資料 | 用途 |
+| --- | --- |
+| [stg配備](stg-deployment.md)・[Terraform](../infra/gcp/README.md) | 環境・IAM・予算/期限・停止 |
+| [CI/CD](cicd.md)・[生成基盤](generation-infrastructure.md) | 両serviceの配備・復帰、有限GPU・config |
+| [ログ方針](logging.md)・[監視](observability.md) | 出力属性・検索・ダッシュボード |
+| [防御/復旧](security-hardening.md)・[identity整理](security-identity.md) | Armor・backup・監査・IAM |
+| [台帳移行](security-generation-migration.md)・[調査記録](security-review.md) | データを保つ切替と検証の限界 |
 
 ## 研究・現状
 
-- [バックエンドと配信の現状](backend-status.md)：実装済み・接続済み・未検証の範囲と、残る課題へのリンク。大規模視聴や端末性能の成立とは分ける。
-- [4DGSの画質と容量の研究調査](research/gs-quality-compression-2026.md)：一次資料、実装・licenseの確認、次の比較案。提案段階で、新しい非可逆方式の採用結果ではない。
-- [企画書](proposal.md)・[技術選定案](technology-selection.md)・[初期インフラ構成案](infrastructure-design.md)・[ABR調査](streaming-research.md)：初期の目的・候補・判断根拠を残した資料。記載された候補を現在の採用構成と読み替えない。
-- [DevFest提出案内](submission.md)：開発用と最終提出用のリポジトリ、提出先の制約と運営案内。
+| 資料 | 用途 |
+| --- | --- |
+| [バックエンドの現状](backend-status.md) | 実装・未接続・未検証 |
+| [クラウドLIVE実測](cloud-live.md)・[API/CDN測定](live-delivery-measurements.md) | 生成遅延と配信測定を分けて確認 |
+| [品質/圧縮の研究調査](research/gs-quality-compression-2026.md) | 一次資料・license・比較案。未採用の提案を含む |
+| [企画](proposal.md)・[選定](technology-selection.md)・[初期infra](infrastructure-design.md)・[ABR調査](streaming-research.md) | 初期の仮説・候補・判断理由 |
+| [提出案内](submission.md) | 開発用と最終提出先の違い |
 
-データセット・外部コードの出典と利用条件は、各素材・実験の資料と[内蔵サンプルの出典](../apps/web/assets/samples/ATTRIBUTION.md)に記載しています。
+数値は各資料のデータ・評価条件と合わせて読み、初期案を現在の採用構成と混同しないでください。出典・利用条件は各素材の資料と[ATTRIBUTION](../apps/web/assets/samples/ATTRIBUTION.md)を参照。
