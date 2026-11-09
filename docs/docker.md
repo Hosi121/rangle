@@ -94,7 +94,7 @@ docker build --target go-build -t rangle-go-build .
 docker run --rm rangle-go-build sh -c "go test -race ./... && go vet ./..."
 ```
 
-## この変更の範囲
+## 手順の範囲
 
 Dockerイメージの作成と、ローカルでの起動に対応する。
 Artifact Registryへの送信とCloud Runへの昇格条件は [CI/CD](cicd.md) を参照する。コンテナのbuildはクラウド資源作成やメディアの公開を行わない。

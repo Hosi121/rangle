@@ -1,6 +1,8 @@
-# インフラ構成案
+# 初期インフラ構成案
 
-配信構成の設計と [Terraform のコード準備](../infra/gcp/README.md) を行う段階。将来の目標は 10 万同時視聴（CCU）。GoとFlutter WebをまとめたDockerイメージのローカル起動は確認したが、Terraformによる実環境の作成、Cloud Runへの実配備、容量・quota・費用の検証は未実施である。[課題一覧](https://github.com/Hosi121/rangle/issues/20)
+本書は初回配備前の構成案と判断根拠を残す記録。以下の「未実施」「後続」は当時の段階を示す。現在の構成は[クラウド構成図](cloud-architecture.md)、実配備・予算・権限は[stg配備手順](stg-deployment.md)、コードと検証は[Terraform README](../infra/gcp/README.md)を参照。
+
+当時は配信構成の設計とTerraformのコード準備を行う段階だった。将来の目標は 10 万同時視聴（CCU）。GoとFlutter WebをまとめたDockerイメージのローカル起動は確認していたが、Terraformによる実環境の作成、Cloud Runへの実配備、容量・quota・費用の検証は未実施だった。10万CCUの容量検証は現在も未実施。[課題一覧](https://github.com/Hosi121/rangle/issues/20)
 
 ## 推奨する構成
 
