@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 # Only update the image/traffic of the pre-existing, dedicated stg service.
 set -Eeuo pipefail
+set +x
+manager_id_token=${GENERATION_MANAGER_ID_TOKEN:-}
+unset GENERATION_MANAGER_ID_TOKEN
 readonly project=comin-up region=asia-northeast1 service=rangle-stg
+readonly manager_service=rangle-stg-generation manager_tag=ci-manager-candidate
 readonly deadline=2026-11-14T15:00:00Z
 readonly deploy_sa=rangle-stg-deploy@comin-up.iam.gserviceaccount.com
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
@@ -58,7 +62,10 @@ readonly tag=ci-candidate
 work=$(mktemp -d)
 promotion_attempted=false
 candidate_created=false
+manager_candidate_created=false
+manager_promotion_attempted=false
 previous_traffic=''
+manager_previous_traffic=''
 cloud_run() { gcloud run "$@" --project="$project" --region="$region" --quiet; }
 expect_direct_rejected() {
   local status
@@ -85,18 +92,35 @@ probe_candidate() {
 cleanup() {
   local result=$?
   trap - EXIT
-  if [[ $result != 0 && $promotion_attempted == true ]]; then
+  if [[ $candidate_created == true ]]; then
+    if ! cloud_run services update-traffic "$service" --remove-tags="$tag"; then
+      echo "Failed to remove this run's candidate tag: $tag" >&2
+      result=1
+    fi
+  fi
+  if [[ $manager_candidate_created == true ]]; then
+    if ! cloud_run services update-traffic "$manager_service" --remove-tags="$manager_tag" > /dev/null; then
+      echo "Failed to remove this run's manager candidate tag: $manager_tag" >&2
+      result=1
+    fi
+  fi
+  if [[ $result != 0 && ( $promotion_attempted == true || $manager_promotion_attempted == true ) ]]; then
     echo 'Promotion failed; restoring the previous explicit revision allocation.' >&2
     if ! cloud_run services update-traffic "$service" --to-revisions="$previous_traffic"; then
       echo 'ROLLBACK FAILED: inspect the dedicated stg service immediately.' >&2
       result=1
     fi
   fi
-  if [[ $candidate_created == true ]]; then
-    if ! cloud_run services update-traffic "$service" --remove-tags="$tag"; then
-      echo "Failed to remove this run's candidate tag: $tag" >&2
+  # Each restoration is attempted independently, including after a failed
+  # public rollback or an interrupted promotion/cleanup request.
+  if [[ $result != 0 && $manager_promotion_attempted == true ]]; then
+    if ! cloud_run services update-traffic "$manager_service" --to-revisions="$manager_previous_traffic" > /dev/null; then
+      echo 'MANAGER ROLLBACK FAILED: inspect the dedicated generation service immediately.' >&2
       result=1
     fi
+  fi
+  if [[ $result != 0 && -f $receipt_path ]]; then
+    rm -f "$receipt_path"
   fi
   rm -rf "$work"
   exit "$result"
@@ -120,8 +144,59 @@ done
 # Verify actual served revisions before making changes. The desired service
 # template can already contain a different Terraform-selected catalog.
 python3 "$script_dir/release-receipt.py" plan "$work/before.json" "$media_origin" "$work/previous" > /dev/null
+generation_mode=$(python3 "$script_dir/release-receipt.py" manager-mode "$work/before.json")
+if [[ $generation_mode == remote ]]; then
+  [[ -n $manager_id_token && $manager_id_token != *$'\n'* && $manager_id_token != *$'\r'* ]] || {
+    echo 'The private generation manager requires a freshly minted deployment ID token.' >&2; exit 1;
+  }
+  mkdir -p "$work/manager/previous"
+  # Read-only validation happens before either service is updated. Never create
+  # a missing manager, change IAM, or fall back to the legacy execution mode.
+  cloud_run services describe "$manager_service" --format=json > "$work/manager/before.json"
+  cloud_run services get-iam-policy "$manager_service" --format=json > "$work/manager/policy.json"
+  mapfile -t manager_before < <(python3 "$script_dir/release-receipt.py" manager-plan \
+    "$work/before.json" "$work/manager/before.json" "$work/manager/policy.json")
+  [[ ${#manager_before[@]} == 3 ]] || { echo 'Existing manager validation failed.' >&2; exit 1; }
+  manager_previous_traffic=${manager_before[1]}
+  IFS=',' read -r -a manager_previous_allocations <<< "$manager_previous_traffic"
+  for allocation in "${manager_previous_allocations[@]}"; do
+    previous_revision=${allocation%=*}
+    cloud_run revisions describe "$previous_revision" --format=json > "$work/manager/previous/$previous_revision.json"
+  done
+  python3 "$script_dir/release-receipt.py" manager-plan "$work/before.json" \
+    "$work/manager/before.json" "$work/manager/policy.json" "$work/manager/previous" > /dev/null
+fi
 expect_direct_rejected "$service_url"
 check_deadline
+if [[ $generation_mode == remote ]]; then
+  cloud_run services update "$manager_service" --image="$STG_IMAGE" --no-traffic --format=json > "$work/manager/candidate.json"
+  manager_revision=$(python3 "$script_dir/release-receipt.py" manager-candidate \
+    "$work/manager/candidate.json" "$work/manager/before.json")
+  manager_candidate_created=true
+  cloud_run services update-traffic "$manager_service" --update-tags="$manager_tag=$manager_revision" --format=json > /dev/null
+  cloud_run services describe "$manager_service" --format=json > "$work/manager/ready.json"
+  manager_candidate_url=$(python3 "$script_dir/release-receipt.py" manager-tag "$work/manager/ready.json" "$manager_revision")
+  manager_ready=false
+  for attempt in 1 2 3 4 5; do
+    # Curl reads the header on stdin. Neither argv nor subprocess environments
+    # contain this credential, and raw service documents never enter receipts.
+    if printf 'Authorization: Bearer %s\n' "$manager_id_token" | \
+      EXPECTED_REVISION="$manager_revision" bash "$script_dir/check-deployment.sh" manager "$manager_candidate_url"; then
+      manager_ready=true
+      break
+    fi
+    [[ $attempt != 5 ]] || break
+    check_deadline
+    sleep 2
+  done
+  [[ $manager_ready == true ]] || { echo 'Generation manager candidate did not become healthy.' >&2; exit 1; }
+  check_deadline
+  manager_promotion_attempted=true
+  cloud_run services update-traffic "$manager_service" --to-revisions="$manager_revision=100" > /dev/null
+  cloud_run services describe "$manager_service" --format=json > "$work/manager/after.json"
+  cloud_run revisions describe "$manager_revision" --format=json > "$work/manager/verified-revision.json"
+  python3 "$script_dir/release-receipt.py" manager-verify "$work/manager" "$work/before.json"
+fi
 # Let Cloud Run name the revision. A tag on this update makes gcloud persist an
 # explicit template revision, causing drift on the next Terraform runtime edit.
 cloud_run services update "$service" --image="$STG_IMAGE" --no-traffic --format=json > "$work/candidate.json"
@@ -167,6 +242,10 @@ EXPECTED_CATALOG_SHA256="$expected_catalog_sha" EXPECTED_REVISION="$revision" \
   RANGLE_CANDIDATE_PROBE='' bash "$script_dir/check-deployment.sh" "$app_origin"
 cloud_run services describe "$service" --format=json > "$work/after.json"
 cloud_run revisions describe "$revision" --format=json > "$work/verified-revision.json"
+manager_receipt_args=()
+if [[ $generation_mode == remote ]]; then
+  manager_receipt_args=("$work/manager")
+fi
 python3 "$script_dir/release-receipt.py" write "$work/before.json" "$work/previous" \
-  "$work/after.json" "$work/verified-revision.json" "$revision" "$media_origin" "$receipt_path"
+  "$work/after.json" "$work/verified-revision.json" "$revision" "$media_origin" "$receipt_path" "${manager_receipt_args[@]}"
 printf 'Verified stg revision %s through %s; public run.app ingress rejected.\n' "$revision" "$app_origin"

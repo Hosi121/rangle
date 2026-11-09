@@ -2,6 +2,9 @@ locals {
   log_bucket_id   = "${local.prefix}-logs"
   log_bucket_path = "projects/${var.project_id}/locations/${var.region}/buckets/${local.log_bucket_id}"
   log_view_path   = "${local.log_bucket_path}/views/_AllLogs"
+  # Collect both owned Run processes only when private generation is enabled.
+  # Native performance charts below remain scoped to the public UI/API service.
+  run_log_service_filter = local.generation_enabled ? "resource.labels.service_name=(\"${local.prefix}\" OR \"${local.generation_manager_name}\")" : "resource.labels.service_name=\"${local.prefix}\""
 
   # Use owned resource names and the workers' existing service attribute. Vertex
   # job labels are not assumed to be labels on every Cloud Logging entry.
@@ -10,7 +13,7 @@ locals {
       "resource.type=\"cloud_run_revision\"",
       "resource.labels.project_id=\"${var.project_id}\"",
       "resource.labels.location=\"${var.region}\"",
-      "resource.labels.service_name=\"${local.prefix}\""
+      local.run_log_service_filter
     ])
     generation = "jsonPayload.service=(\"rangle-trainer\" OR \"rangle-live\")"
     delivery = join(" AND ", [
@@ -31,7 +34,7 @@ locals {
       title  = "Warnings, errors and HTTP 5xx"
       filter = "severity>=WARNING OR jsonPayload.level=(\"WARN\" OR \"ERROR\") OR httpRequest.status>=500"
     },
-    { title = "Cloud Run UI/API", filter = local.log_sources.app },
+    { title = local.generation_enabled ? "Cloud Run UI/API and generation manager" : "Cloud Run UI/API", filter = local.log_sources.app },
     { title = "Vertex training / LIVE worker events", filter = local.log_sources.generation },
     { title = "Load balancer / Cloud CDN", filter = local.log_sources.delivery },
     { title = "Budget guard / generation sync", filter = local.log_sources.operations }

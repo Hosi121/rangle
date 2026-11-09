@@ -13,7 +13,7 @@ resource "google_service_account_iam_member" "live_trainer_act_as" {
   count              = local.generation_live_enabled ? 1 : 0
   service_account_id = google_service_account.live_trainer[0].name
   role               = "roles/iam.serviceAccountUser"
-  member             = "serviceAccount:${google_service_account.runtime.email}"
+  member             = "serviceAccount:${google_service_account.generation_manager[0].email}"
   condition {
     title      = "only_live_trainer_before_presentation_deadline"
     expression = "request.time < timestamp('${var.deadline}')"

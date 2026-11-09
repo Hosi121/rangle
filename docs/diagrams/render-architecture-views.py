@@ -18,26 +18,51 @@ def main():
     args = parser.parse_args()
     source = args.source.read_text()
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    # Rasterize embedded brand SVGs before Chromium sees them. Its SVG image
-    # cache can produce clipped/empty icons even in a fresh dark-theme page.
-    # The HTML source keeps the original SVGs; PNG export preserves their aspect.
+    # Inline vector paths to bypass Chromium's image cache. Cairo resolves each
+    # SVG's own styles before embedding; unique IDs keep clip paths independent.
+    # The portable HTML source keeps the original embedded image assets.
     icons = {}
+    sequence = 0
 
-    def raster_icon(match):
-        uri = match.group()
+    def inline_icon(match):
+        nonlocal sequence
+        uri = match.group("uri")
         if uri not in icons:
             data = base64.b64decode(uri.split(",", 1)[1])
-            png = cairosvg.svg2png(bytestring=data, output_width=512)
-            icons[uri] = "data:image/png;base64," + base64.b64encode(png).decode()
-        return icons[uri]
+            vector = cairosvg.svg2svg(bytestring=data).decode()
+            icons[uri] = vector[vector.index("<svg") :]
+        sequence += 1
+        vector = icons[uri]
+        prefix = f"export-icon-{sequence}-"
+        for identifier in re.findall(r'\bid="([^"]+)"', vector):
+            vector = vector.replace(
+                f"url(#{identifier})", f"url(#{prefix}{identifier})"
+            )
+            vector = vector.replace(
+                f'href="#{identifier}"', f'href="#{prefix}{identifier}"'
+            )
+        vector = re.sub(
+            r'\bid="([^"]+)"', lambda item: f'id="{prefix}{item[1]}"', vector
+        )
+        plate = " plate" if 'class="plate"' in match.group() else ""
+        return f'<span class="inline-icon{plate}" aria-hidden="true">{vector}</span>'
 
-    source = re.sub(r"data:image/svg\+xml;base64,[A-Za-z0-9+/=]+", raster_icon, source)
+    source = re.sub(
+        r'<img\b[^>]*src="(?P<uri>data:image/svg\+xml;base64,[A-Za-z0-9+/=]+)"[^>]*>',
+        inline_icon,
+        source,
+    )
     # Export the canvas without scrolling past the surrounding page chrome.
     source = source.replace(
         "</style>",
         "body{padding:0}.head,.views,.foot,details{display:none}"
         ".scroller{border:0;border-radius:0}.canvas{border-radius:0}"
-        ".g-label img{object-fit:contain}</style>",
+        ".inline-icon{display:block}.inline-icon svg{display:block;width:100%;height:100%}"
+        ".tile .inline-icon{width:43px;height:43px}"
+        ".g-label .inline-icon{width:14px;height:14px}"
+        ".group.gcp>.g-label .inline-icon{width:20px;height:20px}"
+        '[data-theme="dark"] .g-label .inline-icon.plate{background:#fff;border-radius:3px;'
+        "padding:2px;width:18px;height:18px}</style>",
         1,
     )
     with sync_playwright() as playwright:

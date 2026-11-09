@@ -4,7 +4,7 @@
 
 管理者でログインすると、フィードの代わりに管理ページを開く。`/demo/?generate=1` の直接リンクも管理者専用。管理ページでデータ選択、生成、状態確認、結果表示まで進める。画面を閉じてもジョブは続き、再度開けば自分の履歴を確認できる。生成結果のリンクは直接自由視点で開く。
 
-Go APIは既存のアカウントセッションを使う。Firestoreのトランザクションで全ユーザー共通の実行枠を一つ確保し、Vertex AIの東京Spot T4を起動する。配信APIとは別プロセスで学習するため、GPU処理がHTTPリクエストや動画配信を占有しない。
+公開Go APIは既存のアカウントセッションを使い、IAM認証必須の別Cloud Run `rangle-stg-generation` へ操作を転送する。managerが専用Firestore DB `rangle-stg-generation` のトランザクションで全ユーザー共通の実行枠を一つ確保し、Vertex AIの東京Spot T4を起動する。公開runtimeはcommunity DB `rangle-stg` を使い、生成台帳への直接アクセス・Vertex操作・trainer actAsを持たない。workerも配信APIとは別プロセスで学習する。
 
 | 操作 | API |
 | --- | --- |
@@ -17,7 +17,11 @@ Go APIは既存のアカウントセッションを使う。Firestoreのトラ�
 
 プリセットを含む生成API全体で管理者ログインが必要。作成・履歴・job詳細・中止・掲載操作では、既存の所有者チェックも維持する。同じユーザー・request_idの再送は元のジョブを返し、追加起動しない。jobには `published` を含み、成功時には `viewer_url` と `scene_url` が付く。履歴一覧は保存済み状態を返す。個別GETと作成時の照合に加え、有効時はSchedulerが2分ごとにactive 1件の未終了状態を同期する。同期は生成attemptを増やさない。OIDCと有効化は[掲載・同期の契約](generated-publication.md)を参照。
 
-入力のURI・SHA256、学習方式、コンテナdigest、GPU構成、期限はサーバー設定に固定する。ユーザーから任意のストレージパスやコマンドは受け取らない。presetの `mode` は `static` または `dynamic`。既存の設定で省略されている場合は `static` として扱う。作成時の方式はジョブへ保存し、その後の設定変更で書き換えない。品質profileもサーバー側presetに固定し、公開リクエストから指定できない。設定ファイルを指定しなければ機能は無効。運用設定は[インフラの手順](generation-infrastructure.md)を参照。
+入力のURI・SHA256、学習方式、コンテナdigest、GPU構成、期限はサーバー設定に固定する。ユーザーから任意のストレージパスやコマンドは受け取らない。presetの `mode` は `static` または `dynamic`。既存の設定で省略されている場合は `static` として扱う。作成時の方式はジョブへ保存し、その後の設定変更で書き換えない。品質profileもサーバー側presetに固定し、公開リクエストから指定できない。クラウドではmanagerだけが生成設定ファイルを読む。運用設定は[インフラの手順](generation-infrastructure.md)を参照。
+
+クラウドの公開processは `-generation-manager-url` だけで生成先を選び、local生成configや同期endpointとの併用を拒否する。managerがreview済みconfigを読み、公開runtimeの署名・audience・issuer・expiry・verified emailを独立検証してからownerを受け取る。browser cookieや任意のprovider spec・document CRUDはmanagerへ公開しない。ローカルの単一process modeは開発と初回移行用に維持する。
+
+この境界でも、公開runtimeを侵害した相手は認証済みruntimeとしてownerを転送し、残るattempt内の正規preset操作を行える。admin/CSRF確認は公開process側の責任であり、RCEに耐えると主張しない。manager自身が実行枠・予算・固定spec・deadlineを守るため、公開runtimeから台帳を初期化したり任意のVertex jobを作ったりする経路はない。公開feed・生成detail・交流の存在確認も認証付きmanager呼出しへ置き換え、閲覧者にadminログインを要求しない。
 
 ## 計算予算と失敗時
 
@@ -43,6 +47,10 @@ GCSにはファイルを新規作成限定で保存し、最後に `scene.json` 
 
 ## 有効化と確認
 
-対応するGo imageを先に配備し、SHA256を確認した入力とdigest固定のtrainerを用意する。最初のconfigは `attempts: 1` として、private catalogの内容SHA付きパスへ新規作成限定で配置する。Terraformでconfig SHA・IAM・停止定義を適用し、その後CIが新しい引数を引き継いだrevisionを検証・公開する。TerraformとCIのCloud Run更新は同時に行わない。
+対応するGo imageを先に配備し、SHA256を確認した入力とdigest固定のtrainerを用意する。空の新規環境の初回configは `attempts: 1` とする。既存環境ではattemptを戻さず、受付・同期・掲載変更を凍結し、全jobのterminalとactive空を確認してから既存台帳を専用DBへ移す。native fields・使用数・owner・snapshot・履歴・掲載aggregateを保ち、private backupと移行後の厳密一致を確認する。[移行手順](security-generation-migration.md)
+
+configはprivate catalogの内容SHA付きパスへ新規作成限定で配置し、managerのdatabaseを `rangle-stg-generation` とする。Terraformがmanager・限定IAM・停止定義と公開runtimeのremote引数を管理し、CIが同じimageのmanager候補を認証付きhealthで確認・昇格してから公開アプリをLB経由で検証・昇格する。初回bootstrapでは、旧public templateがlocal configだけを使う間はmanager配備をskipできる。remote flagがあるのにmanagerが欠落・不一致なら変更前に失敗する。TerraformとCIのCloud Run更新は同時に行わない。
+
+CIの復帰対象は両serviceのrevision/trafficであり、DB・IAM・使用済みattemptは戻さない。targetで書き込みが始まった後は旧DBのmonolithへ生成処理を戻さず、同じ専用台帳を使う互換revisionを選ぶ。初回切替失敗で旧revisionへtrafficが戻った場合も、旧権限を復活させて生成を再開せず、移行状態を確認してremote構成を再検証する。
 
 実ジョブの終了、metrics、評価画像、配信ファイルを確認してから、同じ台帳を保ったままconfigの試行上限を増やす。config変更は新しいSHAへ配置し、再度TerraformとCIで反映する。台帳の使用数や稼働中ジョブを消して枠を戻さない。無効化は既存ジョブの終了確認後に行う。

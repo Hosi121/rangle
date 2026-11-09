@@ -29,6 +29,12 @@ X-Content-Type-Options: nosniff
 
 この503は依存処理を開始しておらず、生成attemptを予約せず、bodyも解析しない。`Retry-After: 1` は再試行までの下限の目安であり、1秒後の空きを保証しない。呼出し側は回数を有界にし、待ち時間へjitterを加える。状態変更要求を無制限に再送せず、生成createの再試行では同じ `request_id` を保つ。gate自身は再送も予約も行わない。既存clientやschedulerのretry実装をこの変更で追加・変更したものではない。
 
+## 公開交流APIの読み取り頻度
+
+同時実行8枠とは別に、community handlerの `GET` / `HEAD /api/v1/clips/{clip}/engagement`・`comments`・`cheers` は、全clip・全利用者で1個のtoken bucketを共有する。初期burstは20要求、補充は100msごとに1要求相当（毎秒10要求）で、存在しないclipも枠を消費する。Cookieの有無・有効性、query、送信元IP、`X-Forwarded-For` によって枠を分けず、clip存在確認・session照会・Firestore処理より先に判定する。`X-Forwarded-For` は解析・信頼しない。超過時は待ち行列やsleepを使わず、`429`、`Retry-After: 1`、`Cache-Control: no-store` とJSON `{"error":"rate_limited"}` を返す。HEADは同じstatus/headerでbodyなしとする。1秒後の空きは保証しない。通過した要求のデータ・鮮度・認証・書き込み契約は変えず、キャッシュは追加しない。auth・書き込み・healthはこの頻度制限の対象外で、既存の制限を維持する。cheersはcommunity handler内の登録に適用し、現在のapplicationへ新たに経路を公開する変更は含まない。
+
+毎秒10要求・burst 20は、現在のmax 1発表用構成に置く有限の初期値であり、実測した処理能力や10万人向けの容量ではない。初期画面の複数読み取りを許しつつ連続する依存処理を抑えるため、今回は固定値として新しい設定flagを設けない。1要求には複数document・aggregationの課金があり、この要求数を課金read数や金額の上限とは見なさない。制限はhandlerを持つinstanceごとで、再起動時にburstが戻り、複数instance・複数revisionは独立した枠を持つ。攻撃者が枠を使い切れば正規の閲覧者も429になる。per-client制限、WAF、入口でのDoS対策、media egress・Cloud Run要求自体の課金、他のAPI経路は守らず、完全なDoS防止やhard cost capではない。
+
 ## キャンセル・timeout・ログ
 
 枠はhandlerが終了するとき、deferで返す。clientのキャンセルを既存のrequest contextで依存先へ伝え、contextを尊重するhandlerが戻れば枠も解放される。キャンセルを無視して処理を続けるhandlerには、終了まで枠を持たせる。contextがキャンセルされた瞬間に枠だけを先に返すと、実行中の依存処理数を上限以上へ増やせるためである。panicで戻る場合も枠を返す。既にキャンセル済みの要求はhandlerへ入れない。

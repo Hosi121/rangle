@@ -51,4 +51,4 @@ JPフォントはNoto Sans CJK Regularのcollection 0（`Noto Sans CJK JP`）を
 
 最終確認では、全8PNGの文字・線・group padding・dark時のロゴを読む。HTMLに未解決token、外部script/CSS/画像依存、私的環境情報がないことも確認する。公開galleryへの送信は行わない。
 
-PNG出力はlight/darkを別pageへ読み込み、フォントと全画像のdecode完了を待って撮影する。PNG専用のdocumentではページ見出し・nav・footer等を非表示にしてcanvas全体をviewport内へ収める。ChromiumのSVG image cacheによる欠けを避けるため、出力時だけ埋め込みアイコンをCairoSVG 2.9.1で幅512pxのPNGへ変換し、元の縦横比を維持する。HTMLの正本には公式SVGを保持し、canvasの配置・文字・線は共通である。閲覧用HTMLのページ要素は残す。
+PNG出力はlight/darkを別pageへ読み込み、フォントと全画像のdecode完了を待って撮影する。PNG専用のdocumentではページ見出し・nav・footer等を非表示にしてcanvas全体をviewport内へ収める。Chromiumのimage cacheによる欠けを避けるため、出力時だけ埋め込みアイコンをCairoSVG 2.9.1で正規化してinline SVG要素へ展開する。色・縦横比を維持し、clip path等のIDは要素ごとに分ける。HTMLの正本には公式SVGを保持し、canvasの配置・文字・線は共通である。閲覧用HTMLのページ要素は残す。

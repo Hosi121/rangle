@@ -65,7 +65,7 @@ def overview():
             "公開VIP 34.96.101.8/32",
             490,
             190,
-            ("単一IP / 公開HTTPS", "public"),
+            ("公開HTTPS / Cloud Armor", "public"),
         ),
         node(
             "run",
@@ -78,10 +78,10 @@ def overview():
         node(
             "firestore",
             "Firestore",
-            "交流・共通実行台帳",
+            "community / 生成DBを分離",
             1080,
             190,
-            ("IAM", "iam"),
+            ("IAM / PITR・日次backup", "iam"),
         ),
         node(
             "gcs",
@@ -97,7 +97,7 @@ def overview():
             "index 1秒 / 資産24時間",
             490,
             455,
-            ("公開HTTPS", "public"),
+            ("公開HTTPS / edge policy", "public"),
         ),
         node(
             "gcs",
@@ -126,10 +126,11 @@ def overview():
         node(
             "githubactions",
             "GitHub Actions",
-            "build・配備 / WIF",
+            "build / 2 Run配備 / WIF",
             130,
             700,
         ),
+        node("run", "Cloud Run · manager", "生成専用 / ID token必須", 490, 680),
         node("logging", "Cloud Logging", "専用sink / Tokyo / 保持30日", 790, 680),
         node("monitoring", "Cloud Monitoring", "標準指標 + ログパネル", 1080, 680),
         node(
@@ -139,19 +140,27 @@ def overview():
     edges = [
         edge("M172 226 H448", "HTTPS", 305, 214, both=True),
         edge("M532 226 H748", "app", 640, 214, both=True),
-        edge("M832 226 H1038", "transaction", 937, 214, kind="n", both=True),
+        edge("M832 226 H1038", "community DB", 937, 214, kind="n", both=True),
         edge("M130 346 V449", "DNS", 160, 398, kind="n", both=True),
         edge("M490 346 V449", "media", 530, 400, both=True),
         edge("M532 491 H748", "cache fill", 638, 479, both=True),
         edge("M815 184 V174 H1360 V184", "catalog read-only", 1120, 165, kind="n"),
         edge(
-            "M832 244 H945 V414 H1080 V449",
+            "M532 734 H590 V420 H1080 V449",
             "job開始 / 状態 / 中止",
             1055,
-            402,
+            408,
             kind="n",
         ),
         edge("M1360 346 V380 H1175 V430 H1080 V449", "input get", 1290, 370),
+        edge(
+            "M748 250 H640 V670 H550 V690 H532",
+            "ID token / 生成API",
+            715,
+            402,
+            kind="n",
+        ),
+        edge("M532 716 H610 V360 H1080 V346", "生成DB", 1110, 376, kind="n", both=True),
         edge("M1038 491 H832", "model / scene", 935, 479),
         edge("M1318 491 H1122", "image pull", 1220, 479, kind="n"),
         edge(
@@ -168,6 +177,7 @@ def overview():
             369,
             kind="n dash",
         ),
+        edge("M172 756 H340 V736 H448", "manager", 393, 724, kind="n dash"),
         edge("M448 250 H370 V622 H620 V716 H748", kind="n telemetry"),
         edge(
             "M448 515 H370 V622 H620 V716 H748",
@@ -181,6 +191,7 @@ def overview():
         edge(
             "M1360 674 V622 H620 V716 H748", "運用ログ", 1280, 610, kind="n telemetry"
         ),
+        edge("M532 700 H620 V716 H748", kind="n telemetry"),
         edge("M832 716 H1038", "専用viewのログ", 935, 704, kind="n telemetry"),
         edge(
             "M832 264 H930 V655 H1080 V674",
@@ -211,14 +222,14 @@ def ml_pipeline():
         node(
             "run",
             "Cloud Run · Go API",
-            "認証 / 生成受付",
+            "公開側の認証 / 管理者操作",
             415,
             190,
         ),
         node(
             "firestore",
             "Firestore",
-            "active 1件 / 共通台帳",
+            "生成専用DB / active 1件",
             700,
             190,
         ),
@@ -236,6 +247,7 @@ def ml_pipeline():
             415,
             490,
         ),
+        node("run", "Cloud Run · manager", "IAM必須 / 生成制御", 700, 345),
         node("gcs", "Cloud Storage", "private inputs", 700, 490),
         node(
             "pytorch",
@@ -276,19 +288,20 @@ def ml_pipeline():
     ]
     edges = [
         edge("M172 226 H373", "preset", 272, 214, kind="n"),
-        edge("M457 226 H658", "予約・同期", 556, 214, kind="n", both=True),
+        edge("M457 246 H570 V381 H658", "IAM / ID token", 570, 369, kind="n"),
+        edge("M742 397 H820 V226 H742", "台帳", 780, 385, kind="n", both=True),
         edge(
-            "M415 184 V110 H875 V185 H1040 V219",
+            "M742 365 H875 V185 H1040 V219",
             "CustomJob",
-            650,
-            99,
+            960,
+            173,
             kind="n",
         ),
         edge("M1040 185 H1380 V219", "modeで分岐", 1210, 176, kind="n"),
         edge("M172 526 H373", "準備", 273, 514),
         edge("M457 526 H658", "SHA付き", 557, 514),
         edge("M738 526 H840 V261 H998", "NPZ", 917, 249),
-        edge("M700 484 V425 H1180 V261 H1338", "bundle / 元PTS", 944, 414),
+        edge("M742 546 H855 V425 H1180 V261 H1338", "bundle / 元PTS", 975, 414),
         edge("M1040 381 V484", "export", 1086, 439),
         edge("M1380 381 V410 H1210 V526 H1338", "local snapshot", 1320, 402),
         edge("M1040 646 V694", "掲載要求", 1092, 680, kind="n"),
@@ -405,12 +418,12 @@ def observability():
           <p>開始後のログをコピー · 過去の履歴は元の保存先へ</p>
         </div>""",
         """<div class="diagram-note" style="left:465px;top:770px;width:1090px">
-          <p>2026-11-10: bucket / sink / dashboard 適用済み。Go severity対応はimage配備待ち。</p>
+          <p>2026-11-10: ログ基盤を適用済み。生成managerもgeneration有効時の収集対象。</p>
           <p>監視範囲: サーバー・生成・配信・運用。通知・SLO・ブラウザ計測は対象外。</p>
         </div>""",
     ]
     nodes = [
-        node("run", "Cloud Run · Go", "UI / API / request logs", 170, 185),
+        node("run", "Cloud Run · Go", "公開UI/API + 生成manager", 170, 185),
         node("vertex", "Vertex AI · Python", "trainer / LIVE service", 170, 340),
         node(
             "lb",
@@ -450,7 +463,7 @@ def observability():
         edge("M920 521 V558 H1330 V644", "同じviewを検索", 1125, 546),
         edge(
             "M170 179 V169 H325 V99 H1330 V359",
-            "標準メトリクス: request数/秒・revision別p95（UI・healthを含む）",
+            "標準メトリクス: 公開Runのみ / request数・revision別p95（UI・healthを含む）",
             800,
             87,
             kind="n",

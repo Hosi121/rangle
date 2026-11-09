@@ -37,6 +37,10 @@ func main() {
 	insecureCookies := flag.Bool("insecure-local-cookies", false, "allow session cookies over HTTP on loopback only")
 	generationFile := flag.String("generation-config", "", "optional immutable generation configuration JSON")
 	generationSyncAudience := flag.String("generation-sync-audience", "", "optional exact HTTPS audience for managed generation state synchronization")
+	generationManager := flag.Bool("generation-manager", false, "run the private bounded generation manager without the public UI or community database")
+	generationManagerURL := flag.String("generation-manager-url", "", "HTTPS base URL of the private generation manager; excludes local generation config")
+	generationAudience := flag.String("generation-manager-audience", "", "manager mode: exact HTTPS service base URL for signed caller tokens")
+	generationCaller := flag.String("generation-caller-service-account", "", "manager mode: the one public runtime service account allowed to forward account IDs")
 	liveIndex := flag.String("live-index", os.Getenv("RANGLE_LIVE_INDEX"), "optional local live index or gs://bucket/live/index.json")
 	liveAssetsRoot := flag.String("live-assets-root", "", "optional local live-assets directory; production media uses the CDN")
 	flag.Parse()
@@ -58,6 +62,10 @@ func main() {
 		SecureCookies:          !*insecureCookies,
 		GenerationFile:         *generationFile,
 		GenerationSyncAudience: *generationSyncAudience,
+		GenerationManager:      *generationManager,
+		GenerationManagerURL:   *generationManagerURL,
+		GenerationAudience:     *generationAudience,
+		GenerationCaller:       *generationCaller,
 		LiveIndex:              *liveIndex,
 		LiveAssetsRoot:         *liveAssetsRoot,
 		ServingRevision:        os.Getenv("K_REVISION"),

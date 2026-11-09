@@ -14,7 +14,7 @@
 | sink | `rangle-stg-logs`、同一projectの専用バケットへコピー |
 | ダッシュボード | `rangle stg - logs and runtime`、既存IAMで閲覧 |
 
-sinkはCloud Run `rangle-stg`、JSONの `service=rangle-trainer/rangle-live`、専用LBのHTTP/HTTPS forwarding rule、予算停止Workflow・Scheduler、生成同期Schedulerを絞って収集する。Vertex jobのlabelsがそのままログのlabelsになるとは仮定しない。既存MLイベントが `jsonPayload.service` に入ることは実ログで確認した。構造化されていないライブラリ出力やcontainer開始前の基盤ログはMLパネルの対象外で、provider IDを使って元のjobログを調べる。
+sinkはCloud Run `rangle-stg`、JSONの `service=rangle-trainer/rangle-live`、専用LBのHTTP/HTTPS forwarding rule、予算停止Workflow・Scheduler、生成同期Schedulerを絞って収集する。generation有効時は、同じproject・Tokyoの専用Cloud Run `rangle-stg-generation` も既存sinkとCloud Runログパネルへ含める。無効時はmanagerを収集対象へ追加しない。保持期間・既存の課金上限・log出力量の設定は変えない。Vertex jobのlabelsがそのままログのlabelsになるとは仮定しない。既存MLイベントが `jsonPayload.service` に入ることは実ログで確認した。構造化されていないライブラリ出力やcontainer開始前の基盤ログはMLパネルの対象外で、provider IDを使って元のjobログを調べる。
 
 既存の `_Default` / `_Required` bucket・sinkは変更せず、監査ログを専用sinkから除外する。30日設定はこの専用バケットの保存分に適用される。既存の保存先へもroutingされる場合はコピーが残り、保存量は増える。既存のproject共通保持設定・監査ログの保存期間を、この変更で短縮したとは扱わない。
 
@@ -26,7 +26,7 @@ sinkはCloud Run `rangle-stg`、JSONの `service=rangle-trainer/rangle-live`、�
 
 配備後に `terraform output -json observability` でダッシュボードURL、Logs Explorer URL、バケット・view・収集条件を取得できる。
 
-画面にはCloud Run要求数/秒、revisionごとの要求時間p95と、警告・エラー、UI/API、生成/LIVE、LB/CDN、guard/同期のログを表示する。ログパネルは専用 `_AllLogs` viewを読む。Cloud RunのグラフはUI・healthを含むサービス全体の既存プラットフォーム指標で、ブラウザ初回描画やAPIだけのp95ではない。表示に数分の遅延があり得る。
+画面にはCloud Run要求数/秒、revisionごとの要求時間p95と、警告・エラー、UI/API、生成/LIVE、LB/CDN、guard/同期のログを表示する。ログパネルは専用 `_AllLogs` viewを読む。generation有効時のCloud RunログパネルはUI/APIとmanagerの両方を表示する。性能グラフは引き続き公開 `rangle-stg` だけを対象とし、private managerの要求数や遅延を混ぜない。Cloud RunのグラフはUI・healthを含むサービス全体の既存プラットフォーム指標で、ブラウザ初回描画やAPIだけのp95ではない。表示に数分の遅延があり得る。
 
 app/candidate backendの要求ログは既存の10% samplingを保つ。CDNのbackend bucketは自動の要求loggingを使い、LB設定やcache契約は変更しない。表示されたログ件数から総要求数やhit率を断定しない。
 

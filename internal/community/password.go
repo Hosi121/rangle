@@ -3,7 +3,7 @@ package community
 import (
 	"crypto/rand"
 	"crypto/subtle"
-	"errors"
+	"fmt"
 	"strings"
 	"unicode/utf8"
 
@@ -24,10 +24,10 @@ func newAccount(id, name, password string) Account {
 }
 
 // NewAdministrator is for trusted provisioning tools, never public registration.
-// The bootstrap password may be shorter than the public registration minimum.
+// Newly provisioned administrators follow the public registration password policy.
 func NewAdministrator(password string) (Account, error) {
-	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 8 || utf8.RuneCountInString(password) > 128 || len(password) > 512 {
-		return Account{}, errors.New("administrator password must contain 8 to 128 characters")
+	if !validPassword(password) {
+		return Account{}, fmt.Errorf("administrator password must contain %d to 128 characters", MinPasswordLength)
 	}
 	a := newAccount("admin", "管理者", password)
 	a.User.Admin = true
