@@ -47,7 +47,32 @@ run "configured_app_keeps_its_runtime_and_rollout_contract" {
     error_message = "Logging must not increase app capacity, open direct ingress or change existing sampling."
   }
   assert {
+    condition     = strcontains(google_logging_project_sink.app_logs.filter, "resource.labels.service_name=\"rangle-stg\"") && !strcontains(google_logging_project_sink.app_logs.filter, "\"rangle-stg-generation\"") && one([for widget in jsondecode(google_monitoring_dashboard.app_logs.dashboard_json).gridLayout.widgets : widget.logsPanel.filter if widget.title == "Cloud Run UI/API"]) == "resource.type=\"cloud_run_revision\" AND resource.labels.project_id=\"rangle-example\" AND resource.labels.location=\"asia-northeast1\" AND resource.labels.service_name=\"rangle-stg\""
+    error_message = "Without generation, collect only the existing public Run service and retain its log panel scope."
+  }
+  assert {
     condition     = strcontains(google_workflows_workflow.guard.source_contents, "observed_cost >= 15000") && !strcontains(google_workflows_workflow.guard.source_contents, "logging.googleapis.com")
     error_message = "Keep the existing cost guard and retained diagnostics during shutdown."
+  }
+}
+
+run "generation_manager_logs_share_the_owned_run_panel_without_changing_public_metrics" {
+  command = plan
+  variables {
+    base_domain = "presentation.example.com"
+    application = {
+      image_digest             = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+      catalog_sha256           = "1111111111111111111111111111111111111111111111111111111111111111"
+      community_enabled        = true
+      generation_config_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  }
+  assert {
+    condition     = strcontains(google_logging_project_sink.app_logs.filter, "resource.type=\"cloud_run_revision\" AND resource.labels.project_id=\"rangle-example\" AND resource.labels.location=\"asia-northeast1\" AND resource.labels.service_name=(\"rangle-stg\" OR \"rangle-stg-generation\")") && one([for widget in jsondecode(google_monitoring_dashboard.app_logs.dashboard_json).gridLayout.widgets : widget.logsPanel.filter if widget.title == "Cloud Run UI/API and generation manager"]) == "resource.type=\"cloud_run_revision\" AND resource.labels.project_id=\"rangle-example\" AND resource.labels.location=\"asia-northeast1\" AND resource.labels.service_name=(\"rangle-stg\" OR \"rangle-stg-generation\")"
+    error_message = "Collect private generation manager logs only alongside the public Run service in the owned project/location, and make them accessible from the same log panel."
+  }
+  assert {
+    condition     = length(jsondecode(google_monitoring_dashboard.app_logs.dashboard_json).gridLayout.widgets) == 8 && alltrue([for widget in jsondecode(google_monitoring_dashboard.app_logs.dashboard_json).gridLayout.widgets : strcontains(widget.xyChart.dataSets[0].timeSeriesQuery.timeSeriesFilter.filter, "resource.labels.service_name=\"rangle-stg\"") && !strcontains(widget.xyChart.dataSets[0].timeSeriesQuery.timeSeriesFilter.filter, "rangle-stg-generation") if can(widget.xyChart)]) && google_logging_project_bucket_config.app_logs.retention_days == 30 && !google_logging_project_bucket_config.app_logs.enable_analytics && strcontains(google_logging_project_sink.app_logs.filter, "NOT logName:\"cloudaudit.googleapis.com\"")
+    error_message = "Private manager log collection must preserve public-only performance charts, eight widgets, 30-day retention, and separate audit routing."
   }
 }
