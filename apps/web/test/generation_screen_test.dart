@@ -402,14 +402,14 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.ancestor(
-          of: find.byTooltip('3DGSを生成'),
+          of: find.byTooltip('GSを生成'),
           matching: find.byWidgetPredicate(
             (widget) => widget is PointerInterceptor && widget.intercepting,
           ),
         ),
         findsOneWidget,
       );
-      await tester.tap(find.byTooltip('3DGSを生成'));
+      await tester.tap(find.byTooltip('GSを生成'));
       await tester.pumpAndSettle();
       expect(viewers.first.disposed, isTrue);
       expect(scene.disposed, isTrue);
