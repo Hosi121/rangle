@@ -49,6 +49,7 @@ func WithPublicClips(base http.Handler, load func(context.Context) ([]PublicClip
 		return nil, fmt.Errorf("a static feed and public registry are required")
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set(catalogSHAHeader, static.catalogSHA256)
 		if r.URL.EscapedPath() != feedPath || (r.Method != http.MethodGet && r.Method != http.MethodHead) {
 			static.ServeHTTP(w, r)
 			return
