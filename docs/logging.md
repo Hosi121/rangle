@@ -44,6 +44,8 @@ PythonのML処理とDartのアプリでは、各言語のロガーを使い、�
 
 VertexのPython workerは `service="rangle-trainer"`・`severity`・`event` を含むJSONをstdoutへ出す。開始・完了はアプリの `job_id`、学習途中はiteration・loss・Gaussian数・経過秒を記録する。実行全体はCloud LoggingのVertex job IDで絞り込み、Goの `provider_name` と対応させる。画像・モデル・入力本文はログへ埋め込まず、結果ファイルと分ける。
 
+ライブworkerは同じJSON方針で `service="rangle-live"` と `session_id` を使い、session IDをAPIのjob IDに揃える。`cloud_live_started`・`cloud_live_published`・`cloud_live_report`・終了/失敗を記録する。最終reportには起動準備、入力開始からCDN実HTTP確認までの秒数、source EOF前に公開できたか、snapshot数・size・held-out画質、子processの終了結果を分けて残す。秒数は `_seconds`、時刻はUTC、同一host内の順序判定はmonotonicを使う。Vertexの起動待ちやクライアント描画を含む値へ読み替えない。ADCの認証情報・HTTP例外本文・画像・モデル本体は記録しない。[クラウドLIVE](cloud-live.md)
+
 クラウドでの収集・保持期間・権限はIaCの運用設計で定める。Cloud Loggingへ接続する際は、JSONの収集とseverity・traceへの対応づけを確認する。現在のJSON出力だけで監視やトレース連携まで実装済みとは扱わない。
 
 参照: [Go log/slog](https://pkg.go.dev/log/slog)、[Cloud Loggingの構造化ログ](https://docs.cloud.google.com/logging/docs/structured-logging)。

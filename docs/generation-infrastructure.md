@@ -8,13 +8,17 @@ Cloud Runの生成API、Firestoreの実行台帳、Vertex AIの学習、GCS/CDN�
 
 JSON は project / 必須の `project_number` / named Firestore database / pinned trainer image / trainer SA / 既知 input URI と SHA / media origin / deadline / attempts / reviewed presets を保持する。実値や dataset を Terraform へ埋め込まない。生成 API は既存の private `rangle-stg` Firestore と runtime IAM を使い、trainer には Firestore 権限を渡さない。先に対応 Go image と config を用意してから SHA を設定し、disable 時は既存 job が terminal であることを確認してから config / IAM を外す。
 
+## ライブ生成
+
+optionalな `live` configと `application.generation_live_enabled` で、専用worker image・identityを追加する。生成APIと実行台帳・GPU型・時間・累計attempt枠・停止guardは共用する。ライブidentityの上書き権限はmetadata pointerだけに限定し、offline trainerの権限は広げない。手順とデータ経路は[クラウドLIVE](cloud-live.md)。
+
 ## 状態同期
 
 `generation_sync_enabled` は既定false。有効時は専用SA `rangle-stg-generation-sync@<project>.iam.gserviceaccount.com` のOIDCで `/internal/generation/sync` を2分ごとに呼ぶ。同期は台帳のactive 1件だけを更新し、submit・attemptの追加や返金は行わない。初回有効化時やimage/audienceの対応を変える際は、新revisionの配備までSchedulerをpauseし、配備後にresumeしてOIDC疎通を確認する。署名・audience・期限と停止の詳細は[掲載・状態同期](generated-publication.md)を参照。
 
 ## GPU と費用の境界
 
-Go の CustomJob request と immutable config が **Tokyo / SPOT T4×1 / n1-standard-4 / replica1 / pd-standard100GB / timeout1800s / disableRetries=true** を固定する。公開 inference endpoint、GCE / Batch VM、常駐 GPU は作らない。worker は job 作成時刻+30分の絶対期限を引数でも受け、queue / restart 後に期限を過ぎていれば即終了する。[Custom training compute](https://docs.cloud.google.com/vertex-ai/docs/training/configure-compute)
+Go の CustomJob request と immutable config が **Tokyo / SPOT T4×1 / offline n1-standard-4・live n1-standard-16 / replica1 / pd-standard100GB / timeout1800s / disableRetries=true** を固定する。公開 inference endpoint、GCE / Batch VM、常駐 GPU は作らない。worker は job 作成時刻+30分の絶対期限を引数でも受け、queue / restart 後に期限を過ぎていれば即終了する。[Custom training compute](https://docs.cloud.google.com/vertex-ai/docs/training/configure-compute)
 
 1件の global active job を Firestore transaction で守り、最大10 attempts、1 attempt 当たり USD2 を予約して GPU 総予算 USD20 に収める方針。部分成功・応答不明の submit は予約を解放して盲目的に再送しない。Terraform IAM 自体は GPU 型、並列数、job 価格を強制する仕組みではない。Tokyo SKU、起動費用、Spot availability / preemption、実請求は実行条件と照合する。既存の全体 USD300、JPY30000 budget / JPY15000 guard、JPY200 Cloud Run cap は保持し、Cloud Run cap が Vertex 利用を止めるとは扱わない。
 
