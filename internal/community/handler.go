@@ -24,6 +24,11 @@ import (
 
 const cookieName = "rangle_session"
 
+// One shared budget bounds public read admission before any dependency work.
+// These are initial guards for the presentation instance, not measured capacity.
+const publicReadInterval = 100 * time.Millisecond
+const publicReadBurst = 20
+
 type Config struct {
 	Store         Store
 	ClipIDs       map[string]bool
@@ -36,6 +41,7 @@ type Handler struct {
 	routes   http.Handler
 	hashes   chan struct{}
 	authRate *rate.Limiter
+	readRate *rate.Limiter
 	mu       sync.Mutex
 	limits   map[string]*attemptLimit
 	dummy    Account
@@ -49,18 +55,25 @@ func NewHandler(cfg Config) *Handler {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
-	h := &Handler{cfg: cfg, hashes: make(chan struct{}, 2), authRate: rate.NewLimiter(5, 10), limits: map[string]*attemptLimit{}, dummy: newAccount("dummy", "dummy", "not-a-real-user-password")}
+	h := &Handler{
+		cfg:      cfg,
+		hashes:   make(chan struct{}, 2),
+		authRate: rate.NewLimiter(5, 10),
+		readRate: rate.NewLimiter(rate.Every(publicReadInterval), publicReadBurst),
+		limits:   map[string]*attemptLimit{},
+		dummy:    newAccount("dummy", "dummy", "not-a-real-user-password"),
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/auth/me", h.me)
 	mux.HandleFunc("POST /api/v1/auth/register", h.register)
 	mux.HandleFunc("POST /api/v1/auth/login", h.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", h.logout)
-	mux.HandleFunc("GET /api/v1/clips/{clip}/engagement", h.engagement)
-	mux.HandleFunc("GET /api/v1/clips/{clip}/cheers", h.cheers)
+	mux.HandleFunc("GET /api/v1/clips/{clip}/engagement", h.limitPublicRead(h.engagement))
+	mux.HandleFunc("GET /api/v1/clips/{clip}/cheers", h.limitPublicRead(h.cheers))
 	mux.HandleFunc("POST /api/v1/clips/{clip}/cheers", h.cheers)
 	mux.HandleFunc("PUT /api/v1/clips/{clip}/likes", h.like)
 	mux.HandleFunc("DELETE /api/v1/clips/{clip}/likes", h.like)
-	mux.HandleFunc("GET /api/v1/clips/{clip}/comments", h.comments)
+	mux.HandleFunc("GET /api/v1/clips/{clip}/comments", h.limitPublicRead(h.comments))
 	mux.HandleFunc("POST /api/v1/clips/{clip}/comments", h.comment)
 	mux.HandleFunc("DELETE /api/v1/clips/{clip}/comments/{comment}", h.deleteComment)
 	protection := http.NewCrossOriginProtection()
@@ -81,6 +94,19 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.routes.ServeHTTP(w, r)
+}
+
+func (h *Handler) limitPublicRead(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// GET patterns also match HEAD. Share a single budget across routes,
+		// clip IDs and cookies without looking up a clip or session first.
+		if !h.readRate.Allow() {
+			w.Header().Set("Retry-After", "1")
+			h.fail(w, r, http.StatusTooManyRequests, "rate_limited")
+			return
+		}
+		next(w, r)
+	}
 }
 
 func (h *Handler) write(w http.ResponseWriter, r *http.Request, status int, value any) {
