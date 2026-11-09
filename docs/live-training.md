@@ -69,7 +69,9 @@ model_sha256, model_bytes, captured_at, available_at,
 training_seconds, mean_packed_psnr, mean_packed_ssim
 ```
 
-Segment times are absolute source PTS; model time runs from zero to `end_seconds - start_seconds`. `scene_url` is `/live-assets/<id>/<revision>/scene.json`, `temporal.url` is exactly `model.rgs`, and scene attribution label/source/license equal the session title/source URL/license. RGS1 uses the existing lossless smallest encoding, with no extra quantization or point removal and no HTTP `Content-Encoding: gzip`.
+Segment times are absolute source PTS; model time runs from zero to `end_seconds - start_seconds`. `scene_url` is `/live-assets/<id>/<revision>/scene.json`, `temporal.url` is exactly `model.rgs`, and scene attribution label/source/license equal the session title/source URL/license. RGS1 uses the existing lossless RLE gzip encoding, with no extra quantization or point removal and no HTTP `Content-Encoding: gzip`. VOD keeps its smallest-of-two encoding policy.
+
+Live updates prioritize encoding time. For the 13 frozen snapshots measured below, RLE produced byte-for-byte identical files to the smallest-of-two choice. On the three final models, a separate CPU check measured 0.045–0.049 seconds for RLE versus 1.011–1.058 seconds for smallest-of-two, with equal decoded bytes. These are single encoding observations, not whole-pipeline speedups; other inputs can produce larger RLE files. The training table below predates this encoding-only change; the final delivery integration must measure the combined pipeline again.
 
 Only `model.rgs` and `scene.json` are publication assets. Metrics, provenance and the three final packed held-out RGB diagnostics stay local. Diagnostics are written after snapshot availability timing, at the first/middle/last time of the final window using its first held-out view. The index exposes only the agreed aggregate metrics. This module performs no cloud mutations or deployment.
 

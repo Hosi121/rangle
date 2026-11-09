@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 import numpy as np
-from rangle_training.packing import compress_temporal_smallest as compress_temporal
+from rangle_training.packing import compress_temporal_rle as compress_temporal
 from rangle_training.packing import pack_temporal, unpack_temporal
 from rangle_training.temporal import (
     _ssim_function,
