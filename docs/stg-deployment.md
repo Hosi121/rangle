@@ -15,6 +15,8 @@
 
 ## private GCS と公開工程
 
+ログ収集と30日保持、監視ダッシュボードは[ログ監視の運用](observability.md)を参照する。既存の共有ログ設定と予算・期限停止は維持する。
+
 既存の catalog / inputs / media / state bucket と runtime / deploy SA、WIF、専用予算を維持する。media bucket は `rangle-stg-113704194486-media` をそのまま private CDN origin として使う。全 bucket は PAP enforced で、`allUsers` を付けない。backend bucket 作成後に生成される `service-113704194486@https-lb.iam.gserviceaccount.com` に media bucket の objectViewer を付与する。これが、署名 URL なしで private GCS origin から公開 CDN 再生するための接続である。[private bucket access](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket#make_your_cloud_storage_bucket_private)、[cache-fill IAM](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket#make_your_cloud_storage_bucket_private)
 
 media は公開許諾済みの不変 bytes だけ。CDN は `FORCE_CACHE_ALL`、default/client TTL86400秒（APIがこのmodeで省略するmax TTLは設定しない）、negative cache / stale serve / dynamic compression 無効。query は `generation` だけを cache key に残し、content selection や認可に query を流用しない。`Origin` は cache key の明示指定がAPIで禁止されているため、GCS の `Vary: Origin` を CDN が扱う仕組みを使う。匿名 public media の CORS は `*`、GET/HEAD と Range 応答に必要な header を設定する。credentials 付き取得は使わない。実 CDN の GET/HEAD/206/304/416・CORS・hash・cold miss は配備後に確認する。[CDN cache](https://docs.cloud.google.com/cdn/docs/caching)
