@@ -313,7 +313,7 @@ class _GenerationScreenState extends State<GenerationScreen>
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Text('3DGSを生成'),
+      title: const Text('GSを生成'),
       actions: [
         IconButton(
           tooltip: '状態を再読み込み',
@@ -330,11 +330,11 @@ class _GenerationScreenState extends State<GenerationScreen>
             padding: const EdgeInsets.all(20),
             children: [
               Text(
-                '公開データから3Dシーンを作る',
+                'スポーツの一瞬と動きを3Dに',
                 style: Theme.of(context).textTheme.titleLarge,
               ),
               const SizedBox(height: 8),
-              const Text('確認済みのデータを使い、1時刻の静的な3DGSを生成します。動く4D動画の生成には対応していません。'),
+              const Text('確認済みの複数視点データから、自由視点で見返せるシーンを生成します。'),
               const SizedBox(height: 24),
               if (_loading) const Text('生成の受付状況を確認しています'),
               if (_error != null) ...[
@@ -376,6 +376,8 @@ class _GenerationScreenState extends State<GenerationScreen>
                   for (final preset in _catalog!.presets.where(
                     (item) => item.id == _preset,
                   )) ...[
+                    Text(preset.formatLabel),
+                    const SizedBox(height: 4),
                     Text(preset.sport),
                     const SizedBox(height: 4),
                     Text(preset.description),
@@ -432,7 +434,7 @@ class _GenerationScreenState extends State<GenerationScreen>
                                     .where((preset) => preset.id == job.preset)
                                     .firstOrNull
                                     ?.title ??
-                                '3DGSの生成',
+                                'GSの生成',
                             style: Theme.of(context).textTheme.titleSmall,
                           ),
                           const SizedBox(height: 4),

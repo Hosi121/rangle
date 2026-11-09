@@ -77,6 +77,25 @@ Future<void> _tap(WidgetTester tester, String text) async {
 }
 
 void main() {
+  testWidgets('dynamic preset and active job are labeled as moving 4DGS', (
+    tester,
+  ) async {
+    final fixture = GenerationFixture()
+      ..mode = 'dynamic'
+      ..state = 'running';
+    await _show(tester, fixture);
+    expect(find.text('動く4DGS（複数時刻）'), findsOneWidget);
+    expect(find.textContaining('対応していません'), findsNothing);
+    final state = find.text('4DGSを生成しています');
+    await tester.scrollUntilVisible(
+      state,
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(state, findsOneWidget);
+    expect(find.text('3DGSを生成しています'), findsNothing);
+  });
+
   testWidgets(
     'generated result deep links create the scene before any input video',
     (tester) async {

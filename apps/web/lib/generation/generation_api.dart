@@ -21,6 +21,12 @@ class GenerationFailure implements Exception {
   };
 }
 
+String _mode(Object? value) {
+  if (value == null || value == '' || value == 'static') return 'static';
+  if (value == 'dynamic') return 'dynamic';
+  throw const FormatException('Unsupported generation mode.');
+}
+
 class GenerationPreset {
   GenerationPreset.fromJson(Map<String, dynamic> data)
     : id = data['id'] as String,
@@ -28,8 +34,11 @@ class GenerationPreset {
       sport = data['sport'] as String,
       description = data['description'] as String,
       source = data['source'] as String,
-      license = data['license'] as String;
-  final String id, title, sport, description, source, license;
+      license = data['license'] as String,
+      mode = _mode(data['mode']);
+  final String id, title, sport, description, source, license, mode;
+  bool get isDynamic => mode == 'dynamic';
+  String get formatLabel => isDynamic ? '動く4DGS（複数時刻）' : '静的な3DGS（1時刻）';
 }
 
 class GenerationCatalog {
@@ -47,8 +56,9 @@ class GenerationJob {
     : id = data['id'] as String,
       preset = data['preset'] as String,
       state = data['state'] as String,
+      mode = _mode(data['mode']),
       createdAt = DateTime.parse(data['created_at'] as String);
-  final String id, preset, state;
+  final String id, preset, state, mode;
   final DateTime createdAt;
   final Uri? viewerUrl;
 
@@ -57,7 +67,7 @@ class GenerationJob {
   String get stateLabel => switch (state) {
     'submitting' => '生成を受け付けています',
     'queued' => '順番を待っています',
-    'running' => '3DGSを生成しています',
+    'running' => mode == 'dynamic' ? '4DGSを生成しています' : '3DGSを生成しています',
     'cancelling' => '中止しています',
     'succeeded' => '生成が完了しました',
     'failed' => '生成に失敗しました',

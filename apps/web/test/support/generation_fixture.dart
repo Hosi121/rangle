@@ -7,16 +7,20 @@ import 'package:rangle_web/community/community_api.dart';
 import 'package:rangle_web/generation/generation_api.dart';
 
 const generationJobId = '0123456789abcdef0123456789abcdef';
-Map<String, Object?> generationJob(String state) => {
+Map<String, Object?> generationJob(String state, {String mode = 'static'}) => {
   'id': generationJobId,
   'preset': 'reviewed-sports',
   'state': state,
+  'mode': mode,
   'created_at': '2026-11-09T00:00:00Z',
   'updated_at': '2026-11-09T00:00:01Z',
 };
 
-Map<String, Object?> generationResult(String state) => {
-  'job': generationJob(state),
+Map<String, Object?> generationResult(
+  String state, {
+  String mode = 'static',
+}) => {
+  'job': generationJob(state, mode: mode),
   if (state == 'succeeded') ...{
     'viewer_url': '/demo/?clip=generated-$generationJobId',
     'scene_url':
@@ -27,6 +31,7 @@ Map<String, Object?> generationResult(String state) => {
 class GenerationFixture {
   Map<String, String>? user = {'id': 'viewer', 'name': 'テストユーザー'};
   String? state;
+  String mode = 'static';
   String? createError, pollError;
   int? presetsStatus;
   bool dropFirstCreate = false;
@@ -67,6 +72,7 @@ class GenerationFixture {
         'presets': [
           {
             'id': 'reviewed-sports',
+            'mode': mode,
             'title': 'スポーツのサンプル',
             'sport': 'バスケットボール',
             'description': '確認済みの複数視点データです。',
@@ -83,7 +89,7 @@ class GenerationFixture {
     }
     if (path.endsWith('/generation/jobs') && request.method == 'GET') {
       return reply({
-        'jobs': [if (state != null) generationJob(state!)],
+        'jobs': [if (state != null) generationJob(state!, mode: mode)],
       });
     }
     if (path.endsWith('/generation/jobs') && request.method == 'POST') {
@@ -98,13 +104,13 @@ class GenerationFixture {
       if (dropFirstCreate && creates.length == 1) {
         throw http.ClientException('Response lost after admission');
       }
-      return reply(generationResult(state!), 202);
+      return reply(generationResult(state!, mode: mode), 202);
     }
     if (path.endsWith('/generation/jobs/$generationJobId')) {
       if (request.method == 'DELETE') {
         deletes++;
         state = 'cancelling';
-        return reply(generationResult(state!), 202);
+        return reply(generationResult(state!, mode: mode), 202);
       }
       polls++;
       if (pollError != null) {
@@ -112,7 +118,7 @@ class GenerationFixture {
           'error': pollError,
         }, pollError == 'not_authenticated' ? 401 : 429);
       }
-      return reply(generationResult(state ?? 'running'));
+      return reply(generationResult(state ?? 'running', mode: mode));
     }
     throw StateError('Unexpected request: ${request.method} ${request.url}');
   });

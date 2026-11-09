@@ -99,13 +99,29 @@ func (h *Handler) owner(w http.ResponseWriter, r *http.Request) (string, bool) {
 func (h *Handler) presets(w http.ResponseWriter, r *http.Request) {
 	rows := make([]map[string]string, 0, len(h.service.Config.Presets))
 	for _, p := range h.service.Config.Presets {
-		rows = append(rows, map[string]string{"id": p.ID, "title": p.Title, "sport": p.Sport, "description": p.Description, "source": p.Source, "license": p.License})
+		rows = append(rows, map[string]string{"id": p.ID, "mode": p.ModeName(), "title": p.Title, "sport": p.Sport, "description": p.Description, "source": p.Source, "license": p.License})
 	}
 	h.write(w, r, 200, map[string]any{"available": true, "presets": rows, "limits": map[string]any{"concurrent_jobs": 1, "runtime_seconds": int(MaxRuntime / time.Second), "attempts": h.service.Config.Attempts}})
 }
 
+type jobView struct {
+	ID        string    `json:"id"`
+	Preset    string    `json:"preset"`
+	Mode      string    `json:"mode"`
+	State     State     `json:"state"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func viewJob(j Job) jobView {
+	return jobView{
+		ID: j.ID, Preset: j.Preset, Mode: j.Snapshot.ModeName(), State: j.State,
+		CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
+	}
+}
+
 func (h *Handler) response(job Job) map[string]any {
-	v := map[string]any{"job": job}
+	v := map[string]any{"job": viewJob(job)}
 	if job.State == Succeeded {
 		v["viewer_url"] = "/demo/?clip=generated-" + job.ID
 		v["scene_url"] = h.service.Config.MediaOrigin + "/generated/" + job.ID + "/scene.json"
@@ -159,7 +175,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, err)
 		return
 	}
-	h.write(w, r, 200, map[string]any{"jobs": jobs})
+	rows := make([]jobView, 0, len(jobs))
+	for _, job := range jobs {
+		rows = append(rows, viewJob(job))
+	}
+	h.write(w, r, 200, map[string]any{"jobs": rows})
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
@@ -234,10 +254,14 @@ func (h *Handler) ClipHandler(fallback http.Handler) http.Handler {
 			h.fail(w, r, ErrNotFound)
 			return
 		}
+		model := "3DGS"
+		if preset.ModeName() == "dynamic" {
+			model = "4DGS"
+		}
 		h.write(w, r, 200, map[string]any{
-			"id": "generated-" + id, "revision": id, "title": preset.Title + "（生成した3DGS）", "sport": preset.Sport,
+			"id": "generated-" + id, "revision": id, "title": preset.Title + "（生成した" + model + "）", "sport": preset.Sport,
 			"description": preset.Description + "\n" + preset.Source + " / " + preset.License,
-			"tags":        []string{preset.Sport, "3DGS"}, "preview_url": preset.PreviewURL,
+			"tags":        []string{preset.Sport, model}, "preview_url": preset.PreviewURL,
 			"scene_url": h.service.Config.MediaOrigin + "/generated/" + id + "/scene.json",
 		})
 	})

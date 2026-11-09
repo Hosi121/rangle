@@ -22,6 +22,37 @@ class _AbortClient extends http.BaseClient {
 }
 
 void main() {
+  test(
+    'reviewed dynamic mode survives presets, creation, polling and history',
+    () async {
+      final fixture = GenerationFixture()..mode = 'dynamic';
+      final api = fixture.api;
+      final presets = await api.presets();
+      expect(presets.presets.single.isDynamic, isTrue);
+      final created = await api.create('reviewed-sports', 'a' * 32);
+      expect(created.mode, 'dynamic');
+      expect(jsonDecode(fixture.requests.last.body), {
+        'preset': 'reviewed-sports',
+        'request_id': 'a' * 32,
+      });
+      fixture.state = 'running';
+      expect((await api.get(generationJobId)).stateLabel, '4DGSを生成しています');
+      expect((await api.jobs()).single.mode, 'dynamic');
+      api.close();
+    },
+  );
+
+  test('legacy immutable jobs remain static when mode is absent', () {
+    final row = generationJob('running')..remove('mode');
+    final job = GenerationJob.fromJson(row);
+    expect(job.mode, 'static');
+    expect(job.stateLabel, '3DGSを生成しています');
+    expect(
+      () => GenerationJob.fromJson({...row, 'mode': 'unexpected'}),
+      throwsFormatException,
+    );
+  });
+
   test('oversized JSON is rejected before sending', () async {
     final fixture = GenerationFixture();
     final api = fixture.api;
