@@ -80,6 +80,19 @@ database をまたぐ transaction ではないため、source / target の write
 代替しない。commit 後の drift・検証失敗では target の削除や巻き戻しをせず、
 `do_not_switch_runtime` を含む status で停止する。
 
+## 切替後の正本と復帰
+
+切替後の生成データの正本は `rangle-stg-generation` であり、communityは引き続き
+`rangle-stg` を使う。CIはmanagerと公開アプリのrevision/trafficだけを元の配分へ戻し、
+database・IAM・台帳のused/active・履歴・掲載状態を巻き戻さない。正常なremote版への
+復帰も同じ生成DBを使う。古いbackupで上書きしたり、空のDBへ向けてattemptを再発行したりしない。
+
+初回切替中の失敗で公開trafficが旧monolith revisionへ戻った場合も、旧生成権限を
+復活させて受付を再開しない。targetに新しい書き込みがあればsourceは既に古いため、
+両writersと同期を停止し、差分を確認してから互換remote revisionで再検証する。
+utilityは逆方向コピー、targetの削除、backupの自動restoreを行わない。移行の照合に
+失敗した場合は、公開runtimeを切り替えず、private backupと両DBを保持して原因を調べる。
+
 REST は固定の `https://firestore.googleapis.com` のみで、redirect を拒否する。
 認証 token は明示した account / project の `gcloud auth print-access-token` から
 process 内へ捕捉し、file、子 process の argv、出力へ渡さない。API response や SDK の

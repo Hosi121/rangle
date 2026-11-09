@@ -1,6 +1,6 @@
 # rangle のクラウド構成
 
-2026-11-08に構築した発表用stgの配信・配備経路を示す。正本は [Terraform](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。逐次GPU生成の拡張と実測は[クラウドLIVE](cloud-live.md)を参照。CI の変更は [PR #42](https://github.com/Hosi121/rangle/pull/42)。
+2026-11-08に構築した発表用stgの配信経路と、生成制御を分離した現在のコード上の構成を示す。正本は [Terraform](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。生成managerの実適用・データ移行・疎通の完了は、配備記録で別に確認する。逐次GPU生成の実測は[クラウドLIVE](cloud-live.md)を参照。
 
 ![rangle: Cloudflare DNSからGoogle HTTPS LBへ接続し、Cloud RunのUI/APIとCloud CDN・private GCSのmediaへ分岐する構成。下段はWIFによる配備と予算・期限停止。](diagrams/cloud-architecture.svg)
 
@@ -13,11 +13,38 @@
 - **カタログ**：Cloud Run の runtime SA が専用 private GCS catalog を read-only FUSE mount し、`/mnt/catalog/snapshots/<sha256>.json` を読む。入力・重み用の inputs と Terraform state は公開 media と別の private bucket に保持する。
 - **DNS**：Cloudflare の app / media A record は Google LB の global IPv4 を返す **DNS only** 設定。ブラウザの HTTP 通信は Google の LB へ直接接続する。[Cloudflare proxy status](https://developers.cloudflare.com/dns/proxy-status/)
 
-Cloud Run は `asia-northeast1`、1 vCPU / 512 MiB、request billing、min 0 / max 1、concurrency 40。発表用の小さい設定で、10万人同時視聴の容量実証は行っていない。コード上は `internal-and-cloud-load-balancing` ingressとし、外部からの既定 `run.app` / candidate-tag URLの直通を拒否する。CIはappのLB URLと候補headerを使って未昇格revisionを検証する。実環境への切替・再疎通は[配備手順](stg-deployment.md#lb入口制限への切替)に従い、実施前は適用済みと扱わない。
+公開Cloud Run `rangle-stg` は `asia-northeast1`、1 vCPU / 512 MiB、request billing、min 0 / max 1、concurrency 40。発表用の小さい設定で、10万人同時視聴の容量実証は行っていない。コード上は `internal-and-cloud-load-balancing` ingressとし、外部からの既定 `run.app` / candidate-tag URLの直通を拒否する。CIはappのLB URLと候補headerを使って未昇格revisionを検証する。実環境への切替・再疎通は[配備手順](stg-deployment.md#lb入口制限への切替)に従い、実施前は適用済みと扱わない。
+
+## 生成制御とデータの分離
+
+上のSVGは配信・配備経路を表す。生成制御では、公開アプリと同じimageを別mode・別SAのCloud Run `rangle-stg-generation` として動かす。
+
+```mermaid
+flowchart LR
+    Browser[ブラウザ] --> Public[公開 UI / community]
+    Public --> Community[(rangle-stg DB)]
+    Public -->|Google ID token / bounded API| Manager[IAM必須の生成manager]
+    Scheduler[専用同期Scheduler] -->|固定identity / active同期のみ| Manager
+    Manager --> Generation[(rangle-stg-generation DB)]
+    Manager -->|固定preset / admission後| Vertex[Vertex AI worker]
+    Vertex --> Media[private GCS / 公開CDN]
+```
+
+| 実行identity | 許可するデータ・操作 |
+| --- | --- |
+| 公開 `rangle-stg-runtime` SA | `rangle-stg` DBのcommunity CRUD、private catalog read、managerのinvoke。生成DB・Vertex CustomJob・trainer actAsは持たない |
+| private `rangle-stg-generation` SA | `rangle-stg-generation` DBの生成台帳CRUD、private catalog/config read、期限付きVertex操作と専用trainer actAs。community DBは読まない |
+| 専用同期SA | managerの同期endpointをinvoke。DB・Vertex権限は持たない |
+
+managerのingressは `all` だがCloud Run IAM認証を必須とし、公開UIのLB経路には載せない。呼出しを許可するのは公開runtime、専用同期SA、配備用SA。配備用SAはhealth確認とimage/traffic更新を担い、managerの業務APIは独立した署名・identity検証で拒否する。公開runtimeの署名付きservice tokenはapplication headerでも検証し、Cloud Runがplatform headerを書き換えても認証を省略しない。
+
+公開runtimeでadmin cookie・現在のaccount role・CSRFを確認し、managerへowner IDを転送する。managerはownerを転送するruntime自体を信頼するため、公開runtimeのRCEはownerの偽装と残る枠内の正規preset操作まで可能である。manager側の同時1件・最大10 attempts・30分・固定spec・deadlineは迂回できず、台帳のresetや任意Vertex specの送信はできない。公開フィード・detail・engagementの存在確認もmanager経由で行い、private job設定を返さない。[生成API](generation.md)、[生成基盤](generation-infrastructure.md)
+
+旧DBからの切替は、writersを停止して2つの生成collectionだけを型・ID・使用済みattempt・履歴・掲載状態ごと移し、照合後に再開する。データの正本を空のDBや古いsnapshotへ戻さない。[移行・復帰の契約](security-generation-migration.md)
 
 ## 配備と停止
 
-GitHub Actions の `stg` workflow は OIDC / Workload Identity Federation を経て、専用 deployer SA を使用する。長期 SA key を使わず Artifact Registry へ image を格納し、Cloud Run の candidate revision を smoke してから traffic を昇格する。
+GitHub Actionsの `stg` workflowはOIDC / Workload Identity Federationを経て専用deployer SAを使用する。長期SA keyを使わずArtifact Registryへimageを格納する。remote生成構成では、既存managerのidentity・config・IAMを検証し、認証付きcandidate healthとrevisionを確認してからmanagerを昇格する。その後、公開アプリのLB経由candidateを検証・昇格する。後続の失敗では両serviceの元の明示traffic配分へ復帰し、DBとIAMは巻き戻さない。[CI/CD](cicd.md)
 
 | 所有者 | 管理するもの |
 | --- | --- |

@@ -1,12 +1,12 @@
 # CI/CD
 
-GitHub Actionsで検証し、`stg` の変更をCloud Run `rangle-stg`（`comin-up` / `asia-northeast1`）へ配備する。
+GitHub Actionsで検証し、`stg` の変更を公開Cloud Run `rangle-stg` と、remote生成有効時のprivate manager `rangle-stg-generation`（`comin-up` / `asia-northeast1`）へ配備する。
 
 ## workflow
 
 | workflow | 実行条件・内容 |
 | --- | --- |
-| `ci.yml` → `validate.yml` | `stg` / `main` 宛PRでGo race/vet、viewer・Flutterの検証、配備スクリプトのテスト、Terraformの静的・mock検証 |
+| `ci.yml` → `validate.yml` | `stg` / `main` 宛PRでGo race/vet、viewer・Flutter、配備・台帳移行・cloud metadata checkerのofflineテスト、Terraformの静的・mock検証とArmor regex検査 |
 | `docker-build.yml` | 同じPRでDocker imageのbuildを確認 |
 | `deploy-stg.yml` | `stg` へのpush、または `stg` を指定した手動実行で検証・build・配備 |
 
@@ -15,11 +15,16 @@ Go＋Flutter Webをマルチステージで1つの非root imageにまとめ、di
 ## 配備の流れ
 
 1. 実行元・設定・期限を確認し、共通の検証を通す。
-2. imageをbuild/pushし、通常trafficを流さず候補revisionを作る。
-3. 既定 `run.app` と候補tag付きURLの外部直通拒否を確認する。固定tag `ci-candidate` を使い、`https://app.<domain>` に `X-Rangle-Candidate: ci-candidate` を付け、LB経由で候補のhealth・UI・APIと公開メディアURLを確認する。
-4. 候補へtrafficを100%切り替え、候補指定headerなしで `https://app.<domain>` をHTTPSで再確認する。
+2. imageをbuild/pushする。公開desired templateの `-generation-manager-url` がある場合は、既存managerのSA、IAM、固定args、config/catalog SHA path、pinned imageと両serviceの実traffic配分・復帰先revisionをread-onlyで確認する。manager欠落や不一致は、どちらのserviceも更新する前に失敗させる。
+3. remote構成では、同じimageでmanagerをno-traffic更新し、`ci-manager-candidate` tagへ新しいID token付きで `/health` を呼ぶ。HTTP 200・health本文・`K_REVISION`由来headerを照合してからmanagerを100%へ昇格し、実revisionのimage/argsとtrafficを再確認する。
+4. 公開アプリをno-traffic更新する。公開serviceの既定 `run.app` と候補tag付きURLの外部直通拒否を確認し、固定tag `ci-candidate` に対応するLB経路を検証する。`https://app.<domain>` に `X-Rangle-Candidate: ci-candidate` を付け、候補のhealth・UI・APIと公開メディアURLを確認する。
+5. 公開候補へtrafficを100%切り替え、候補指定headerなしで `https://app.<domain>` をHTTPSで再確認する。
 
-昇格時・昇格後の確認に失敗したら、以前のrevisionとtraffic比率へ戻す。正常終了・エラー時とも、その実行で作った候補タグの削除を試みる。
+manager昇格後の公開候補・公開後確認・receipt保存・tag cleanupに失敗した場合は、両serviceをそれぞれ以前の明示revision/traffic比率へ戻す。一方の復帰失敗でも他方を試みる。正常終了・エラー時とも、その実行で作った2つの候補tagだけを削除し、失敗したreleaseのreceiptファイルは残さない。DB・IAM・attempt counterはこの復帰処理の対象外である。
+
+managerへのID tokenはbuild後にWIFで発行し、audienceを `https://rangle-stg-generation-113704194486.asia-northeast1.run.app` に固定する。email claimを含め、deploy scriptへだけ渡す。scriptはexportを解除してcurlのheaderをstdinで渡し、argv・子process環境・ログ・receiptへtokenを含めない。deployerにはmanagerのinvokeとimage/traffic更新を許可するが、managerの独立したidentity検証は業務APIの利用を拒否する。CIはIAM・network・databaseを作成・変更しない。
+
+初回bootstrapでは、公開templateが従来の `-generation-config` を持ちremote flagを持たない間、managerの配備をskipして対応imageを公開できる。その後、操作担当者がwritersを凍結し、Terraform・[台帳移行](security-generation-migration.md)を完了してから同じworkflowをremote構成で再実行する。remote構成からlegacy modeへ自動fallbackしない。
 
 フィード先頭は通常catalogのクリップと、掲載済みの生成結果の両方を受け付ける。生成結果はtransport codec/manifestを持たない契約のまま、ID・revision・固定scene pathとmedia originを照合する。不完全なtransport情報や別jobのsceneは昇格を止める。この確認はHTTPの接続・metadata検査で、ブラウザ描画や実機性能の検証とは別。
 
@@ -29,9 +34,11 @@ TerraformがLB用の候補NEG/backend・header routeとingressを所有し、CI�
 
 ## release receipt
 
-正常な公開確認の後、sourceの40桁commit SHA、run ID/attempt、候補revision・immutable image digest、静的catalogファイルSHA、generation config SHA（設定時）、asset origin、元のtraffic配分と各復帰先revisionの実configを、小さいJSONへ記録する。`schema_version` は1、最大64KiBとする。
+正常な公開確認の後、sourceの40桁commit SHA、run ID/attempt、候補revision・immutable image digest、静的catalogファイルSHA、generation config SHA（legacy設定時）、manager URL（remote時）、asset origin、元のtraffic配分と各復帰先revisionの実configを、小さいJSONへ記録する。remote時は `generation_manager` にmanagerのcandidate/前版のrevision・image digest・catalog/config SHAと新旧traffic配分も記録する。`schema_version` は1、最大64KiBとする。
 
 前版は `services describe.spec.template` から取らない。Terraformによるruntime変更後、このdesired templateはまだ通常trafficを受けていない新configを指すことがある。配備前の `status.traffic` で実際に配信するrevisionを確定し、各revisionをread-onlyの `revisions describe` で取得して、`revision.spec.containers` の既知fieldだけを記録する。前版のimageがtagならその実値を残し、`image_digest` はnullとする。古いcatalog pathなどからSHAを確認できない場合もnullとし、desired templateの値で埋めない。
+
+managerの候補と復帰先は専用repositoryのdigest固定imageと既知のmanager argsを必須とし、不明な旧manager構成を推測して配備しない。
 
 候補のtarget argsとしてのみ配備前のdesired templateを使う。公開確認後、trafficが候補100%であることと、実際の候補revisionのimmutable image・argsが要求と一致することを照合してからreceiptを生成する。新targetのcatalog SHAは必須で、旧版の未知値とは区別する。sourceのremote origin、args全量、env、credentials、GCS input URI、巨大なservice JSONはreceiptやSummaryへ含めない。
 
@@ -45,7 +52,7 @@ TerraformがLB用の候補NEG/backend・header routeとingressを所有し、CI�
 
 guard・期限・候補no-traffic・実instance設定・元trafficの厳密復帰・自分の候補tagだけを消す契約は維持する。receiptの保存やartifact uploadにGCP/IAM設定を追加しない。artifact保持期限後の長期保存や、mainへのdigest昇格は別の判断であり、この記録だけで完了したとは扱わない。
 
-ローカルの `python3 scripts/deploy-stg.test.py` はgcloud/curl/date/sleepをstubに置き換え、Cloud APIへ接続しない。desired templateと実配信revisionが異なるケース、未知の旧版field、秘密の非export、候補/公開catalog SHA不一致、候補100%・image/args不一致、receipt/Summary書込失敗、partial promotionのrollbackを確認する。通常catalog・generated-firstの両方を維持する。100k性能や少量trafficの合否、実ブラウザ描画を測るテストではない。
+ローカルの `python3 scripts/deploy-stg.test.py` はgcloud/curl/date/sleepをstubに置き換え、Cloud APIへ接続しない。desired templateと実配信revisionの相違、秘密の非export、catalog/revision不一致、receipt失敗に加え、manager欠落・不正args/IAM、認証付きhealth、2serviceの昇格順・復帰、legacy bootstrapを確認する。通常catalog・generated-firstの両方を維持する。`delivery` jobの `migrate-generation-ledger.test.py` と `check-cloud-security.test.py` もfake transportを使い、実移行やlive cloud checkerは実行しない。`terraform` jobの `security_policy_regex_test.py` はcapturing groupの回帰をofflineで検出するが、CEL/API compilerの検証は代替しない。これらは実環境のIAM実効・移行完了・GPUや100k性能を証明しない。
 
 ## 初期設定
 
