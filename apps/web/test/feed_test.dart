@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:rangle_web/data/clip_repository.dart';
@@ -11,6 +12,39 @@ import 'package:rangle_web/widgets/preview_viewer.dart';
 import 'package:rangle_web/widgets/edge_seek_bar.dart';
 
 import 'support/fake_viewer.dart';
+
+class BufferedScene extends FakeViewer {
+  BufferedScene()
+    : super(
+        initialStatus: ViewerStatus.loading,
+        surfaceKey: 'real-scene-surface',
+      );
+  bool pendingFrame = false;
+  @override
+  ViewerValue get value {
+    final v = super.value;
+    return ViewerValue(
+      status: v.status,
+      position: v.position,
+      duration: v.duration,
+      playing: v.playing,
+      canPlay: v.canPlay,
+      muted: v.muted,
+      buffering: pendingFrame,
+    );
+  }
+
+  @override
+  Future<void> seek(Duration position) async {
+    pendingFrame = true;
+    await super.seek(position);
+  }
+
+  void acknowledgeFrame() {
+    pendingFrame = false;
+    notifyListeners();
+  }
+}
 
 class TestRepository implements ClipRepository {
   TestRepository(this.loadClips);
@@ -73,6 +107,73 @@ Future<void> pumpApp(
 }
 
 void main() {
+  testWidgets(
+    'explicit entry button also enters while the pointer stays down',
+    (tester) async {
+      await pumpApp(
+        tester,
+        repository: const DemoClipRepository(
+          sceneUrl: 'https://example.invalid/scene.json',
+        ),
+        viewerFactory: (_) => FakeViewer(),
+        sceneFactory: (_) => FakeViewer(),
+      );
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.text('自由視点で見る')),
+      );
+      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pumpAndSettle();
+      expect(find.text('動画に戻る'), findsOneWidget);
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(find.text('動画に戻る'), findsOneWidget);
+    },
+  );
+  testWidgets('wheel momentum advances one clip per scroll gesture', (
+    tester,
+  ) async {
+    await pumpApp(tester);
+    final point = tester.getCenter(find.byKey(const Key('feed-player')));
+    Future<void> wheel(double delta) async {
+      await tester.sendEventToBinding(
+        PointerScrollEvent(
+          position: point,
+          scrollDelta: Offset(0, delta),
+          kind: PointerDeviceKind.mouse,
+        ),
+      );
+      await tester.pump();
+    }
+
+    await wheel(100);
+    await tester.pump(const Duration(milliseconds: 80));
+    final page = tester
+        .widget<PageView>(find.byKey(const Key('highlight-feed')))
+        .controller!
+        .page!;
+    expect(page, greaterThan(0));
+    expect(page, lessThan(1));
+    for (var i = 0; i < 12; i++) {
+      await wheel(100);
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pumpAndSettle();
+    expect(
+      find.text('02 / 03'),
+      findsOneWidget,
+      reason:
+          'Wheel gesture settled at page ${tester.widget<PageView>(find.byKey(const Key('highlight-feed'))).controller!.page}',
+    );
+    await tester.pump(const Duration(milliseconds: 260));
+    await wheel(9000);
+    await tester.pumpAndSettle();
+    expect(find.text('03 / 03'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 260));
+    await wheel(-120);
+    await tester.pumpAndSettle();
+    expect(find.text('02 / 03'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
   testWidgets('pending media has disabled playback and free-view controls', (
     tester,
   ) async {
@@ -87,13 +188,9 @@ void main() {
     expect(find.text('映像を準備しています'), findsOneWidget);
     expect(find.text('バスケットボール 01'), findsOneWidget);
     expect(created, 0);
-    expect(find.byIcon(Icons.play_arrow), findsNothing);
+    expect(tester.widget<IconButton>(iconButton('再生')).onPressed, isNull);
     expect(find.byType(EdgeSeekBar), findsNothing);
-    final freeView = find.ancestor(
-      of: find.text('自由視点は準備中'),
-      matching: find.byType(FilledButton),
-    );
-    expect(tester.widget<FilledButton>(freeView).onPressed, isNull);
+    expect(find.text('自由視点は準備中'), findsNothing);
   });
 
   testWidgets('buttons, swipe and keyboard navigate the finite feed', (
@@ -179,7 +276,7 @@ void main() {
         viewerFactory: (_) => FakeViewer(),
         sceneFactory: (_) => scene,
       );
-      await tester.tap(iconButton('自由視点で見る'));
+      await tester.tap(find.text('自由視点で見る'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('real-scene-surface')), findsOneWidget);
       expect(tester.takeException(), isNull);
@@ -189,7 +286,7 @@ void main() {
       expect(find.textContaining('CC BY 4.0'), findsOneWidget);
       await tester.tap(iconButton('閉じる'));
       await tester.pumpAndSettle();
-      await tester.tap(iconButton('動画に戻る'));
+      await tester.tap(find.text('動画に戻る'));
       await tester.pumpAndSettle();
       expect(scene.paused, isTrue);
       expect(scene.disposed, isFalse);
@@ -275,7 +372,7 @@ void main() {
     await tester.tap(find.byKey(const Key('video-playback-surface')));
     await tester.pump();
     expect(viewers.single.value.playing, isTrue);
-    expect(find.byIcon(Icons.pause), findsNothing);
+    expect(find.byIcon(Icons.pause), findsOneWidget);
     await tester.tap(iconButton('ミュート'));
     await tester.pump();
     expect(viewers.single.value.muted, isTrue);
@@ -399,207 +496,71 @@ void main() {
   );
 
   testWidgets(
-    'legacy free view seeks without playback and releases on return or navigation',
+    'charged hold waits for the actual frame; return is immediate and navigation locks',
     (tester) async {
-      final videos = <FakeViewer>[];
-      final scenes = <FakeViewer>[];
+      final video = FakeViewer(), scene = BufferedScene();
       await pumpApp(
         tester,
         repository: const DemoClipRepository(
           sceneUrl: 'https://example.invalid/scene.json',
         ),
-        viewerFactory: (_) {
-          final viewer = FakeViewer();
-          videos.add(viewer);
-          return viewer;
-        },
-        sceneFactory: (_) {
-          final viewer = FakeViewer(
-            surfaceKey: 'real-scene-surface',
-            canPlay: false,
-          );
-          scenes.add(viewer);
-          return viewer;
-        },
+        viewerFactory: (_) => video,
+        sceneFactory: (_) => scene,
       );
-      await tester.tap(find.text('自由視点で見る'));
-      await tester.pumpAndSettle();
-      expect(videos.single.disposed, isTrue);
-      expect(find.byKey(const Key('real-video-surface')), findsNothing);
-      expect(find.byKey(const Key('real-scene-surface')), findsOneWidget);
-      expect(iconButton('再生'), findsNothing);
+      await video.seek(const Duration(seconds: 7));
+      await video.togglePlayback();
+      await tester.pump();
+      final gesture = await tester.startGesture(
+        tester.getCenter(find.byKey(const Key('immersive-hold-area'))),
+      );
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 1300));
+      await gesture.up();
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.text('動画に戻る'), findsNothing);
+      expect(video.value.playing, isFalse);
       expect(
-        tester
-            .widget<PageView>(find.byKey(const Key('highlight-feed')))
-            .physics,
-        isA<NeverScrollableScrollPhysics>(),
+        tester.widget<IconButton>(iconButton('次のハイライト')).onPressed,
+        isNull,
       );
-      final scrubber = tester.getRect(find.byKey(const Key('media-scrubber')));
-      await tester.dragFrom(
-        Offset(scrubber.left + 18, scrubber.center.dy),
-        Offset(scrubber.width / 2, 0),
+      await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
+      expect(find.text('01 / 03'), findsOneWidget);
+      scene.becomeReady();
+      await tester.pump();
+      await tester.pump();
+      expect(scene.lastSeek, const Duration(seconds: 7));
+      await tester.pump(const Duration(seconds: 2));
+      expect(find.text('動画に戻る'), findsNothing);
+      scene.acknowledgeFrame();
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 240));
+      expect(find.text('動画に戻る'), findsNothing);
+      await tester.pump(const Duration(milliseconds: 3000));
+      await tester.pump();
+      expect(find.text('動画に戻る'), findsOneWidget);
+      expect(scene.value.playing, isTrue);
+      expect(video.disposed, isFalse);
+      await tester.drag(
+        find.byKey(const Key('highlight-feed')),
+        const Offset(0, -500),
       );
       await tester.pump();
-      expect(scenes.single.lastSeek, isNotNull);
-      expect(
-        tester.widget<EdgeSeekBar>(find.byType(EdgeSeekBar)).onSeek,
-        isNotNull,
-      );
+      expect(find.text('01 / 03'), findsOneWidget);
+      await scene.seek(const Duration(seconds: 9));
       await tester.tap(find.text('動画に戻る'));
-      await tester.pumpAndSettle();
-      expect(scenes.single.disposed, isFalse);
-      expect(scenes.single.paused, isTrue);
-      expect(videos, hasLength(2));
-      await tester.tap(find.text('自由視点で見る'));
-      await tester.pumpAndSettle();
-      expect(scenes, hasLength(1));
-      expect(scenes.single.paused, isFalse);
+      await tester.pump();
+      expect(find.text('動画に戻る'), findsNothing);
+      expect(video.lastSeek, const Duration(seconds: 9));
+      expect(scene.paused, isTrue);
+      expect(scene.disposed, isFalse);
       await tester.tap(iconButton('次のハイライト'));
       await tester.pumpAndSettle();
-      expect(scenes.last.disposed, isTrue);
-      expect(find.byKey(const Key('real-scene-surface')), findsNothing);
+      expect(scene.disposed, isTrue);
     },
   );
 
   testWidgets(
-    'free-view failure retries with a new viewer and keeps phone layout usable',
-    (tester) async {
-      final scenes = <FakeViewer>[];
-      await pumpApp(
-        tester,
-        size: const Size(844, 390),
-        repository: const DemoClipRepository(
-          sceneUrl: 'https://example.invalid/scene.json',
-        ),
-        viewerFactory: (_) => FakeViewer(),
-        sceneFactory: (_) {
-          final viewer = FakeViewer(surfaceKey: 'real-scene-surface');
-          scenes.add(viewer);
-          return viewer;
-        },
-      );
-      await tester.tap(iconButton('自由視点で見る'));
-      await tester.pumpAndSettle();
-      scenes.single.fail();
-      await tester.pumpAndSettle();
-      expect(find.textContaining('自由視点を表示できませんでした'), findsOneWidget);
-      expect(find.byKey(const Key('real-video-surface')), findsOneWidget);
-      await tester.tap(iconButton('自由視点を再試行'));
-      await tester.pumpAndSettle();
-      expect(scenes.first.disposed, isTrue);
-      expect(scenes, hasLength(2));
-      expect(tester.takeException(), isNull);
-    },
-  );
-
-  testWidgets(
-    'cancel disposes pending GS while completed GS is retained for reentry',
-    (tester) async {
-      final videos = <FakeViewer>[];
-      final scenes = <FakeViewer>[];
-      await pumpApp(
-        tester,
-        repository: const DemoClipRepository(
-          sceneUrl: 'https://example.invalid/scene.json',
-        ),
-        viewerFactory: (_) {
-          final viewer = FakeViewer();
-          videos.add(viewer);
-          return viewer;
-        },
-        sceneFactory: (_) {
-          final viewer = FakeViewer(
-            initialStatus: ViewerStatus.loading,
-            canPlay: false,
-            surfaceKey: 'real-scene-surface',
-          );
-          scenes.add(viewer);
-          return viewer;
-        },
-      );
-      await tester.tap(find.byKey(const Key('video-playback-surface')));
-      await tester.pump();
-      await tester.tap(find.text('自由視点で見る'));
-      await tester.pumpAndSettle();
-      expect(videos, hasLength(1));
-      expect(videos.single.disposed, isFalse);
-      expect(videos.single.value.playing, isTrue);
-      expect(scenes.single.paused, isTrue);
-      final sceneWidget = tester.widget<PreviewViewer>(
-        find.byWidgetPredicate(
-          (widget) => widget is PreviewViewer && widget.freeView,
-        ),
-      );
-      expect(sceneWidget.visible, isFalse);
-      await tester.tap(find.byKey(const Key('video-playback-surface')));
-      await tester.pump();
-      expect(videos.single.value.playing, isFalse);
-      await tester.tap(find.byKey(const Key('media-scrubber')).hitTestable());
-      await tester.pump();
-      expect(videos.single.lastSeek, isNotNull);
-
-      await tester.tap(find.text('自由視点の準備をキャンセル'));
-      // Queue a late ready callback before the cancelled widget is removed.
-      scenes.single.becomeReady();
-      await tester.pumpAndSettle();
-      expect(videos.single.disposed, isFalse);
-      expect(scenes.single.disposed, isTrue);
-      expect(scenes.single.paused, isTrue);
-      expect(find.byKey(const Key('real-video-surface')), findsOneWidget);
-      expect(find.byKey(const Key('real-scene-surface')), findsNothing);
-      await tester.tap(find.text('自由視点で見る'));
-      await tester.pumpAndSettle();
-      expect(scenes, hasLength(2));
-      expect(videos.single.disposed, isFalse);
-      expect(scenes.last.paused, isTrue);
-      scenes.last.becomeReady();
-      await tester.pumpAndSettle();
-      expect(videos.single.disposed, isTrue);
-      expect(scenes.last.paused, isFalse);
-      await tester.tap(find.text('動画に戻る'));
-      await tester.pumpAndSettle();
-      expect(scenes.last.paused, isTrue);
-      expect(scenes.last.disposed, isFalse);
-      expect(videos, hasLength(2));
-      await tester.tap(find.text('自由視点で見る'));
-      await tester.pumpAndSettle();
-      expect(scenes, hasLength(2));
-      expect(scenes.last.paused, isFalse);
-      await tester.tap(iconButton('次のハイライト'));
-      await tester.pumpAndSettle();
-      expect(scenes.last.disposed, isTrue);
-    },
-  );
-
-  testWidgets('navigation while GS prepares releases the pending scene', (
-    tester,
-  ) async {
-    final video = FakeViewer();
-    final scene = FakeViewer(
-      initialStatus: ViewerStatus.loading,
-      canPlay: false,
-      surfaceKey: 'real-scene-surface',
-    );
-    await pumpApp(
-      tester,
-      repository: const DemoClipRepository(
-        sceneUrl: 'https://example.invalid/scene.json',
-      ),
-      viewerFactory: (_) => video,
-      sceneFactory: (_) => scene,
-    );
-    await tester.tap(find.text('自由視点で見る'));
-    await tester.pumpAndSettle();
-    expect(video.disposed, isFalse);
-    expect(scene.paused, isTrue);
-    await tester.tap(iconButton('次のハイライト'));
-    await tester.pumpAndSettle();
-    expect(video.disposed, isTrue);
-    expect(scene.disposed, isTrue);
-  });
-
-  testWidgets(
-    'failed GS preparation retains video and retry replaces the scene',
+    'short tap and early release do not enter; cancelled scene cannot complete later',
     (tester) async {
       final video = FakeViewer();
       final scenes = <FakeViewer>[];
@@ -610,35 +571,87 @@ void main() {
         ),
         viewerFactory: (_) => video,
         sceneFactory: (_) {
-          final scene = FakeViewer(
-            initialStatus: ViewerStatus.loading,
-            canPlay: false,
-            surfaceKey: 'real-scene-surface',
-          );
-          scenes.add(scene);
-          return scene;
+          final v = FakeViewer(initialStatus: ViewerStatus.loading);
+          scenes.add(v);
+          return v;
+        },
+      );
+      final area = find.byKey(const Key('immersive-hold-area'));
+      await tester.tap(area);
+      await tester.pump();
+      expect(scenes, isEmpty);
+      final hold = await tester.startGesture(tester.getCenter(area));
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump(const Duration(milliseconds: 200));
+      await hold.up();
+      scenes.single.becomeReady();
+      await tester.pumpAndSettle();
+      expect(scenes.single.disposed, isTrue);
+      expect(video.value.playing, isTrue);
+      expect(find.text('動画に戻る'), findsNothing);
+      expect(
+        tester.widget<IconButton>(iconButton('次のハイライト')).onPressed,
+        isNotNull,
+      );
+    },
+  );
+
+  testWidgets(
+    'failed preparation restores video and retry replaces the scene',
+    (tester) async {
+      final video = FakeViewer();
+      final scenes = <FakeViewer>[];
+      await pumpApp(
+        tester,
+        repository: const DemoClipRepository(
+          sceneUrl: 'https://example.invalid/scene.json',
+        ),
+        viewerFactory: (_) => video,
+        sceneFactory: (_) {
+          final v = FakeViewer(initialStatus: ViewerStatus.loading);
+          scenes.add(v);
+          return v;
         },
       );
       await tester.tap(find.text('自由視点で見る'));
-      await tester.pumpAndSettle();
+      await tester.pump();
       scenes.single.fail();
       await tester.pumpAndSettle();
       expect(scenes.single.disposed, isTrue);
       expect(video.disposed, isFalse);
       expect(find.textContaining('自由視点を表示できませんでした'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('video-playback-surface')));
-      await tester.pump();
-      expect(video.value.playing, isTrue);
       await tester.tap(find.text('自由視点を再試行'));
-      await tester.pumpAndSettle();
+      await tester.pump();
       expect(scenes, hasLength(2));
-      expect(video.disposed, isFalse);
       scenes.last.becomeReady();
       await tester.pumpAndSettle();
-      expect(video.disposed, isTrue);
-      expect(scenes.last.paused, isFalse);
+      expect(find.text('動画に戻る'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('explicit cancel releases pending resources and unlocks feed', (
+    tester,
+  ) async {
+    final scene = FakeViewer(initialStatus: ViewerStatus.loading);
+    await pumpApp(
+      tester,
+      repository: const DemoClipRepository(
+        sceneUrl: 'https://example.invalid/scene.json',
+      ),
+      viewerFactory: (_) => FakeViewer(),
+      sceneFactory: (_) => scene,
+    );
+    await tester.tap(find.text('自由視点で見る'));
+    await tester.pump();
+    await tester.tap(find.text('キャンセル'));
+    await tester.pumpAndSettle();
+    expect(scene.disposed, isTrue);
+    expect(
+      tester.widget<IconButton>(iconButton('次のハイライト')).onPressed,
+      isNotNull,
+    );
+  });
 
   testWidgets(
     'free view keeps drawing on iframe focus but pauses when hidden',
