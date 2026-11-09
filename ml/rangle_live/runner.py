@@ -4,9 +4,10 @@ import json
 import threading
 import time
 from datetime import datetime, timezone
+from pathlib import Path
 
-from .model import IncrementalModel, bootstrap_cuda
-from .output import Publisher, json_bytes
+from .model import IncrementalModel, bootstrap_cuda, warmup_cuda
+from .output import Publisher, atomic_index, json_bytes
 from .source import Rig, VideoDecoder, produce
 from .window import LatestWindow
 
@@ -39,6 +40,8 @@ def run(args):
             "Source duration must include a complete window and declared seed-prior time"
         )
     software = bootstrap_cuda(args.cuda_extension)
+    if getattr(args, "cloud_warmup", False):
+        warmup_cuda()
     decoder = VideoDecoder(rig, args.decode_workers)
     origin, origin_utc = time.monotonic(), datetime.now(timezone.utc)
     source = {
@@ -57,7 +60,28 @@ def run(args):
     bus, stop = LatestWindow(), threading.Event()
     deadline = process_started + args.max_runtime_seconds
 
+    last_status_write = float("-inf")
+
     def observe(status, force=False):
+        nonlocal last_status_write
+        if getattr(args, "status_path", None) and (
+            force or time.monotonic() - last_status_write >= 1
+        ):
+            atomic_index(
+                Path(args.status_path),
+                json_bytes(
+                    {
+                        "version": 1,
+                        "capture_origin_monotonic": origin,
+                        "capture_started_at": origin_utc.isoformat().replace(
+                            "+00:00", "Z"
+                        ),
+                        "startup_seconds": origin - process_started,
+                        **status,
+                    }
+                ),
+            )
+            last_status_write = time.monotonic()
         publisher.observe(status, force)
         if force or status["frames_received"] % 50 == 0:
             log("source_progress", **status)

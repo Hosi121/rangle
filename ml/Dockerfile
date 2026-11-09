@@ -60,6 +60,28 @@ PY
 WORKDIR /tmp
 USER 65532:65532
 
+FROM golang:1.27.3-bookworm AS live-validator
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY internal/ ./internal/
+COPY cmd/rangle-live-check/ ./cmd/rangle-live-check/
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /rangle-live-check ./cmd/rangle-live-check
+
+FROM dependencies AS live-trainer
+USER root
+COPY ml/rangle_live/requirements.lock /tmp/live-requirements.lock
+RUN python -m pip install --no-deps --require-hashes --only-binary=:all: -r /tmp/live-requirements.lock \
+    && python -m pip check && rm /tmp/live-requirements.lock
+COPY --from=live-validator /rangle-live-check /usr/local/bin/rangle-live-check
+COPY --chown=65532:65532 ml/rangle_training/ /opt/rangle/ml/rangle_training/
+COPY --chown=65532:65532 ml/rangle_preprocessing/ /opt/rangle/ml/rangle_preprocessing/
+COPY --chown=65532:65532 ml/rangle_live/ /opt/rangle/ml/rangle_live/
+COPY --chown=65532:65532 scripts/publish-live.py scripts/publish-catalog.py /opt/rangle/scripts/
+USER 65532:65532
+ENTRYPOINT ["python", "-m", "rangle_live.cloud"]
+
+# Keep the existing default/final image and offline entrypoint backward compatible.
 FROM dependencies AS trainer
 COPY --chown=65532:65532 ml/rangle_training/ /opt/rangle/ml/rangle_training/
 ENTRYPOINT ["python", "-m", "rangle_training.train"]

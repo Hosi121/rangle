@@ -55,7 +55,7 @@ class Publisher:
         clock=time.monotonic,
     ):
         if (
-            not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", session_id)
+            not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", session_id)
             or not title
             or len(title) > 256
         ):
