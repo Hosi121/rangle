@@ -24,7 +24,7 @@ class GenerationFailure implements Exception {
 
 String _mode(Object? value) {
   if (value == null || value == '' || value == 'static') return 'static';
-  if (value == 'dynamic') return 'dynamic';
+  if (value == 'dynamic' || value == 'live') return value as String;
   throw const FormatException('Unsupported generation mode.');
 }
 
@@ -39,7 +39,12 @@ class GenerationPreset {
       mode = _mode(data['mode']);
   final String id, title, sport, description, source, license, mode;
   bool get isDynamic => mode == 'dynamic';
-  String get formatLabel => isDynamic ? '動く4DGS（複数時刻）' : '静的な3DGS（1時刻）';
+  bool get isLive => mode == 'live';
+  String get formatLabel => isLive
+      ? 'LIVEの自由視点（順次更新）'
+      : isDynamic
+      ? '動く4DGS（複数時刻）'
+      : '静的な3DGS（1時刻）';
 }
 
 class GenerationCatalog {
@@ -64,15 +69,21 @@ class GenerationJob {
   final DateTime createdAt;
   final Uri? viewerUrl;
   final bool published;
+  bool get isLive => mode == 'live';
 
   bool get active =>
       !const ['succeeded', 'failed', 'cancelled'].contains(state);
   String get stateLabel => switch (state) {
-    'submitting' => '生成を受け付けています',
-    'queued' => '順番を待っています',
-    'running' => mode == 'dynamic' ? '4DGSを生成しています' : '3DGSを生成しています',
+    'submitting' => isLive ? 'LIVEの開始を受け付けています' : '生成を受け付けています',
+    'queued' => isLive ? 'LIVE用GPUの準備を待っています' : '順番を待っています',
+    'running' =>
+      isLive
+          ? 'LIVEの生成ジョブが稼働中です'
+          : mode == 'dynamic'
+          ? '4DGSを生成しています'
+          : '3DGSを生成しています',
     'cancelling' => '中止しています',
-    'succeeded' => '生成が完了しました',
+    'succeeded' => isLive ? 'LIVEの生成が終了しました' : '生成が完了しました',
     'failed' => '生成に失敗しました',
     'cancelled' => '生成を中止しました',
     _ => '状態を確認してください',
@@ -190,24 +201,25 @@ class GenerationApi {
   }
 
   GenerationJob _job(Map<String, dynamic> data) {
+    final row = data['job'] as Map<String, dynamic>;
+    final live = _mode(row['mode']) == 'live';
     Uri? viewer;
     if (data['viewer_url'] is String) {
       final uri = Uri.parse(data['viewer_url'] as String);
+      final expected = live ? row['id'] : 'generated-${row['id']}';
       if (uri.hasScheme ||
           uri.hasAuthority ||
           uri.hasFragment ||
           uri.path != '/demo/' ||
-          uri.queryParameters.length != 1 ||
-          !RegExp(r'^generated-[a-f0-9]{32}$')
-              .hasMatch(uri.queryParameters['clip'] ?? '')) {
+          uri.queryParametersAll.length != 1 ||
+          uri.queryParametersAll.values.single.length != 1 ||
+          !RegExp(r'^[a-f0-9]{32}$').hasMatch(row['id'] as String) ||
+          uri.queryParameters[live ? 'live' : 'clip'] != expected) {
         throw const GenerationFailure('generation_unavailable');
       }
       viewer = uri;
     }
-    return GenerationJob.fromJson(
-      data['job'] as Map<String, dynamic>,
-      viewerUrl: viewer,
-    );
+    return GenerationJob.fromJson(row, viewerUrl: viewer);
   }
 
   void cancelPending() {

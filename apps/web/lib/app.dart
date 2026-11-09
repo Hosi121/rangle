@@ -15,7 +15,6 @@ import 'generation/generation_screen.dart';
 import 'generation/open_result.dart';
 import 'sharing/share_clip.dart';
 import 'live/live_api.dart';
-import 'live/live_screen.dart';
 import 'widgets/search_dialog.dart';
 import 'models/clip.dart';
 import 'viewer/viewer_adapter.dart';
@@ -60,7 +59,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   String? _clipId;
   AccountController? _account;
   String _query = '', _tag = '';
-  bool _generationOpen = false, _liveOpen = false;
+  bool _generationOpen = false;
 
   @override
   void initState() {
@@ -83,22 +82,13 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
     }
   }
 
-  Future<void> _openLive([String? id]) async {
-    if (_liveOpen || _generationOpen) return;
-    setState(() => _liveOpen = true);
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (context) => LiveScreen(
-          api: widget.live,
-          initialId: id,
-          viewerFactory: widget.liveFactory,
-        ),
-      ),
-    );
-    if (mounted) setState(() => _liveOpen = false);
-  }
+  Future<void> _openLive([String? id]) =>
+      _openGeneration(liveViewer: true, liveId: id);
 
-  Future<void> _openGeneration() async {
+  Future<void> _openGeneration({
+    bool liveViewer = false,
+    String? liveId,
+  }) async {
     if (_generationOpen) return;
     var publicationChanged = false;
     setState(() => _generationOpen = true);
@@ -107,6 +97,10 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
         builder: (context) => GenerationScreen(
           account: _account,
           api: widget.generation,
+          live: widget.live,
+          liveFactory: widget.liveFactory,
+          liveViewer: liveViewer,
+          initialLiveId: liveId,
           onPublicationChanged: () => publicationChanged = true,
           onOpenResult: (uri) {
             if (!openGeneratedViewer(uri)) Navigator.pop(context, uri);
@@ -193,7 +187,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => _generationOpen || _liveOpen
+  Widget build(BuildContext context) => _generationOpen
       ? const SizedBox.expand()
       : Scaffold(
           backgroundColor: Colors.black,

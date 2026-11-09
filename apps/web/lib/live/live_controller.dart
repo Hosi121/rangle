@@ -13,6 +13,7 @@ class LiveController extends ChangeNotifier {
   LiveSession? current;
   bool reconnecting = false, loading = true;
   bool missing = false;
+  bool _waitingForSession = false;
   bool _visible = true, _disposed = false, _busy = false;
   int _epoch = 0;
   String? _etag;
@@ -82,13 +83,24 @@ class LiveController extends ChangeNotifier {
         notifyListeners();
         if (epoch != _epoch) {
           unawaited(refresh());
-        } else if (!missing && current?.terminal != true) {
+        } else if ((!missing || _waitingForSession) &&
+            current?.terminal != true) {
           _timer = Timer(
             const Duration(seconds: 1),
             () => unawaited(refresh()),
           );
         }
       }
+    }
+  }
+
+  /// Only an authenticated active job can explain a not-yet-created session.
+  void waitForSession(bool value) {
+    if (_waitingForSession == value || _disposed) return;
+    _waitingForSession = value;
+    if (missing) {
+      _timer?.cancel();
+      if (value) unawaited(refresh());
     }
   }
 
