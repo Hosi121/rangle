@@ -1,52 +1,52 @@
-# Temporal training comparison profiles
+# Temporal training comparison
 
-Two optional profiles test specific reconstruction hypotheses. They are candidates for GPU comparison; their implementation and CPU checks do not establish a visual improvement. The default remains `--quality-profile baseline`.
+On the fixed VRU Basketball `gz` input, `local-lifetime` recorded the highest held-out mean PSNR/SSIM in one run per profile. Its packed PSNR was 27.814041 dB, versus baseline 27.618057 dB: a 0.195984 dB difference. `motion-prior` reduced those mean metrics. These results support selecting `local-lifetime` for this input; preset adoption and deployment are separate changes.
 
-The existing VRU Basketball `gz` baseline used input SHA256 `f735fbbdfd9b17846941d7fdede7a2617999fc77a06cb0f6dc906000a7e55c53`, 20 synchronized times at 25 fps, 34 cameras, 480×270 RGB, seed 0, 30 training cameras, four held-out cameras, and 12,000 iterations. The observed Tokyo T4 run reported packed mean PSNR 27.618 dB, SSIM 0.91133, reversed-time PSNR 22.177 dB, 259,797 stored primitives, and 159.86 seconds for the training loop. These are measurements of that run, not a guarantee for another dataset or machine. The supplied initial geometry may incorporate held-out cameras; held-out RGB pixels are excluded from optimization.
+## Measured conditions and results
 
-| Profile | Hypothesis | Deliberate change |
+All three runs used the same input SHA256 `f735fbbdfd9b17846941d7fdede7a2617999fc77a06cb0f6dc906000a7e55c53`, 20 times at 25 fps, 34 cameras, 480×270 RGB, 99,330 initial primitives, seed 0, and 12,000 iterations on a Tokyo Tesla T4. Torch was 2.6.0+cu124 and gsplat 1.5.3. The same 30 cameras supplied training pixels; held-out cameras `[0,10,20,30]` were evaluated at every time, giving the same 80 images. Scores below are full-image means from the decoded export, including its per-time RGBA8 alpha evaluation.
+
+| Profile | Packed PSNR (dB) | Packed SSIM | Final Gaussians | Model bytes | Training loop (s) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `baseline` | 27.618057 | 0.911333 | 259,797 | 12,106,161 | 159.863 |
+| `motion-prior` | 27.420715 | 0.910226 | 261,168 | 12,058,991 | 173.735 |
+| `local-lifetime` | 27.814041 | 0.915371 | 250,637 | 11,626,506 | 152.087 |
+
+The floating-model PSNRs were 27.625994, 27.427700, and 27.822283 dB respectively, preserving the same ordering. Reversed-time packed PSNRs were 22.177066, 22.114258, and 22.029459 dB; these reuse each render against the same camera's target at the reversed time. This is a full-frame time-correspondence diagnostic, without a player ROI.
+
+Model bytes include export compression. Baseline used the previous Z1 encoder; the comparison runs used the smallest lossless strategy. The 3.962% baseline-to-`local-lifetime` size difference also includes changed training and primitive count. The isolated **same-model** compression result is only 12,106,161 → 11,967,872 bytes, or 1.142%; see [the compression comparison](temporal-compression-comparison.md).
+
+Training-loop time excludes setup, evaluation, provisioning, and publication. The motion-prior activity setup took 1.062 s. Evaluation took 5.883 s for baseline, 6.036 s for motion-prior, and 23.826 s for local-lifetime; the last run included 18.100 s of optional precision-comparison work. The lower local-lifetime loop time is not an end-to-end job speedup measurement.
+
+Each profile has **one trial**, with no repeated-seed confidence estimate. Full-image averages can hide moving-player ghosts or local background drift; these runs do not establish that either defect is resolved. Held-out pixels are excluded from optimization, but supplied initial geometry/calibration may incorporate held-out source cameras. The result does not establish quality on another sequence or sport.
+
+## What the profiles change
+
+| Profile | Hypothesis | Change from baseline |
 | --- | --- | --- |
-| `baseline` | Reference for both comparisons | Existing initialization, RNG draws, loss, learning rates, primitive budgets, and evaluation |
-| `motion-prior` | Free velocities can introduce drift in static background | Add a velocity penalty where training images show little temporal variation |
-| `local-lifetime` | Broad lifetime support can leave moving-player ghosts | Distribute initial centre times over the interval and initialize sigma to one quarter of its duration |
+| `baseline` | Reference | Existing initialization, RNG draws, loss, learning rates, and budgets |
+| `motion-prior` | Free velocities can cause background drift | Add a velocity penalty at locations with little training-image temporal variation |
+| `local-lifetime` | Broad lifetime support can leave motion ghosts | Distribute initial centre times across the interval and initialize sigma to one quarter of its duration |
 
-Both candidates retain the same number of seed primitives, spatial seed positions, RGB, initial spatial scales, peak opacity, zero velocity, iteration limit, and evaluation images. No points are removed, duplicated at initialization, or additionally quantized. `local-lifetime` changes which subset initially contributes strongly at each time, so it is a different initialization despite the equal primitive count. Its centre times use the existing shuffled point order, without extra RNG draws. Each timestamp has nearby centres with approximately peak support, including interval endpoints.
+The candidates retain the same initial primitive count, spatial seed positions, RGB, spatial scales, peak opacity, zero velocity, iteration limit, and evaluation images. No initialization points are removed or duplicated. Local-lifetime uses the existing shuffled point order without additional RNG draws. It changes the subset strongly contributing at each time; endpoints still have nearby centres with approximately peak support.
 
-## Motion prior
-
-The worker computes per-pixel RGB variance across the input times separately for each **training** camera, with float32 Welford accumulation. Activity is `clip(sqrt(mean(RGB variance)) / 0.05, 0, 1)` for RGB in `[0,1]`. The threshold is fixed; it is not fitted using held-out images. Shadows, lighting changes, occlusion, and calibration errors can also produce activity, so this is not a foreground mask or optical-flow estimate.
-
-At each sampled training camera/time, the current Gaussian centres are projected into that camera. Bilinear activity samples provide a fixed detached weight `(1 - activity)^2`; offscreen and behind-camera primitives receive zero weight. The extra loss is:
+Motion-prior computes float32 Welford RGB variance across times for each **training camera only**. Its fixed activity map is `clip(sqrt(mean(RGB variance)) / 0.05, 0, 1)`, for RGB in `[0,1]`. Current centres are projected into the sampled camera; detached bilinear activity samples weight this added loss:
 
 ```text
-0.01 * mean(weight * ||velocity * interval_duration||^2)
+0.01 * mean((1 - activity)^2 * ||velocity * interval_duration||^2)
 ```
 
-Only velocity receives this penalty's gradient. Camera projection and activity are detached, preventing the regularizer from moving primitives toward active image locations. The activity is sampled again after topology changes, so no separate primitive labels can lose alignment during densification or pruning.
+Offscreen and behind-camera primitives receive zero weight. Only velocity receives the penalty's gradient. Re-sampling after topology changes avoids separate primitive labels losing alignment. Lighting, shadows, and occlusion can also produce activity; the map is an appearance heuristic, without foreground or flow supervision. This trial's lower mean scores do not support an overall quality benefit from this prior.
 
-The expected tradeoff is stronger background stability versus the risk of suppressing motion where image variation is weak or correspondence is inaccurate. This must be judged from held-out results and the first/middle/last images.
+## Reproduction and precision evaluation
 
-## Reproduction and acceptance
-
-For the already approved input, pass either candidate flag to the same worker invocation used for baseline:
+The compared candidate invocations added these flags to the same bounded worker job:
 
 ```text
 --mode dynamic --steps 12000 --quality-profile motion-prior
---mode dynamic --steps 12000 --quality-profile local-lifetime
+--mode dynamic --steps 12000 --quality-profile local-lifetime --evaluate-compression
 ```
 
-Non-baseline profiles are rejected for static training. Omitting the flag preserves baseline behavior. The backend's trusted preset chooses the profile; it is not a public free-form input.
+The worker CLI still defaults to `baseline`; non-baseline profiles are rejected for static training. Trusted presets choose the profile. Metrics retain `quality_profile`, exact configuration, setup time, train/evaluation splits, model bytes, and the existing per-image float/export results. CPU checks for initialization/RNG compatibility, temporal support, and training-only prior gradients are described in [dynamic-gs-training.md](dynamic-gs-training.md).
 
-Metrics include `quality_profile`, the exact profile configuration, activity camera indices, initial count multiplier, and `quality_setup_seconds`. Compare setup plus training/evaluation time, stored primitive count, raw/export bytes, mean and per-image float/export PSNR and SSIM, matched/reversed-time PSNR, endpoint motion, and diagnostic images. Activity setup time is reported separately rather than hidden from the cost comparison. Torch peak allocation includes the activity maps in the training allocation baseline.
-
-The two GPU comparisons use the same input checksum, 480×270 resolution, seed 0, split, 20 times, and 12,000 iterations. Run one GPU at a time within the existing 30-minute job and shared attempt/cost limits. A profile is not adopted merely because its mean PSNR rises: inspect moving players for ghosts and static background for drift, and report any size/time regressions. The integrator records actual GPU results and chooses whether either candidate is useful.
-
-CPU checks verify baseline initialization/RNG compatibility, equal primitive counts and temporal support, training-only activity maps, and finite velocity-only regularizer gradients. Run the NumPy contract suite and the explicit complete ML suite described in [dynamic-gs-training.md](dynamic-gs-training.md). No reconstruction-quality claim follows from those checks.
-
-## Optional compression evaluation
-
-`--evaluate-compression` adds two inference-only comparisons to a dynamic job's existing held-out evaluation: all 12 float fields round-tripped through FP16, and FP32 positions with the other nine float fields round-tripped through FP16. The candidates retain the same RGS1 row format, ordering, RGB8/quaternion8 bytes, and per-time RGBA8 alpha evaluation. This estimates the effect and compressed size of lower-precision values; it does not introduce or adopt a new storage format.
-
-The published `model.rgs` always contains the original wire representation. Candidate model bytes are never written or uploaded. `compression_evaluation` reports each candidate's compressed bytes, per-image and mean GT PSNR/SSIM, mean pixel absolute difference and maximum difference from the original wire render, and evaluation seconds. FP16 overflow or invalid scales/lifetimes reject a candidate explicitly, without modifying the reference model. For first/middle/last held-out frames, `heldout-*-compression-*.webp` contains three columns: ground truth, original wire, candidate. This optional work uses the same trained model and adds no training iterations or separate GPU job. The flag defaults to false; missing the flag preserves the existing evaluation work.
-
-Temporal export explicitly uses [the smallest lossless Z1 strategy](temporal-compression-comparison.md) for both the reference and candidate-size measurements. It runs the existing gzip encoder and the RLE encoder and chooses the smaller result; equal sizes retain the existing strategy. The original wire's values and row order are unchanged. This avoids size regressions against the existing compressor, while adding the cost of evaluating both strategies. The measured RLE-only encoding speedup does not describe this automatic selection or the training pipeline.
+`--evaluate-compression` adds inference-only comparisons on the same 80 held-out images, with no further training. The [measured FP16 comparison](temporal-compression-comparison.md) reports both average and local maximum pixel differences. **FP16 remains unadopted; only the original wire representation is served.** Candidate model files are never written or published. First/middle/last comparison WebP files show ground truth, original wire, and candidate.

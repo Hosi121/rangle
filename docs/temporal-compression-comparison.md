@@ -1,6 +1,8 @@
-# 実T4モデルのZ1圧縮比較
+# 時間付きモデルの圧縮比較
 
 2026-11-09に生成した259,797 Gaussianの同じRGS1を、値・順序・数を変えずに比較した。今回のモデルではgzipの `Z_RLE` により、既存Z1の12,106,161Bから11,967,872Bへ138,289B（1.142%）減った。raw 14,548,664Bからの削減は17.739%。新形式・量子化・間引きは導入していない。
+
+別の学習runである `local-lifetime` の配信モデルは11,626,506Bだった。baseline比3.962%の差には、学習方法、最終Gaussian数、export圧縮の変更が含まれる。この差を圧縮単独の効果とは扱わない。学習条件と指標は[学習比較](training-quality.md)に分けた。
 
 RLEは辞書圧縮が得意な既存fixtureでは悪化したため、既存 `compress_temporal(payload)` とNode packerの既定は変更しない。追加の `compress_temporal_smallest(payload)` / `--strategy=auto` は従来方式とRLEを両方encodeして小さい方を選び、同じサイズなら従来方式を保つ。従来Z1より容量を増やさず適用できるが、RLE単独の速度・メモリの測定値をautoや学習全体の改善として扱わない。
 
@@ -62,4 +64,20 @@ node apps/web/viewer/pack-temporal.mjs raw.rgs output-rle.rgs --strategy=rle
 
 packerは復号後の全byte一致を確認し、選択したstrategy・サイズ・SHAをJSONへ出力する。出力先が存在すれば失敗する。autoのtieは従来方式、rawと同サイズの場合は既存動作どおりrawとなる。
 
-検証はPythonの既存契約と追加テスト、Node oracle、JS codec/packerテストで行った。RLE単独が悪化する入力、autoの最小選択・tie、旧Z1/D1、破損・切断・余分なgzip bytes、宣言サイズの不整合を含む。学習画像品質、WebGL、スマートフォン、実ブラウザのCPU・memoryは測定していない。全byte一致は固定した配信用RGS1に対するものであり、RGS1に書く前の既存RGB/alpha/quaternion量子化の影響を消すものではない。
+検証はPythonの既存契約と追加テスト、Node oracle、JS codec/packerテストで行った。RLE単独が悪化する入力、autoの最小選択・tie、旧Z1/D1、破損・切断・余分なgzip bytes、宣言サイズの不整合を含む。上記の可逆圧縮CPU比較では、学習画像品質、WebGL、スマートフォン、実ブラウザのCPU・memoryを測定していない。全byte一致は固定した配信用RGS1に対するものであり、RGS1に書く前の既存RGB/alpha/quaternion量子化の影響を消すものではない。
+
+## FP16精度候補の評価（未採用）
+
+`local-lifetime` の同じ学習結果を固定し、追加学習なしで80枚のheld-out画像すべてを評価した。原wireは250,637 Gaussian、raw 14,035,704B、auto圧縮11,626,506B。候補は全12floatをFP16往復するものと、positionの3floatをFP32に保って残り9floatをFP16往復するもの。RGB8・quaternion8、行順、数、時刻ごとのRGBA8評価は共通とした。
+
+往復後の値は既存RGS1のfloat32欄へ戻し、同じ最小選択encoderで圧縮した。以下のサイズはこの既存wire上の候補サイズであり、新しいFP16ファイル形式を実装・配備した結果ではない。候補rawサイズは原wireと同じで、精度削減によるbitの変化も圧縮結果へ影響する。
+
+| 表現 | 圧縮bytes | GT PSNR (dB) | GT SSIM | 原wire比の平均MAE | 原wire比の最大絶対RGB差 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 原wire | 11,626,506 | 27.814041 | 0.915371 | 0 | 0 |
+| 全float FP16往復 | 6,818,929 | 27.798317 | 0.915068 | 0.001186555 | 0.351430 |
+| position FP32・他FP16往復 | 8,023,765 | 27.813830 | 0.915368 | 0.000056239 | 0.237637 |
+
+数値はWebP保存前のgsplat描画によるもので、RGBは `[0,1]`。MAEは各画像の平均誤差を80枚で平均し、最大差は全画像の任意pixel・RGB成分の最大値を取った。全float候補の最大差はframe 0 / view 30、position維持候補はframe 19 / view 30で記録された。平均PSNR/SSIMが近くても、この局所差を小さいとは判断しない。
+
+これは同一モデル・同一80画像の1回の評価で、WebGLやスマートフォン上の画素差・速度は測っていない。比較処理は同じT4 job内で18.100秒を要し、追加GPU学習jobは起動していない。初回・中間・終端の比較WebPは「GT・原wire・候補」の順で保存した。**FP16は未採用で、配信するモデルは原wireのみ。候補モデルのファイル保存・公開は行っていない。**
