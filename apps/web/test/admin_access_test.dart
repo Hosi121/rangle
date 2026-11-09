@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:rangle_web/community/community_api.dart';
 import 'package:rangle_web/data/clip_repository.dart';
 import 'package:rangle_web/generation/generation_screen.dart';
 import 'package:rangle_web/live/live_screen.dart';
@@ -9,6 +10,27 @@ import 'support/fake_viewer.dart';
 import 'support/generation_fixture.dart';
 
 void main() {
+  test(
+    'management display hint comes from the response with a strict boolean',
+    () {
+      expect(const AccountUser('admin', 'User').isAdmin, isFalse);
+      for (final value in [null, false, 'true', 1]) {
+        expect(
+          AccountUser.fromJson({
+            'id': 'admin',
+            'name': 'User',
+            'is_admin': value,
+          }).isAdmin,
+          isFalse,
+        );
+      }
+      expect(
+        AccountUser.fromJson({'id': 'admin', 'name': 'User', 'is_admin': true})
+            .isAdmin,
+        isTrue,
+      );
+    },
+  );
   for (final entry in ['home', 'generation', 'live']) {
     testWidgets('administrator session opens management for $entry', (
       tester,
