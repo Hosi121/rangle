@@ -4,6 +4,8 @@
 
 ## Cloud Armor
 
+`matches()` の選択肢は capture を作らない `(?:...)` でまとめる。Cloud Armor API は capture group を拒否するが、Terraform mock plan はこのコンパイルを行わない。`python3 infra/gcp/modules/presentation/tests/security_policy_regex_test.py` は現在の HCL の全 `matches()` 正規表現で capture 数ゼロを検査する。CEL 全体やサービス側の受理は検証しない。[公式の noncapture を使う host 判定例](https://docs.cloud.google.com/armor/docs/create-security-policy-rules#allow_or_deny_traffic_based_on_host_header)
+
 `rangle-stg-app-security` は通常経路と `X-Rangle-Candidate` 経路の両方へ付ける。接続元 IP ごと・backend ごとのおおよその制限は、login/register 合算で30件/分、その他 API 書き込み120件/分、API 読み取り600件/分。超過は429。IPを共有する利用者は枠も共有する。`X-Forwarded-For`、cookie、ユーザー指定 header をレートキーにしない。候補経路は独立 backend なので通常経路と別のカウンターになる。[レート制限の仕様](https://docs.cloud.google.com/armor/docs/rate-limiting-overview)
 
 メソッド制限と、API の GET/HEAD に限る感度1の `protocolattack-v33-stable` を先に評価する。レートルールの `allow` で WAF を迂回しない順序にする。POST/PUT/DELETE のコメント本文やパスワードには WAF を適用しないため、無害な `<script>text only` を含む JSON をブロックする原因にしない。書き込みの検証・出力時のエスケープ・認証はアプリの責務として残る。[WAF ルール](https://docs.cloud.google.com/armor/docs/waf-rules)

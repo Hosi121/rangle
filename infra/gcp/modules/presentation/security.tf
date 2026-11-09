@@ -1,5 +1,7 @@
 # Service-level policies use Cloud Armor Standard pay-as-you-go. Do not create
 # hierarchical policies or Enterprise subscriptions for this bounded deployment.
+# matches() forbids capture groups: use (?:...) for regex alternations, as in
+# Google's Cloud Armor host-matching example. Mock plans cannot compile CEL.
 resource "google_compute_security_policy" "app" {
   count       = local.app_enabled ? 1 : 0
   project     = var.project_id
@@ -12,7 +14,7 @@ resource "google_compute_security_policy" "app" {
     action      = "deny(403)"
     description = "Reject methods outside the app's HTTP contract."
     match {
-      expr { expression = "!request.method.matches('^(GET|HEAD|OPTIONS|POST|PUT|DELETE)$')" }
+      expr { expression = "!request.method.matches('^(?:GET|HEAD|OPTIONS|POST|PUT|DELETE)$')" }
     }
   }
 
@@ -24,7 +26,7 @@ resource "google_compute_security_policy" "app" {
     action      = "deny(403)"
     description = "Sensitivity-one protocol attack signatures on API reads only."
     match {
-      expr { expression = "request.method.matches('^(GET|HEAD)$') && request.path.urlDecode().startsWith('/api/') && evaluatePreconfiguredWaf('protocolattack-v33-stable', {'sensitivity': 1})" }
+      expr { expression = "request.method.matches('^(?:GET|HEAD)$') && request.path.urlDecode().startsWith('/api/') && evaluatePreconfiguredWaf('protocolattack-v33-stable', {'sensitivity': 1})" }
     }
   }
 
@@ -33,7 +35,7 @@ resource "google_compute_security_policy" "app" {
     action      = "throttle"
     description = "Limit password verification and account creation per peer IP."
     match {
-      expr { expression = "request.method == 'POST' && request.path.urlDecode().matches('^/api/v1/auth/(login|register)$')" }
+      expr { expression = "request.method == 'POST' && request.path.urlDecode().matches('^/api/v1/auth/(?:login|register)$')" }
     }
     rate_limit_options {
       conform_action = "allow"
@@ -52,7 +54,7 @@ resource "google_compute_security_policy" "app" {
     action      = "throttle"
     description = "Limit remaining API mutations per peer IP."
     match {
-      expr { expression = "request.path.urlDecode().startsWith('/api/') && request.method.matches('^(POST|PUT|DELETE)$')" }
+      expr { expression = "request.path.urlDecode().startsWith('/api/') && request.method.matches('^(?:POST|PUT|DELETE)$')" }
     }
     rate_limit_options {
       conform_action = "allow"
@@ -70,7 +72,7 @@ resource "google_compute_security_policy" "app" {
     action      = "throttle"
     description = "Bound public API polling per peer IP without a global quota."
     match {
-      expr { expression = "request.path.urlDecode().startsWith('/api/') && request.method.matches('^(GET|HEAD)$')" }
+      expr { expression = "request.path.urlDecode().startsWith('/api/') && request.method.matches('^(?:GET|HEAD)$')" }
     }
     rate_limit_options {
       conform_action = "allow"
@@ -110,7 +112,7 @@ resource "google_compute_security_policy" "media" {
     action      = "allow"
     description = "Allow public immutable media and mutable live indexes with CORS."
     match {
-      expr { expression = "request.method.matches('^(GET|HEAD|OPTIONS)$') && request.path.matches('^/(assets/|manifests/|generated/|live/|live-index/|previews/|ATTRIBUTION[.]txt$)')" }
+      expr { expression = "request.method.matches('^(?:GET|HEAD|OPTIONS)$') && request.path.matches('^/(?:assets/|manifests/|generated/|live/|live-index/|previews/|ATTRIBUTION[.]txt$)')" }
     }
   }
 
