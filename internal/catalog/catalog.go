@@ -31,8 +31,9 @@ type clip struct {
 
 // Catalog is a validated startup snapshot. Input order is the public feed order.
 type Catalog struct {
-	clips    []clip
-	snapshot string
+	clips        []clip
+	snapshot     string
+	sourceSHA256 string
 }
 
 // Load accepts one version-1 JSON document, bounded before decoding. URLs are
@@ -98,8 +99,13 @@ func Load(source io.Reader) (*Catalog, error) {
 		return nil, fmt.Errorf("encode catalog snapshot: %w", err)
 	}
 	sum := sha256.Sum256(canonical)
-	return &Catalog{clips: document.Clips, snapshot: hex.EncodeToString(sum[:])}, nil
+	sourceSum := sha256.Sum256(data)
+	return &Catalog{clips: document.Clips, snapshot: hex.EncodeToString(sum[:]), sourceSHA256: hex.EncodeToString(sourceSum[:])}, nil
 }
+
+// SourceSHA256 identifies the original JSON bytes, including whitespace. It is
+// independent of the canonical catalog/origin/filter hashes used by cursors.
+func (c *Catalog) SourceSHA256() string { return c.sourceSHA256 }
 
 func validTag(value string) bool {
 	if value == "" || !utf8.ValidString(value) || utf8.RuneCountInString(value) > 32 {

@@ -15,6 +15,7 @@ import (
 )
 
 const feedPath = "/api/v1/clips"
+const catalogSHAHeader = "X-Rangle-Catalog-SHA256"
 
 type PublicClip struct {
 	ID          string   `json:"id"`
@@ -32,12 +33,13 @@ type PublicClip struct {
 type clipView = PublicClip
 
 type handler struct {
-	extra       []jsonDocument
-	extraSearch []searchEntry
-	clips       []jsonDocument
-	byID        map[string]int
-	snapshot    string
-	search      []searchEntry
+	extra         []jsonDocument
+	extraSearch   []searchEntry
+	clips         []jsonDocument
+	byID          map[string]int
+	snapshot      string
+	catalogSHA256 string
+	search        []searchEntry
 }
 
 type jsonDocument struct {
@@ -66,7 +68,7 @@ func NewHandler(c *Catalog, assetOrigin string) (http.Handler, error) {
 		}
 		return value
 	}
-	h := &handler{clips: make([]jsonDocument, len(c.clips)), byID: make(map[string]int, len(c.clips))}
+	h := &handler{clips: make([]jsonDocument, len(c.clips)), byID: make(map[string]int, len(c.clips)), catalogSHA256: c.SourceSHA256()}
 	snapshot := sha256.Sum256([]byte(c.snapshot + "\n" + assetOrigin))
 	h.snapshot = hex.EncodeToString(snapshot[:])
 	for i, entry := range c.clips {
@@ -94,6 +96,7 @@ func NewHandler(c *Catalog, assetOrigin string) (http.Handler, error) {
 
 func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w = cacheWriter{w}
+	w.Header().Set(catalogSHAHeader, h.catalogSHA256)
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {

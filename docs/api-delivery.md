@@ -6,6 +6,8 @@
 
 カタログAPIは起動時に読み込んだcatalogを公開する。利用者ごとの状態を持たず、同じcatalogを複数のAPIプロセスに配布できる。初期版のcatalog更新は再起動で反映し、動的な編集や推薦は後続とする。[アカウント・いいね・コメント](accounts.md) は別APIと保存先を使う。
 
+公開フィードの `X-Rangle-Catalog-SHA256` は選択した静的catalogの元JSON bytesを識別し、HEAD/304でも確認できる。生成結果の掲載registry、応答ETag、cursorのhashとは役割が異なる。不変snapshotの切替・新旧instance/cacheの混在・旧版への復帰とasset保持は [catalog snapshotの運用契約](catalog-snapshots.md) に従う。
+
 各clipのJSONとETagは起動時に生成し、詳細応答で再利用する。一覧は指定ページのJSONを結合し、その応答内容からETagを計算する。ページごとに蓄積するキャッシュは持たず、保持量はcatalogのメタデータ量に比例する。[実装状況と計測](backend-status.md) を参照。
 
 資産配信は `internal/delivery` のHTTP handlerへ分離する。ローカルではAPIと同じHTTP入口に載せ、本番では版付きmanifestと資産をCDN・object storageへ配置する。APIが返す取得先originを設定で変更できるようにし、APIプロセスがCDNの資産を中継しない。
