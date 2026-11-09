@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { gzipSync } from 'node:zlib';
+import { constants, gzipSync } from 'node:zlib';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -77,5 +77,65 @@ test('offline packer verifies a round trip and refuses to overwrite a published 
     assert.deepEqual(await decodeTemporal(data), raw);
     assert.notEqual(run().status, 0);
     assert.deepEqual(await readFile(output), encoded);
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('explicit RLE packing keeps the existing codec and falls back to raw when larger', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'rangle-rle-pack-'));
+  try {
+    for (const compressible of [false, true]) {
+      const raw = fixture();
+      if (compressible) new Uint8Array(raw, 32).fill(0);
+      const input = join(directory, `${compressible}-input.rgs`);
+      const output = join(directory, `${compressible}-output.rgs`);
+      await writeFile(input, new Uint8Array(raw));
+      const run = spawnSync(process.execPath, [
+        new URL('../pack-temporal.mjs', import.meta.url).pathname, input, output, '--strategy=rle',
+      ], { encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const summary = JSON.parse(run.stdout);
+      assert.equal(summary.strategy, 'rle');
+      assert.equal(summary.encoding, compressible ? 'byte-shuffle-gzip' : 'raw');
+      const encoded = await readFile(output);
+      const data = encoded.buffer.slice(encoded.byteOffset, encoded.byteOffset + encoded.byteLength);
+      assert.deepEqual(await decodeTemporal(data), raw);
+      assert.ok(summary.outputBytes <= summary.inputBytes);
+    }
+  } finally { await rm(directory, { recursive: true, force: true }); }
+});
+
+test('auto packing selects the smaller stream and keeps default on an equal-size tie', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'rangle-auto-pack-'));
+  try {
+    for (const pattern of ['dictionary', 'tie', 'entropy']) {
+      const raw = fixture();
+      if (pattern === 'tie') new Uint8Array(raw, 32).fill(0);
+      if (pattern === 'entropy') {
+        const bytes = new Uint8Array(raw, 32);
+        let state = 21;
+        for (let i = 0; i < bytes.length; i++) {
+          state ^= state << 13; state ^= state >>> 17; state ^= state << 5;
+          bytes[i] = state & 15;
+        }
+      }
+      const original = packTemporal(raw, bytes => gzipSync(bytes, { level: 9 }));
+      const rle = packTemporal(raw, bytes => gzipSync(bytes, { level: 9, strategy: constants.Z_RLE }));
+      if (pattern === 'tie') assert.equal(original.byteLength, rle.byteLength, 'exercise a real gzip tie');
+      if (pattern === 'entropy') assert.ok(rle.byteLength < original.byteLength, 'exercise the RLE choice');
+      const selected = rle.byteLength < original.byteLength ? rle : original;
+      const expected = selected.byteLength < raw.byteLength ? selected : raw;
+      const input = join(directory, `${pattern}-input.rgs`);
+      const output = join(directory, `${pattern}-output.rgs`);
+      await writeFile(input, new Uint8Array(raw));
+      const run = spawnSync(process.execPath, [
+        new URL('../pack-temporal.mjs', import.meta.url).pathname, input, output, '--strategy=auto',
+      ], { encoding: 'utf8' });
+      assert.equal(run.status, 0, run.stderr);
+      const summary = JSON.parse(run.stdout);
+      assert.equal(summary.strategy, 'auto');
+      assert.equal(summary.selectedStrategy, selected === rle ? 'rle' : 'default');
+      assert.deepEqual(await readFile(output), Buffer.from(expected));
+      assert.ok(summary.outputBytes <= original.byteLength);
+    }
   } finally { await rm(directory, { recursive: true, force: true }); }
 });

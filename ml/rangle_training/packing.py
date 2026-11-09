@@ -175,6 +175,41 @@ def compress_temporal(payload):
     return result
 
 
+def compress_temporal_rle(payload):
+    """Opt-in Z1 gzip strategy for measured assets, preserving every raw byte.
+
+    RLE can be larger on dictionary-friendly input. Keep the existing default
+    encoder unchanged and compare complete asset sizes before publication.
+    """
+    import zlib
+
+    count, _, _, _, compressed = temporal_header(payload)
+    if compressed:
+        raise ValueError("Temporal model is already compressed")
+    rows = np.frombuffer(payload, dtype=np.uint8, offset=TEMPORAL_HEADER_BYTES)
+    rows = rows.reshape(count, TEMPORAL_STRIDE)
+    # RLE retains the existing Z1 gzip stream. Feed one column at a time to
+    # avoid materializing two extra full-size copies of the shuffled records.
+    encoder = zlib.compressobj(level=9, wbits=31, strategy=zlib.Z_RLE)
+    parts = [b"RANGL4Z1", payload[8:TEMPORAL_HEADER_BYTES]]
+    for column in rows.T:
+        parts.append(encoder.compress(column.tobytes()))
+    parts.append(encoder.flush())
+    result = b"".join(parts)
+    temporal_header(result)
+    return result
+
+
+def compress_temporal_smallest(payload):
+    """Choose the smaller Z1 stream; ties retain the existing default encoder.
+
+    Both strategies run, so the RLE-only CPU/memory gains do not apply here.
+    """
+    original = compress_temporal(payload)
+    rle = compress_temporal_rle(payload)
+    return rle if len(rle) < len(original) else original
+
+
 def decode_temporal(payload):
     import gzip
     import io
