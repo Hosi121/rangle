@@ -20,16 +20,17 @@ const (
 )
 
 type Preset struct {
-	ID          string `json:"id"`
-	Mode        string `json:"mode,omitempty"`
-	Title       string `json:"title"`
-	Sport       string `json:"sport"`
-	Description string `json:"description"`
-	InputURI    string `json:"input_uri"`
-	InputSHA256 string `json:"input_sha256"`
-	PreviewURL  string `json:"preview_url"`
-	Source      string `json:"source"`
-	License     string `json:"license"`
+	ID             string `json:"id"`
+	QualityProfile string `json:"quality_profile,omitempty"`
+	Mode           string `json:"mode,omitempty"`
+	Title          string `json:"title"`
+	Sport          string `json:"sport"`
+	Description    string `json:"description"`
+	InputURI       string `json:"input_uri"`
+	InputSHA256    string `json:"input_sha256"`
+	PreviewURL     string `json:"preview_url"`
+	Source         string `json:"source"`
+	License        string `json:"license"`
 }
 
 // ModeName keeps immutable presets written before temporal training compatible.
@@ -102,6 +103,9 @@ func (c Config) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, p := range c.Presets {
+		if !p.validProfile() {
+			return fmt.Errorf("generation preset %q has an unsupported quality profile", p.ID)
+		}
 		if p.ModeName() != "static" && p.ModeName() != "dynamic" {
 			return fmt.Errorf("generation preset %q has an unsupported mode", p.ID)
 		}
@@ -126,4 +130,15 @@ func (c Config) preset(id string) (Preset, bool) {
 		}
 	}
 	return Preset{}, false
+}
+
+func (p Preset) validProfile() bool {
+	switch p.QualityProfile {
+	case "", "baseline":
+		return true
+	case "motion-prior", "local-lifetime":
+		return p.ModeName() == "dynamic"
+	default:
+		return false
+	}
 }
