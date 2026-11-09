@@ -53,14 +53,15 @@ resource "google_logging_project_bucket_config" "app_logs" {
 }
 
 resource "google_logging_project_sink" "app_logs" {
-  project                = var.project_id
-  name                   = "${local.prefix}-logs"
-  description            = "Copy only rangle runtime logs to the 30-day bucket"
-  destination            = "logging.googleapis.com/${local.log_bucket_path}"
-  filter                 = local.log_filter
-  unique_writer_identity = false
-  # A sink into a Logging bucket in the SAME project needs no writer identity
-  # or project-wide bucketWriter role. Existing _Default routing is untouched.
+  project     = var.project_id
+  name        = "${local.prefix}-logs"
+  description = "Copy only rangle runtime logs to the 30-day bucket"
+  destination = "logging.googleapis.com/${local.log_bucket_path}"
+  filter      = local.log_filter
+  # The API omits writerIdentity for a Logging bucket in the SAME project,
+  # regardless of this provider's unique_writer_identity default. Do not pin
+  # false: the provider reads it back as true and would propose updates forever.
+  # No bucketWriter IAM is needed. Existing _Default routing is untouched.
   depends_on = [google_logging_project_bucket_config.app_logs]
 }
 
@@ -69,12 +70,15 @@ locals {
     displayName = "rangle stg - logs and runtime"
     labels      = local.labels
     gridLayout = {
-      columns = 2
+      # The API serializes this int64 as a string and adds style/targetAxis.
+      # Spell out defaults to keep a refresh-only round trip free of drift.
+      columns = "2"
       widgets = concat([
         {
           title = "rangle diagnostics - 30-day log retention"
           text = {
             format = "MARKDOWN"
+            style  = {}
             content = join("\n\n", [
               "Runtime logs are copied to **${local.log_bucket_id}** in **${var.region}** for **30 days**. Collection starts after the sink is applied; historical logs are not backfilled.",
               "Use Logs Explorer with the same log view and filter by **jsonPayload.job_id** or **jsonPayload.session_id**. The Go submitted event links the application job ID to **jsonPayload.provider_name**.",
@@ -98,7 +102,8 @@ locals {
                   }
                 }
               }
-              plotType = "LINE"
+              plotType   = "LINE"
+              targetAxis = "Y1"
             }]
           }
         },
@@ -115,7 +120,8 @@ locals {
                   }
                 }
               }
-              plotType = "LINE"
+              plotType   = "LINE"
+              targetAxis = "Y1"
             }]
           }
         }

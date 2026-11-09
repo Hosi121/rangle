@@ -16,7 +16,7 @@ run "logs_survive_the_application_without_shared_bucket_or_iam_changes" {
     error_message = "Use the dedicated Tokyo bucket with 30-day retention and no analytics dependency."
   }
   assert {
-    condition     = google_logging_project_sink.app_logs.destination == "logging.googleapis.com/projects/rangle-example/locations/asia-northeast1/buckets/rangle-stg-logs" && !google_logging_project_sink.app_logs.unique_writer_identity
+    condition     = google_logging_project_sink.app_logs.destination == "logging.googleapis.com/projects/rangle-example/locations/asia-northeast1/buckets/rangle-stg-logs"
     error_message = "The sink must stay in the same project without granting a writer service account."
   }
   assert {
