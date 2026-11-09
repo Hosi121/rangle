@@ -565,30 +565,6 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                               ),
                             ),
                           ),
-                          if (constraints.maxWidth >= 420)
-                            Flexible(
-                              flex: 0,
-                              child: Semantics(
-                                liveRegion: true,
-                                label:
-                                    '取得済み${widget.paging.endIndex}件中${_selected + 1}件目${widget.paging.hasMore ? '、続きがあります' : ''}',
-                                child: ExcludeSemantics(
-                                  child: Text(
-                                    '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.paging.endIndex.toString().padLeft(2, '0')}${widget.paging.hasMore ? '+' : ''}',
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .labelMedium
-                                        ?.copyWith(
-                                          fontFeatures: const [
-                                            FontFeature.tabularFigures(),
-                                          ],
-                                        ),
-                                  ),
-                                ),
-                              ),
-                            ),
                           PointerInterceptor(
                             intercepting: _freeView,
                             child: IconButton(
@@ -629,23 +605,6 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                         ],
                       ),
                     ),
-                    if (constraints.maxWidth < 420)
-                      Positioned(
-                        top: 55,
-                        left: 16,
-                        child: IgnorePointer(
-                          child: Semantics(
-                            liveRegion: true,
-                            child: Text(
-                              '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.paging.endIndex.toString().padLeft(2, '0')}${widget.paging.hasMore ? '+' : ''}',
-                              style: const TextStyle(
-                                fontSize: 10,
-                                color: Colors.white54,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
                     if (widget.filterLabel.isNotEmpty)
                       Positioned(
                         top: 68,

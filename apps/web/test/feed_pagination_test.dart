@@ -44,6 +44,11 @@ Future<void> showFeed(
   await tester.pumpAndSettle();
 }
 
+double? feedPage(WidgetTester tester) => tester
+    .widget<PageView>(find.byKey(const Key('highlight-feed')))
+    .controller!
+    .page;
+
 void main() {
   testWidgets(
     'pending append preserves selection, free view, time and controller',
@@ -101,7 +106,7 @@ void main() {
       final videoCount = videos.length;
       pending.complete(page(20, 20));
       await tester.pumpAndSettle();
-      expect(find.text('20 / 40'), findsOneWidget);
+      expect(feedPage(tester), 19);
       expect(find.text('Clip 19'), findsOneWidget);
       expect(find.text('動画に戻る'), findsOneWidget);
       expect(scenes.single, same(scene));
@@ -133,7 +138,7 @@ void main() {
     await tester.tap(find.text('続きを再試行'));
     await tester.pumpAndSettle();
     expect(repo.calls, [null, '20', '20']);
-    expect(find.text('20 / 25'), findsOneWidget);
+    expect(feedPage(tester), 19);
     await moveTo(tester, 24);
     expect(tester.widget<IconButton>(nextButton()).onPressed, isNull);
     expect(tester.takeException(), isNull);
@@ -176,7 +181,7 @@ void main() {
       expect(scene.value.position, const Duration(seconds: 9));
       expect(find.byKey(const Key('retained-scene')), findsOneWidget);
       expect(find.text('動画に戻る'), findsOneWidget);
-      expect(find.text('120 / 140'), findsOneWidget);
+      expect(feedPage(tester), 119);
       expect(find.text('Clip 119'), findsOneWidget);
       await tester.tap(find.text('動画に戻る'));
       await tester.pumpAndSettle();
@@ -198,7 +203,7 @@ void main() {
         40,
       );
       await moveTo(tester, 139);
-      expect(find.text('140 / 140'), findsOneWidget);
+      expect(feedPage(tester), 139);
       expect(tester.widget<IconButton>(nextButton()).onPressed, isNull);
       expect(tester.takeException(), isNull);
     },
@@ -226,7 +231,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(aborted, isTrue);
     expect(find.text('Clip 500'), findsOneWidget);
-    expect(find.text('01 / 01'), findsOneWidget);
+    expect(feedPage(tester), 0);
     expect(find.byType(ClipCard), findsOneWidget);
     expect(repo.queries, ['/', '/', 'new/']);
     expect(tester.takeException(), isNull);
@@ -262,7 +267,7 @@ void main() {
       expect(find.text('動画に戻る'), findsOneWidget);
       expect(scene.disposed, isFalse);
       expect(scene.value.position, const Duration(seconds: 3));
-      expect(find.text('01 / 21'), findsOneWidget);
+      expect(feedPage(tester), 0);
       expect(tester.takeException(), isNull);
     },
   );
