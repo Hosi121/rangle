@@ -106,6 +106,11 @@ Future<void> pumpApp(
   await tester.pumpAndSettle();
 }
 
+double? feedPage(WidgetTester tester) => tester
+    .widget<PageView>(find.byKey(const Key('highlight-feed')))
+    .controller!
+    .page;
+
 void main() {
   testWidgets(
     'explicit entry button also enters while the pointer stays down',
@@ -124,6 +129,9 @@ void main() {
       await tester.pump(const Duration(milliseconds: 600));
       await tester.pumpAndSettle();
       expect(find.text('動画に戻る'), findsOneWidget);
+      expect(find.text('自由視点'), findsNothing);
+      expect(find.byIcon(Icons.info_outline), findsOneWidget);
+      expect(find.byTooltip('概要'), findsOneWidget);
       await gesture.up();
       await tester.pumpAndSettle();
       expect(find.text('動画に戻る'), findsOneWidget);
@@ -159,19 +167,19 @@ void main() {
     }
     await tester.pumpAndSettle();
     expect(
-      find.text('02 / 03'),
-      findsOneWidget,
+      feedPage(tester),
+      1,
       reason:
           'Wheel gesture settled at page ${tester.widget<PageView>(find.byKey(const Key('highlight-feed'))).controller!.page}',
     );
     await tester.pump(const Duration(milliseconds: 260));
     await wheel(9000);
     await tester.pumpAndSettle();
-    expect(find.text('03 / 03'), findsOneWidget);
+    expect(feedPage(tester), 2);
     await tester.pump(const Duration(milliseconds: 260));
     await wheel(-120);
     await tester.pumpAndSettle();
-    expect(find.text('02 / 03'), findsOneWidget);
+    expect(feedPage(tester), 1);
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets('pending media has disabled playback and free-view controls', (
@@ -240,6 +248,8 @@ void main() {
         isTrue,
       );
       expect(find.textContaining('CC BY 4.0'), findsNothing);
+      expect(find.byIcon(Icons.info_outline), findsOneWidget);
+      expect(find.textContaining(RegExp(r'^\d+ / \d+\+?$')), findsNothing);
       await tester.tap(iconButton('概要'));
       await tester.pumpAndSettle();
       expect(find.textContaining('CC BY 4.0'), findsOneWidget);
@@ -303,11 +313,13 @@ void main() {
       expect(player.width, closeTo(900 * 9 / 16, .01));
       expect(player.center.dx, 720);
       expect(find.byType(ListTile), findsNothing);
+      expect(find.byIcon(Icons.info_outline), findsOneWidget);
+      expect(find.textContaining(RegExp(r'^\d+ / \d+\+?$')), findsNothing);
       await tester.tap(iconButton('次のハイライト'));
       await tester.pumpAndSettle();
       await tester.tap(iconButton('次のハイライト'));
       await tester.pumpAndSettle();
-      expect(find.text('03 / 03'), findsOneWidget);
+      expect(feedPage(tester), 2);
       expect(tester.takeException(), isNull);
     },
   );
@@ -524,7 +536,7 @@ void main() {
         isNull,
       );
       await tester.sendKeyEvent(LogicalKeyboardKey.arrowDown);
-      expect(find.text('01 / 03'), findsOneWidget);
+      expect(feedPage(tester), 0);
       scene.becomeReady();
       await tester.pump();
       await tester.pump();
@@ -545,7 +557,7 @@ void main() {
         const Offset(0, -500),
       );
       await tester.pump();
-      expect(find.text('01 / 03'), findsOneWidget);
+      expect(feedPage(tester), 0);
       await scene.seek(const Duration(seconds: 9));
       await tester.tap(find.text('動画に戻る'));
       await tester.pumpAndSettle();

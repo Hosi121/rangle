@@ -269,6 +269,10 @@ void main() {
   testWidgets('hashtag and keyword search can return to the complete feed', (
     tester,
   ) async {
+    int? clipCount() => tester
+        .widget<PageView>(find.byKey(const Key('highlight-feed')))
+        .childrenDelegate
+        .estimatedChildCount;
     await tester.pumpWidget(
       RangleApp(
         repository: const DemoClipRepository(),
@@ -282,10 +286,10 @@ void main() {
     await tester.enterText(find.byType(TextFormField), '#自由視点');
     await tester.tap(find.widgetWithText(FilledButton, '検索'));
     await tester.pumpAndSettle();
-    expect(find.text('01 / 01'), findsOneWidget);
+    expect(clipCount(), 1);
     await tester.tap(find.byTooltip('絞り込み解除'));
     await tester.pumpAndSettle();
-    expect(find.text('01 / 03'), findsOneWidget);
+    expect(clipCount(), 3);
     await tester.tap(find.byTooltip('検索'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextFormField), '存在しないキーワード');
@@ -294,7 +298,7 @@ void main() {
     expect(find.text('ハイライトが見つかりませんでした'), findsOneWidget);
     await tester.tap(find.widgetWithText(OutlinedButton, 'すべてのハイライトを見る'));
     await tester.pumpAndSettle();
-    expect(find.text('01 / 03'), findsOneWidget);
+    expect(clipCount(), 3);
   });
   test(
     'shared links point to the selected clip and clear unrelated filters',

@@ -211,7 +211,7 @@ void main() {
       scenes.single.complete();
       await tester.pumpAndSettle();
       expect(scenes.single.value.playing, isFalse);
-      expect(find.textContaining('時刻の対応情報なし'), findsOneWidget);
+      expect(find.textContaining('時刻の対応情報なし'), findsNothing);
       scenes.single.emit(const Duration(milliseconds: 400), false);
       await tap(tester, '動画に戻る');
       expect(
@@ -289,7 +289,7 @@ void main() {
       scenes.single.complete();
       await tester.pumpAndSettle();
       expect(scenes.single.drawn, [14, 19]);
-      expect(find.textContaining('0.76秒へ調整'), findsOneWidget);
+      expect(find.textContaining('0.76秒へ調整'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       expect(scenes.single.disposed, isTrue);
     },

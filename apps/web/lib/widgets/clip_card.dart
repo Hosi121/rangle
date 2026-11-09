@@ -73,7 +73,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
   bool _hasEntered = false;
   bool _videoRequested = true;
   Duration _entryPosition = Duration.zero, _sceneTarget = Duration.zero;
-  bool _captureReady = false, _pendingVideo = false, _timeClamped = false;
+  bool _captureReady = false, _pendingVideo = false;
   PlaybackState? _videoPlayback;
   ViewerTimeline? _sceneTimeline;
   int _generation = 0;
@@ -262,10 +262,6 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
     _alignmentRequested = true;
     final timeline = _sceneTimeline;
     final mapped = timeline?.mapping?.toScene(_entryPosition);
-    _timeClamped =
-        mapped != null &&
-        (mapped < Duration.zero ||
-            mapped > timeline!.atFrame(timeline.frameCount - 1));
     _sceneTarget = timeline != null
         ? timeline.sample(mapped ?? Duration.zero)
         : Duration(
@@ -668,30 +664,20 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                                   ),
                                 ),
                               ),
-                              const SizedBox(width: 8),
-                              Flexible(
-                                child: Text(
-                                  _freeView
-                                      ? (_sceneTimeline != null &&
-                                                _sceneTimeline!.mapping == null
-                                            ? '自由視点・時刻の対応情報なし'
-                                            : _timeClamped
-                                            ? '自由視点・${(_sceneTarget.inMicroseconds / 1000000).toStringAsFixed(2)}秒へ調整'
-                                            : '自由視点')
-                                      : clip.sport,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    fontSize: 11,
-                                    color: Colors.white70,
+                              if (!_freeView) ...[
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    clip.sport,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.white70,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              const Icon(
-                                Icons.info_outline,
-                                size: 14,
-                                color: Colors.white70,
-                              ),
+                              ],
                             ],
                           ),
                         ),
