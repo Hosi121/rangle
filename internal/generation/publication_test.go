@@ -64,6 +64,7 @@ type outputFixture struct {
 	requests       atomic.Int32
 	fail           string
 	redirect       string
+	cacheControl   map[string][]string
 }
 
 func fixturePublication(t *testing.T, mode string) (*Service, Job, *outputFixture) {
@@ -119,7 +120,13 @@ func fixturePublication(t *testing.T, mode string) (*Service, Job, *outputFixtur
 			http.Redirect(w, r, fixture.redirect, 302)
 			return
 		}
-		w.Header().Set("Cache-Control", "public,max-age=31536000,immutable")
+		if values, ok := fixture.cacheControl[name]; ok {
+			for _, value := range values {
+				w.Header().Add("Cache-Control", value)
+			}
+		} else {
+			w.Header().Set("Cache-Control", "public,max-age=31536000,immutable")
+		}
 		switch name {
 		case "scene.json":
 			_ = json.NewEncoder(w).Encode(fixture.scene)

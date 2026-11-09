@@ -187,11 +187,14 @@ func (s *Service) validatePublication(ctx context.Context, job Job) (Publication
 			return nil, err
 		}
 		defer response.Body.Close()
-		cache := strings.ToLower(response.Header.Get("Cache-Control"))
-		if response.StatusCode != 200 || !strings.Contains(cache, "immutable") || !strings.Contains(cache, "public") ||
-			strings.Contains(cache, "private") || strings.Contains(cache, "no-store") || response.ContentLength > maximum ||
-			(response.Header.Get("Content-Encoding") != "" && response.Header.Get("Content-Encoding") != encoding) {
-			return nil, fmt.Errorf("invalid immutable generated %s response", name)
+		if response.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("generated %s returned HTTP %d", name, response.StatusCode)
+		}
+		if !publicArtifactCache(response.Header.Values("Cache-Control")) {
+			return nil, fmt.Errorf("generated %s is not publicly cacheable", name)
+		}
+		if response.ContentLength > maximum || (response.Header.Get("Content-Encoding") != "" && response.Header.Get("Content-Encoding") != encoding) {
+			return nil, fmt.Errorf("invalid generated %s response size or encoding", name)
 		}
 		data, err := io.ReadAll(io.LimitReader(response.Body, maximum+1))
 		if err != nil || len(data) == 0 || int64(len(data)) > maximum {

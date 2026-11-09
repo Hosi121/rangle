@@ -290,6 +290,9 @@ func (h *Handler) publication(w http.ResponseWriter, r *http.Request) {
 	job, err := h.service.SetPublication(ctx, owner, r.PathValue("job"), *input.Published)
 	if err != nil {
 		if errors.Is(err, ErrArtifacts) {
+			if h.service.Logger != nil {
+				h.service.Logger.WarnContext(ctx, "generation publication validation failed", "job_id", r.PathValue("job"), "error", err)
+			}
 			h.write(w, r, 409, map[string]string{"error": "publication_unavailable"})
 			return
 		}
