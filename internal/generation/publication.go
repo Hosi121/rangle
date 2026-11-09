@@ -234,20 +234,53 @@ func (s *Service) validatePublication(ctx context.Context, job Job) (Publication
 		return Publication{}, err
 	}
 	var metrics struct {
-		JobID           string `json:"job_id"`
-		Mode            string `json:"mode"`
-		QualityProfile  string `json:"quality_profile"`
-		InputSHA256     string `json:"input_sha256"`
-		ModelBytes      int64  `json:"model_bytes"`
-		ModelSHA256     string `json:"model_sha256"`
-		SplatBytes      int64  `json:"splat_bytes"`
-		SplatSHA256     string `json:"splat_sha256"`
+		JobID           string          `json:"job_id"`
+		Mode            json.RawMessage `json:"mode"`
+		QualityProfile  string          `json:"quality_profile"`
+		InputSHA256     string          `json:"input_sha256"`
+		ModelBytes      json.RawMessage `json:"model_bytes"`
+		ModelSHA256     json.RawMessage `json:"model_sha256"`
+		SplatBytes      int64           `json:"splat_bytes"`
+		SplatSHA256     string          `json:"splat_sha256"`
 		Source, License string
 	}
-	if json.Unmarshal(metricsBytes, &metrics) != nil || metrics.JobID != job.ID || metrics.Mode != job.Snapshot.ModeName() ||
-		metrics.InputSHA256 != job.Snapshot.InputSHA256 || metrics.Source != job.Snapshot.Source || metrics.License != job.Snapshot.License ||
-		metrics.ModelBytes <= 0 || metrics.ModelBytes > 32<<20 || !checksum.MatchString(metrics.ModelSHA256) {
+	if json.Unmarshal(metricsBytes, &metrics) != nil || metrics.JobID != job.ID ||
+		metrics.InputSHA256 != job.Snapshot.InputSHA256 || metrics.Source != job.Snapshot.Source || metrics.License != job.Snapshot.License {
 		return Publication{}, fmt.Errorf("invalid generated metrics")
+	}
+	expectedMode := job.Snapshot.ModeName()
+	measuredMode := ""
+	if len(metrics.Mode) > 0 {
+		if json.Unmarshal(metrics.Mode, &measuredMode) != nil || measuredMode == "" {
+			return Publication{}, fmt.Errorf("invalid generated metrics mode")
+		}
+	} else if expectedMode == "static" {
+		measuredMode = "static"
+	} else {
+		return Publication{}, fmt.Errorf("generated metrics mode is required")
+	}
+	if measuredMode != expectedMode {
+		return Publication{}, fmt.Errorf("generated metrics mode mismatch")
+	}
+	if expectedMode == "static" && (metrics.SplatBytes <= 0 || metrics.SplatBytes > 32<<20 || metrics.SplatBytes%32 != 0 || !checksum.MatchString(metrics.SplatSHA256)) {
+		return Publication{}, fmt.Errorf("invalid generated splat size or checksum")
+	}
+	// Current workers declare the stored model pair. Earlier static workers
+	// declare only the raw splat pair; never interpret null/partial values as
+	// absent, and never use this compatibility path for temporal models.
+	hasSize, hasHash := len(metrics.ModelBytes) > 0, len(metrics.ModelSHA256) > 0
+	if hasSize != hasHash {
+		return Publication{}, fmt.Errorf("generated model size and checksum must be paired")
+	}
+	var expectedModel *ArtifactProof
+	if hasSize {
+		expectedModel = &ArtifactProof{}
+		if json.Unmarshal(metrics.ModelBytes, &expectedModel.Bytes) != nil || expectedModel.Bytes <= 0 || expectedModel.Bytes > 32<<20 ||
+			json.Unmarshal(metrics.ModelSHA256, &expectedModel.SHA256) != nil || !checksum.MatchString(expectedModel.SHA256) {
+			return Publication{}, fmt.Errorf("invalid generated model measurements")
+		}
+	} else if expectedMode != "static" {
+		return Publication{}, fmt.Errorf("generated model measurements are required")
 	}
 	profile := job.Snapshot.QualityProfile
 	if profile == "" {
@@ -260,12 +293,16 @@ func (s *Service) validatePublication(ctx context.Context, job Job) (Publication
 	if profile != measuredProfile {
 		return Publication{}, fmt.Errorf("generated quality profile mismatch")
 	}
-	model, err := get(name, encoding, metrics.ModelBytes)
+	modelLimit := int64(32 << 20)
+	if expectedModel != nil {
+		modelLimit = expectedModel.Bytes
+	}
+	model, err := get(name, encoding, modelLimit)
 	if err != nil {
 		return Publication{}, err
 	}
 	modelProof := proof(model)
-	if modelProof.Bytes != metrics.ModelBytes || modelProof.SHA256 != metrics.ModelSHA256 {
+	if expectedModel != nil && modelProof != *expectedModel {
 		return Publication{}, fmt.Errorf("generated model checksum mismatch")
 	}
 	if name == "model.rgs" {
@@ -274,9 +311,6 @@ func (s *Service) validatePublication(ctx context.Context, job Job) (Publication
 		}
 	}
 	if name == "model.splat" {
-		if metrics.SplatBytes <= 0 || metrics.SplatBytes > 32<<20 || metrics.SplatBytes%32 != 0 || !checksum.MatchString(metrics.SplatSHA256) {
-			return Publication{}, fmt.Errorf("invalid generated splat size")
-		}
 		reader, err := gzip.NewReader(bytes.NewReader(model))
 		if err != nil {
 			return Publication{}, err

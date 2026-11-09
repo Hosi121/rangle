@@ -15,8 +15,10 @@ Succeeded jobの保存済みpreset snapshotを使い、CC BY 4.0の出典、入�
 Goが検証のために取得するURLは、設定済みmedia originの `/generated/{32桁job-id}/` と固定ファイル名だけ。scene内のURLを自由に追跡せず、redirectもしない。sceneは64KiB、metricsは256KiB、modelは32MiB、要求全体は25秒以内。HTTP 200とpublicなcache宣言、正のTTLを要求する。Cache-Controlはdirective名をtokenとして解析し、private・no-store・no-cacheを拒否する。s-maxage指定時はshared TTLを優先し、未指定ならmax-ageの正値を確認する。
 
 1. scene.jsonのversion、フレーム情報、出典・許諾を確認する。staticは単一の `model.splat`、dynamicは `model.rgs` だけを参照できる。
-2. metrics.jsonのjob ID・mode・入力SHA256・出典・許諾とmodelサイズ/SHA256を確認する。追加profileの場合はmetricsのquality_profileも保存済み設定に一致させる。旧baseline metricsの省略はbaselineとして扱う。
-3. model bytesの実サイズとSHA256を照合する。static gzipは展開後32MiB以内で、32byte record境界と展開後SHA256も照合する。dynamicは既存RGS1 header・sceneの時刻・payloadサイズ・圧縮時の展開サイズを確認する。
+2. metrics.jsonのjob ID・入力SHA256・出典・許諾を保存済みsnapshotと照合する。modeの省略はstatic snapshotだけに後方互換として認め、明示modeはsnapshotと一致させる。dynamicではmodeを必須とする。quality_profile省略は従来どおりbaselineとし、追加profileは保存済み設定に一致させる。
+3. 現workerが出すmodel_bytes/model_sha256はpairで照合し、片方だけ・明示null/0・不正hashを拒否する。旧staticではpair全体の省略だけを許し、staticのsplat_bytes/splat_sha256は常に必須とする。gzip展開後32MiB以内・32byte record境界・raw SHA256を照合する。dynamicはmodel pairを必須とし、既存RGS1 header・sceneの時刻・payloadサイズ・圧縮時の展開サイズも確認する。
+
+旧staticに圧縮fileの測定値がない場合、raw splatの宣言値を検証し、ArtifactProof.Modelには受信したgzip bytesの実測サイズ・SHA256を記録する。事前に宣言された圧縮hashとの照合を行ったとは扱わない。
 
 scene/metrics/modelそれぞれの実サイズ・SHA256を検証記録に保存する。workerのscene-last、GCS generation-match=0、固定job pathへの上書き不能な生成先がcontentの不変性の基盤となる。
 
