@@ -9,6 +9,7 @@ import time
 
 import numpy as np
 
+from .data import training_activity
 from .packing import compress_temporal, pack_temporal, unpack_temporal
 
 
@@ -33,7 +34,14 @@ def stored_values(arrays, time_seconds):
     return means + velocity * delta[:, None], scales, quats, colors, opacity
 
 
-def initialize_parameters(xyz, rgb, spacing, frame_times, device="cuda"):
+QUALITY_PROFILES = ("baseline", "motion-prior", "local-lifetime")
+
+
+def initialize_parameters(
+    xyz, rgb, spacing, frame_times, device="cuda", *, quality_profile="baseline"
+):
+    if quality_profile not in QUALITY_PROFILES:
+        raise ValueError("Invalid quality profile")
     import torch
 
     tensor = lambda value: torch.as_tensor(value, dtype=torch.float32, device=device)
@@ -62,6 +70,14 @@ def initialize_parameters(xyz, rgb, spacing, frame_times, device="cuda"):
             ),
         }
     )
+    if quality_profile == "local-lifetime":
+        # The existing shuffled seed-point order distributes times spatially,
+        # with the same primitive count and no additional RNG draws.
+        with torch.no_grad():
+            params["centre_times"].copy_(
+                torch.linspace(0, duration, count, device=device)
+            )
+            params["log_sigmas"].fill_(math.log(duration / 4))
     rates = {
         "means": 0.00016,
         "scales": 0.005,
@@ -78,6 +94,40 @@ def initialize_parameters(xyz, rgb, spacing, frame_times, device="cuda"):
         for key, param in params.items()
     }
     return params, optimizers, rates
+
+
+def motion_prior_loss(params, time_seconds, viewmat, K, activity, duration):
+    """Penalize velocity at low-variation image locations, without moving means.
+
+    Projection and the activity weights are detached. Only velocities receive
+    this gradient; topology changes need no separate per-primitive metadata.
+    """
+    import torch
+    import torch.nn.functional as F
+
+    with torch.no_grad():
+        means, _ = temporal_values(params, time_seconds)
+        camera = means @ viewmat[:3, :3].T + viewmat[:3, 3]
+        projected = camera @ K.T
+        pixels = projected[:, :2] / projected[:, 2:3].clamp_min(1e-6)
+        height, width = activity.shape
+        valid = (
+            (camera[:, 2] > 0)
+            & (pixels[:, 0] >= 0)
+            & (pixels[:, 0] <= width - 1)
+            & (pixels[:, 1] >= 0)
+            & (pixels[:, 1] <= height - 1)
+        )
+        grid = pixels / pixels.new_tensor([width - 1, height - 1]) * 2 - 1
+        sampled = F.grid_sample(
+            activity[None, None],
+            grid[None, :, None],
+            mode="bilinear",
+            align_corners=True,
+        ).flatten()
+        weights = (1 - sampled).square() * valid
+    displacement = params["velocities"] * duration
+    return 0.01 * (displacement.square().sum(dim=1) * weights).mean()
 
 
 def _ssim_function(device):
@@ -106,7 +156,7 @@ def _ssim_function(device):
     return ssim
 
 
-def optimize_dynamic(data, steps, deadline, directory):
+def optimize_dynamic(data, steps, deadline, directory, *, quality_profile="baseline"):
     from importlib.metadata import version
 
     import torch
@@ -116,6 +166,8 @@ def optimize_dynamic(data, steps, deadline, directory):
 
     from .train import log
 
+    if quality_profile not in QUALITY_PROFILES:
+        raise ValueError("Invalid quality profile")
     if data.frame_times is None:
         raise ValueError("Dynamic training requires temporal input")
     if not torch.cuda.is_available():
@@ -128,7 +180,11 @@ def optimize_dynamic(data, steps, deadline, directory):
     distances = cKDTree(xyz).query(xyz, k=4, workers=1)[0][:, 1:]
     spacing = np.sqrt(np.mean(distances**2, axis=1)).clip(1e-4, 1)
     params, optimizers, rates = initialize_parameters(
-        xyz, data.rgb[selected], spacing, data.frame_times
+        xyz,
+        data.rgb[selected],
+        spacing,
+        data.frame_times,
+        quality_profile=quality_profile,
     )
     strategy = DefaultStrategy(refine_stop_iter=min(6000, steps))
     strategy.check_sanity(params, optimizers)
@@ -140,6 +196,14 @@ def optimize_dynamic(data, steps, deadline, directory):
     frames, _, height, width, _ = data.images.shape
     duration, fps = float(data.frame_times[-1]), data.frame_rate
     ssim = _ssim_function("cuda")
+    quality_started = time.perf_counter()
+    activity = (
+        {index: tensor(value) for index, value in training_activity(data).items()}
+        if quality_profile == "motion-prior"
+        else {}
+    )
+    torch.cuda.synchronize()
+    quality_setup_seconds = time.perf_counter() - quality_started
 
     def target(frame, index):
         return images[frame, index : index + 1].float() / 255
@@ -188,6 +252,10 @@ def optimize_dynamic(data, steps, deadline, directory):
         # Discourage early opacity saturation while all timestamps begin to fit.
         opacity_weight = 1e-3 * max(0.0, 1 - step / max(1, 0.25 * steps))
         loss = loss + opacity_weight * params["opacities"].sigmoid().mean()
+        if quality_profile == "motion-prior":
+            loss = loss + motion_prior_loss(
+                params, times[frame], views[index], Ks[index], activity[index], duration
+            )
         loss.backward()
         optimizers["means"].param_groups[0]["lr"] = rates["means"] * 0.01 ** (
             step / steps
@@ -214,6 +282,7 @@ def optimize_dynamic(data, steps, deadline, directory):
             log(
                 "training_progress",
                 mode="dynamic",
+                quality_profile=quality_profile,
                 iteration=step,
                 iterations=steps,
                 frame=frame,
@@ -302,6 +371,23 @@ def optimize_dynamic(data, steps, deadline, directory):
         evaluation_seconds = time.perf_counter() - evaluation_started
     return payload, {
         "mode": "dynamic",
+        "quality_profile": quality_profile,
+        "quality_setup_seconds": quality_setup_seconds,
+        "quality_configuration": {
+            "initial_count_multiplier": 1,
+            "initial_sigma_duration_fraction": 0.25
+            if quality_profile == "local-lifetime"
+            else 1.0,
+            "initial_centres": "uniform interval, existing shuffled point order"
+            if quality_profile == "local-lifetime"
+            else "interval midpoint",
+            "motion_prior_weight": 0.01 if quality_profile == "motion-prior" else 0,
+            "activity_std_rgb_threshold": 0.05
+            if quality_profile == "motion-prior"
+            else None,
+            "activity_views": data.train_indices.tolist() if activity else [],
+            "hypothesis_only": True,
+        },
         "seed": 0,
         "iterations": steps,
         "frame_count": frames,

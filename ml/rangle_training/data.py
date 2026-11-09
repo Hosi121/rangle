@@ -187,3 +187,26 @@ def scene_camera(data: Dataset) -> dict:
             "cy": float(K[1, 2]),
         },
     }
+
+
+def training_activity(data: Dataset) -> dict[int, np.ndarray]:
+    """Fixed temporal RGB variation maps from training cameras only.
+
+    Welford accumulation avoids materializing a float copy of the whole video.
+    A fixed 0.05 RGB standard deviation maps to activity one. This is an
+    appearance-change heuristic, not foreground supervision or optical flow.
+    """
+    if data.frame_times is None:
+        raise ValueError("Temporal activity requires a video dataset")
+    result = {}
+    for index in data.train_indices:
+        mean = np.zeros(data.images.shape[-3:], np.float32)
+        second = np.zeros_like(mean)
+        for frame, pixels in enumerate(data.images[:, int(index)]):
+            value = pixels.astype(np.float32) / 255
+            delta = value - mean
+            mean += delta / (frame + 1)
+            second += delta * (value - mean)
+        variance = np.maximum(second / len(data.frame_times), 0)
+        result[int(index)] = np.clip(np.sqrt(variance.mean(axis=-1)) / 0.05, 0, 1)
+    return result

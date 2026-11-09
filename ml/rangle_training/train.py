@@ -259,11 +259,17 @@ def parse_args(argv=None):
         parser.add_argument("--" + flag, required=True)
     parser.add_argument("--steps", type=int, default=6000)
     parser.add_argument("--mode", choices=("static", "dynamic"), default="static")
+    parser.add_argument(
+        "--quality-profile",
+        choices=("baseline", "motion-prior", "local-lifetime"),
+        default="baseline",
+    )
     args = parser.parse_args(argv)
     if (
         not re.fullmatch(r"[a-f0-9]{32}", args.job_id)
         or not re.fullmatch(r"[a-f0-9]{64}", args.input_sha256)
         or not 1 <= args.steps <= (12000 if args.mode == "dynamic" else 6000)
+        or (args.mode != "dynamic" and args.quality_profile != "baseline")
     ):
         raise ValueError("Invalid job identity, checksum or iteration budget")
     return args
@@ -289,6 +295,7 @@ def build_scene(args, dataset):
 
 def main(*, storage_client_factory=None):
     args = parse_args()
+    quality_profile = getattr(args, "quality_profile", "baseline")
     deadline = datetime.fromisoformat(args.deadline.replace("Z", "+00:00"))
     if deadline.tzinfo is None:
         raise ValueError("Deadline must include its timezone")
@@ -341,8 +348,13 @@ def main(*, storage_client_factory=None):
             if args.mode == "dynamic":
                 from .temporal import optimize_dynamic
 
+                quality_options = (
+                    {"quality_profile": quality_profile}
+                    if quality_profile != "baseline"
+                    else {}
+                )
                 payload, metrics = optimize_dynamic(
-                    dataset, args.steps, expires, directory
+                    dataset, args.steps, expires, directory, **quality_options
                 )
                 model_name, model_bytes = "model.rgs", payload
             else:
@@ -352,6 +364,7 @@ def main(*, storage_client_factory=None):
                 {
                     "job_id": args.job_id,
                     "mode": args.mode,
+                    "quality_profile": quality_profile,
                     "input_sha256": args.input_sha256,
                     "model_bytes": len(model_bytes),
                     "model_sha256": hashlib.sha256(model_bytes).hexdigest(),
