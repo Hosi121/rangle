@@ -95,6 +95,27 @@ Latency uses a session UTC/monotonic epoch plus original source PTS as the simul
 
 ## Checks
 
+### Verified cloud delivery, 2026-11-09
+
+Source `19085e206f67c37b65db86be86fa433e5114c2f8` was then tested with the same 10-second recorded rig, 8 decode workers, 300 bootstrap/update steps and the RLE encoding path. The local worker and an independent publisher ran concurrently. All training was local; no cloud GPU or B300 was used.
+
+Four distinct models reached the real GCS/Cloud CDN path, with the first visible through HTTP **before source decoding completed**. Nine pending windows were replaced. Capture timestamps below refer to the last source sample of each 0.76-second window.
+
+| Measurement | Observed result |
+| --- | ---: |
+| Capture start → first local model | 14.104 s |
+| Maximum capture → local model | 26.803 s |
+| Maximum capture → CDN-verifiable publication | 29.810 s |
+| Maximum capture → HTTP observer's first retrieval | 30.236 s |
+| Final packed held-out PSNR / SSIM | 20.5904 dB / .674379 |
+| Final compressed model | 5,774,550 bytes |
+
+The observer fetched changing session metadata from the separate one-second CDN route; responses advertised `max-age=1` and permitted the app's CORS origin. It also checked API/CDN agreement at completion. All four published models were fetched through HTTP, passed scene/timeline/size/SHA and Range 206 checks, and decoded to identical raw bytes in Python and the shipped JavaScript reader.
+
+These are one short integration run's results, not a sustained 30-second SLO or browser-display measurement. Browser polling, decoding and GPU presentation can add delay. The lossless encoder changed scheduling and selected intermediate windows, so this run is not an isolated end-to-end compression speedup comparison. Player ghosting and gaps remain; [issue #89](https://github.com/Hosi121/rangle/issues/89) tracks source throughput, quality and longer-input validation. The finite test ended and retains its last model at the [LIVE viewer](https://app.rangleplay.stream/demo/?live=basketball-live-20261109).
+
+### Automated checks
+
 ```sh
 PYTHONPATH=ml python3 -m unittest discover -s ml/tests -v
 ruff check ml/rangle_live ml/tests/test_live.py ml/tests/full_ml/test_live_model.py

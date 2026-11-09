@@ -63,4 +63,6 @@ sourceはoperatorが承認済みのものへ固定する。再実行時も同じ
 
 一般の単眼動画、RTMP/RTSPの接続管理、常駐cloud GPU、連続25fpsの欠損なし再構成、実端末の表示遅延・画質、大規模負荷は今回の成立確認に含めない。テスト入力は明示した録画ストリームである。
 
+実際の10秒入力では4モデルがCDNへ届き、最大capture→公開29.810秒、HTTP observer取得30.236秒だった。入力EOF前の更新も確認した。短い区間の断続更新であり、画面描画までの遅延や長時間の保証ではない。条件と品質は[ライブ学習の実配信結果](live-training.md#verified-cloud-delivery-2026-11-09)を参照。テスト終了後も[最後のモデル](https://app.rangleplay.stream/demo/?live=basketball-live-20261109)を開ける。
+
 オンライン学習の参考には[3DGStreamの論文](https://arxiv.org/abs/2403.01444)と[Instant Gaussian Streamの公式実装](https://github.com/yjb6/IGS)がある。本実装は既存RGS1とgsplatを使う小さなbaselineで、これらの再現や論文の性能達成を主張しない。
