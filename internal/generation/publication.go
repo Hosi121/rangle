@@ -66,7 +66,7 @@ func (s *Service) SetPublication(ctx context.Context, owner, id string, publishe
 	if job.Owner != owner {
 		return Job{}, ErrNotFound
 	}
-	if job.State != Succeeded || published && s.ReservedClipID != nil && s.ReservedClipID("generated-"+id) {
+	if job.State != Succeeded || job.Snapshot.ModeName() == "live" || published && s.ReservedClipID != nil && s.ReservedClipID("generated-"+id) {
 		return Job{}, ErrConflict
 	}
 	store, ok := s.Store.(PublicationStore)
@@ -129,7 +129,7 @@ func (s *Service) CompletedClipExists(ctx context.Context, id string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	return job.ID == raw && job.State == Succeeded && job.Snapshot.ID != "", nil
+	return job.ID == raw && job.State == Succeeded && job.Snapshot.ID != "" && job.Snapshot.ModeName() != "live", nil
 }
 
 func (p Publication) validProofs() bool {
