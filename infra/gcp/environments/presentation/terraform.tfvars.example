@@ -11,4 +11,5 @@ application = null
 #   catalog_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
 #   community_enabled = false # Optional; enable only with a compatible server image.
 #   generation_config_sha256 = null # Reviewed private generation/<sha256>.json only.
+#   generation_live_enabled = false # Requires the config above and live_streaming_enabled=true.
 # }

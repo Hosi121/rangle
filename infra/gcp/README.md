@@ -22,6 +22,10 @@ GitHub ActionsはWIFでrepository数値ID・owner数値ID・`refs/heads/stg`・d
 
 発表用はmin0/max1・concurrency40・CPU1・512MiBの費用優先設定。GPU学習は配信APIと別の東京Spot T4、同時1件・最大30分・永続10試行。停止期限は2026-11-14 15:00 UTC。budget/期限guardと停止手順は配備済みだが、請求の厳密なhard capや10万人向け容量を保証しない。AWS経由のB300は私的な検証用で、この構成へ接続しない。
 
+ライブ生成の権限は `application.generation_live_enabled=true` で明示的に有効化する。`generation_config_sha256`、`live_streaming_enabled=true`、domainの設定が必要。専用の `rangle-stg-live-trainer` は入力の `datasets/live/` をgetし、mediaの `live/` とcatalogの `live/snapshots/` にget/createだけを持つ。更新するmediaの `live-index/` とcatalogの単一object `live/index.json` に限り、get/create/deleteを許す。GCSで既存objectを置き換えるには、generation条件付きでもcreateとdeleteが必要なためで、model・scene・archiveにはdeleteを付けない。metadataは初回insertで指定するためupdate・list・bucket readは不要。すべてのgrantとruntimeのactAsを発表期限で制限する。[GCS object insertの必要権限](https://docs.cloud.google.com/storage/docs/json_api/v1/objects/insert)
+
+このopt-inが作るのはSAと限定IAMだけで、常時稼働GPUや別の試行枠は作らない。既存のgeneration API・Firestore admission ledger・Vertex CustomJob・終了guardを共用する。IaCの有効化だけでライブ処理の起動や30秒遅延を保証するものではなく、承認済みsource bundle、digest固定の対応worker image、immutable generation configを揃えてから適用する。実行結果は[ライブ処理](../../docs/live-training.md)に記録する。
+
 以下は主に汎用stg/main rootの設定契約と初回配備手順。既存発表環境へそのまま新規適用せず、privateなbackend・tfvars・現在のplanを確認する。TerraformとCIによるCloud Run更新は同時に実行しない。
 
 Terraform **1.17.1** と `hashicorp/google` **8.10.0** に固定し、各 root と直接テストする module に `.terraform.lock.hcl` を管理する。2026-11-08 に [公式 CLI release API](https://api.releases.hashicorp.com/v1/releases/terraform/latest) と [公式 provider Registry API](https://registry.terraform.io/v1/providers/hashicorp/google) で stable を確認した。CLI の [公式 SHA256SUMS](https://releases.hashicorp.com/terraform/1.17.1/terraform_1.17.1_SHA256SUMS) と照合した Linux amd64 ZIP は `4638628058e71a55212b1c563712eac03b902128f40740f3dc8174df12135061`。provider は `init` 時に HashiCorp 署名を検証した。ユーザーの global CLI を更新する必要はない。[Terraform のインストール](https://developer.hashicorp.com/terraform/install)

@@ -58,6 +58,7 @@ variable "application" {
     catalog_sha256           = string
     community_enabled        = optional(bool, false)
     generation_config_sha256 = optional(string, null)
+    generation_live_enabled  = optional(bool, false)
   })
   default  = null
   nullable = true
@@ -70,6 +71,14 @@ variable "application" {
       var.application.generation_config_sha256 == null ? true : can(regex("^[0-9a-f]{64}$", var.application.generation_config_sha256))
     )
     error_message = "Generation config must be null or the lowercase SHA256 of a reviewed immutable private JSON file."
+  }
+  validation {
+    condition = var.application == null ? true : (
+      !var.application.generation_live_enabled || (
+        var.application.generation_config_sha256 != null && var.base_domain != null
+      )
+    )
+    error_message = "Cloud live generation requires a reviewed generation config and a configured domain."
   }
 }
 
@@ -101,7 +110,9 @@ variable "live_streaming_enabled" {
   type        = bool
   default     = false
   validation {
-    condition     = !var.live_streaming_enabled || (var.application != null && var.base_domain != null)
-    error_message = "Live metadata requires a configured application and domain."
+    condition = (!var.live_streaming_enabled || (var.application != null && var.base_domain != null)) && (
+      var.application == null ? true : !var.application.generation_live_enabled || var.live_streaming_enabled
+    )
+    error_message = "Live metadata requires a configured application and domain, and cloud live generation requires live metadata enabled."
   }
 }
