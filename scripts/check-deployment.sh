@@ -63,6 +63,7 @@ fetch /health health
 fetch / landing
 fetch /demo/ demo
 fetch '/api/v1/clips?limit=1' api
+fetch /api/v1/live live
 python3 - "$work" "$media_origin" <<'PY'
 import json
 import os
@@ -102,6 +103,10 @@ demo = Demo()
 demo.feed(work.joinpath('demo').read_text())
 if not demo.base or not demo.bootstrap:
     raise SystemExit('Demo base URL or Flutter bootstrap is missing.')
+live = json.loads(work.joinpath('live').read_text())
+if (not isinstance(live, dict) or live.get('version') != 1 or
+        not isinstance(live.get('sessions'), list) or len(live['sessions']) > 8):
+    raise SystemExit('Live API did not return the bounded session index.')
 doc = json.loads(work.joinpath('api').read_text())
 clips = doc.get('clips') if isinstance(doc, dict) else None
 if not isinstance(clips, list) or len(clips) != 1 or not isinstance(clips[0], dict):

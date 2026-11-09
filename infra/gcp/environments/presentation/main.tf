@@ -11,6 +11,7 @@ module "presentation" {
   region                     = var.region
   application                = var.application
   generation_sync_enabled    = var.generation_sync_enabled
+  live_streaming_enabled     = var.live_streaming_enabled
   deadline                   = var.deadline
   budget_currency            = var.budget_currency
   budget_stop_amount         = var.budget_stop_amount

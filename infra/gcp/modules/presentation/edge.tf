@@ -23,6 +23,24 @@ resource "google_compute_backend_bucket" "media" {
   }
 }
 
+# Mutable discovery metadata has its own cache policy; model URLs remain immutable.
+resource "google_compute_backend_bucket" "live_index" {
+  count            = var.live_streaming_enabled ? 1 : 0
+  project          = var.project_id
+  name             = "${local.prefix}-live-index"
+  bucket_name      = google_storage_bucket.private["media"].name
+  enable_cdn       = true
+  compression_mode = "DISABLED"
+  cdn_policy {
+    cache_mode         = "FORCE_CACHE_ALL"
+    default_ttl        = 1
+    client_ttl         = 1
+    negative_caching   = false
+    serve_while_stale  = 0
+    request_coalescing = true
+  }
+}
+
 resource "google_storage_bucket_iam_member" "cache_fill" {
   bucket = google_storage_bucket.private["media"].name
   role   = "roles/storage.objectViewer"
@@ -76,6 +94,13 @@ resource "google_compute_url_map" "https" {
   path_matcher {
     name            = "media"
     default_service = google_compute_backend_bucket.media.id
+    dynamic "path_rule" {
+      for_each = var.live_streaming_enabled ? [1] : []
+      content {
+        paths   = ["/live-index/*"]
+        service = google_compute_backend_bucket.live_index[0].id
+      }
+    }
   }
   dynamic "host_rule" {
     for_each = local.app_enabled ? [1] : []

@@ -37,6 +37,10 @@ if name == 'curl':
         sys.exit(60)
     if '/health' in url:
         body = 'ok\n'
+    elif '/api/v1/live' in url:
+        body = json.dumps({'version': 1, 'sessions': []})
+        if os.environ.get('BAD_LIVE_CANDIDATE') and candidate or os.environ.get('BAD_LIVE_PUBLIC') and not candidate:
+            body = '<html>broken live endpoint</html>'
     elif '/api/' in url:
         clip = {'id': 'vru', 'revision': 'v1', 'title': 'VRU', 'sport': 'basketball',
           'codec': 'synthetic-transport-v1' if os.environ.get('SYNTHETIC_API') else 'splat-v1',
@@ -263,6 +267,19 @@ class Deployment(unittest.TestCase):
                 self.assertNotEqual(result.returncode, 0)
                 self.assertEqual(self.traffic(calls), [])
                 self.assertIsNone(receipt)
+                self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+
+    def test_broken_live_index_blocks_candidate_or_restores_previous_traffic(self):
+        for variable in ('BAD_LIVE_CANDIDATE', 'BAD_LIVE_PUBLIC'):
+            with self.subTest(variable=variable):
+                result, calls, receipt, _ = self.run_case({variable: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIsNone(receipt)
+                updates = [row for row in calls if row[:4] == ['gcloud', 'run', 'services', 'update-traffic']]
+                promoted = any('--to-revisions=rangle-stg-00003-abc=100' in row for row in updates)
+                self.assertEqual(promoted, variable == 'BAD_LIVE_PUBLIC')
+                if promoted:
+                    self.assertTrue(any('--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20' in row for row in updates))
                 self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
 
     def test_public_catalog_mismatch_restores_the_previous_split(self):

@@ -61,6 +61,7 @@ jobs:
       - run: shellcheck scripts/deploy-stg.sh scripts/check-deployment.sh
       - run: python3 scripts/deploy-stg.test.py
       - run: python3 scripts/publish-catalog.test.py
+      - run: python3 scripts/publish-live.test.py
   terraform:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
