@@ -60,7 +60,7 @@ go run ./cmd/rangle-publish \
   -remote
 ```
 
-1. Prepare the frozen allowlisted root and ledger. Upload assets to new immutable revision keys using the existing operator tooling, with create-only preconditions; resume an interrupted upload only by comparing existing bytes. Upload the matching standalone manifest after its asset files. Keep the candidate catalog unadvertised.
+1. Prepare the frozen allowlisted root and ledger. Run the local gate before uploading any public bytes. Upload assets to new immutable revision keys with create-only preconditions; resume an interrupted upload only by comparing existing bytes. Upload the matching standalone manifest after its asset files. Keep the candidate catalog unadvertised. The provider adapter below connects these steps.
 2. Run preflight with `-remote`. Every new file must match its local and remote byte size/SHA256. The standalone manifest must equal the embedded catalog manifest. Scene, RGS1, metrics, preview and transport must identify the same revision and agree on time. The gate verifies packed RGS1's bounded gzip decode, column transpose, raw proof, header and primitive values. It checks WebM's bounded EBML/video container, duration, unlaced frame count/timestamps and first keyframe, plus held-out WebP headers; it does not decode every preview/image frame or judge reconstruction quality. A 20-sample scene at 25 fps ends at 0.76 s; its 20-frame preview has a nominal 0.8 s support interval.
 3. Only a successful **`local-and-remote`** receipt authorizes the operator to proceed with the separately approved promotion. Recompute the candidate file SHA256 and require the receipt's `catalog_sha256`; archive that exact catalog, ledger, receipt and verifier source commit. Point the existing configuration/deployment process at that content-addressed catalog. `local` receipts are offline checks and do not establish remote availability. Any failure leaves the current catalog pointer unchanged.
 
@@ -76,4 +76,28 @@ To withdraw a clip, prepare a catalog omitting it, verify that snapshot, and pro
 
 Rollback uses the archived exact previous catalog body and hash, with a fresh availability check or an explicitly recorded pinned-previous trust decision before switching the configuration back. Keep the prior immutable assets for the agreed rollback period. This verifier rejects mutation of a revision present in its previous input; global historical key uniqueness and create-only upload enforcement remain the uploader's responsibility.
 
-This is the finite metadata/asset gate for [#22](https://github.com/Hosi121/rangle/issues/22) and [#25](https://github.com/Hosi121/rangle/issues/25). It does not scan a production container image, enumerate unrelated bucket objects, inspect every `/demo` dependency, or make an automatic CI/deployment promotion mandatory. Those release-artifact allowlists and enforced promotion/upload integration remain acceptance work; these issues must not be closed solely because this preflight passes.
+This is the finite metadata/asset gate for [#22](https://github.com/Hosi121/rangle/issues/22) and [#25](https://github.com/Hosi121/rangle/issues/25). It does not scan a production container image, enumerate unrelated bucket objects, inspect every `/demo` dependency, or make the adapter mandatory for all release paths. Release-artifact allowlists and enforced release-path adoption remain acceptance work; these issues must not be closed solely because an offline preflight passes.
+
+## Finite GCS provider adapter
+
+Build the reviewed gate with `go build -o /private/rangle-publish ./cmd/rangle-publish`, then run:
+
+```bash
+python3 scripts/publish-catalog.py \
+  --gate /private/rangle-publish \
+  --catalog /private/candidate-catalog.json --approvals /private/approvals.json \
+  --root /staging/public --origin https://media.rangleplay.stream \
+  --previous-catalog /private/previous-catalog.json --previous-sha256 <sha256> \
+  --project comin-up --media-bucket rangle-stg-113704194486-media \
+  --catalog-bucket rangle-stg-113704194486-catalog \
+  --environment presentation-stg --account <explicit-account-email> \
+  --output-receipt /private/upload-receipt.json
+```
+
+The default is a local-gate dry run: no credential command or cloud API call, and no upload receipt is written. Add **`--execute`** only for an already authorized publication. The total deadline defaults to 1800 seconds, capped at 3600. Execution first passes the local Go gate, then obtains `gcloud auth print-access-token --account=...` into RAM. It verifies the active project's numeric identity and both buckets' project, Tokyo location, `application=rangle` / requested environment labels, uniform access, and enforced public access prevention. Missing or mismatched scope fails before the first write. No IAM, Cloud Run, active catalog selection, object update/delete, or GPU API is available in the adapter.
+
+All media data precedes scene files, which precede transport manifests. Inserts use [`ifGenerationMatch=0`](https://docs.cloud.google.com/storage/docs/json_api/v1/objects/insert); a 412 is resumable only when size, SHA256 metadata, actual GCS MD5, content type/cache policy, absent encoding, and a valid generation match the local bytes. `rangle_source` is an ownership hint, not approval proof; a matching existing `local-batch-20261109` marker is left unchanged. Every uploaded body is rehashed after the local gate. There are no automatic cloud retries; interruption stops safely and the same frozen inputs can be rerun.
+
+Only after the complete remote Go gate passes does the adapter create private `approvals/<catalogsha>.json`, `receipts/<catalogsha>.json`, and finally `snapshots/<catalogsha>.json` in that order, all create-only with `private,no-store`. Different existing content fails; identical content resumes. The private local upload receipt records bucket/key/generation/size/SHA256/MD5 and verified catalog/ledger/remote-receipt hashes, never tokens or authenticated response bodies. Its creation is atomic and refuses different existing output. Temporary gate receipts are removed on success or failure.
+
+Pass the resulting verified SHA to the existing reviewed Terraform/CI deployment path. Check the candidate response header's catalog snapshot before selecting it; this adapter cannot change the active configuration. Archive the deployment selection and prior SHA for rollback. `python3 scripts/publish-catalog.test.py` runs cloud-stub interruption/resume and failure tests in the existing delivery CI job; real project execution and deployment verification remain operator evidence.
