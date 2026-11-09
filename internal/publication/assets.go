@@ -43,7 +43,7 @@ func finite(n float64) bool      { return !math.IsNaN(n) && !math.IsInf(n, 0) }
 func little32(b []byte) uint32   { return binary.LittleEndian.Uint32(b) }
 func float32At(b []byte) float64 { return float64(math.Float32frombits(little32(b))) }
 
-func validateSceneModel(sceneData, model, metricsData []byte, e entry, a Approval) error {
+func validateSceneData(sceneData []byte, e entry, a Approval) error {
 	var s scene
 	if err := decode(sceneData, &s); err != nil {
 		return fmt.Errorf("scene schema: %w", err)
@@ -98,6 +98,18 @@ func validateSceneModel(sceneData, model, metricsData []byte, e entry, a Approva
 	if math.Abs(e.Manifest.Representations[0].Segments[0].DurationSeconds-duration) > 1e-5 {
 		return fmt.Errorf("transport and scene timelines differ")
 	}
+	return nil
+}
+
+func validateSceneModel(sceneData, model, metricsData []byte, e entry, a Approval) error {
+	if err := validateSceneData(sceneData, e, a); err != nil {
+		return err
+	}
+	var s scene
+	if err := json.Unmarshal(sceneData, &s); err != nil {
+		return err
+	}
+	duration := float64(s.FrameCount-1) / s.FrameRate
 	raw, err := temporalModel(model, s.FrameCount, s.FrameRate)
 	if err != nil {
 		return err

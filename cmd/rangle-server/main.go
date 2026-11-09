@@ -37,6 +37,8 @@ func main() {
 	insecureCookies := flag.Bool("insecure-local-cookies", false, "allow session cookies over HTTP on loopback only")
 	generationFile := flag.String("generation-config", "", "optional immutable generation configuration JSON")
 	generationSyncAudience := flag.String("generation-sync-audience", "", "optional exact HTTPS audience for managed generation state synchronization")
+	liveIndex := flag.String("live-index", os.Getenv("RANGLE_LIVE_INDEX"), "optional local live index or gs://bucket/live/index.json")
+	liveAssetsRoot := flag.String("live-assets-root", "", "optional local live-assets directory; production media uses the CDN")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "rangle-server")
@@ -54,6 +56,8 @@ func main() {
 		SecureCookies:          !*insecureCookies,
 		GenerationFile:         *generationFile,
 		GenerationSyncAudience: *generationSyncAudience,
+		LiveIndex:              *liveIndex,
+		LiveAssetsRoot:         *liveAssetsRoot,
 	}
 
 	if err := run(ctx, *address, cfg, logger); err != nil {
@@ -90,7 +94,7 @@ func run(ctx context.Context, address string, cfg config, logger *slog.Logger) (
 		ReadHeaderTimeout: 5 * time.Second,
 		ErrorLog:          slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
-	logger.Info("server started", "scene_id", cfg.Web.SceneID, "clip_count", handler.clipCount, "api_max_active_requests", serverlimit.MaxConcurrentAPIRequests, "api_queue_capacity", 0)
+	logger.Info("server started", "scene_id", cfg.Web.SceneID, "clip_count", handler.clipCount, "api_max_active_requests", serverlimit.MaxConcurrentAPIRequests, "api_queue_capacity", 0, "live_enabled", cfg.LiveIndex != "")
 
 	serveError := make(chan error, 1)
 	go func() { serveError <- server.Serve(listener) }()
