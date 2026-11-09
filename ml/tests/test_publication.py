@@ -92,7 +92,6 @@ class PublicationTests(unittest.TestCase):
 
         with (
             patch("rangle_training.train.parse_args", return_value=args),
-            patch("google.cloud.storage.Client", return_value=client),
             patch("rangle_training.train.optimize", side_effect=optimize),
             patch("rangle_training.temporal.optimize_dynamic", side_effect=optimize),
             patch("rangle_training.train.threading.Timer"),
@@ -103,9 +102,9 @@ class PublicationTests(unittest.TestCase):
         ):
             if fail_name:
                 with self.assertRaisesRegex(RuntimeError, "Storage publication failed"):
-                    main()
+                    main(storage_client_factory=lambda: client)
             else:
-                main()
+                main(storage_client_factory=lambda: client)
         self.assertTrue(client.closed)
         self.assertEqual(input_blob.download["if_generation_match"], 7)
         for _, kwargs in calls:

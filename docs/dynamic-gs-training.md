@@ -63,16 +63,27 @@ Every held-out camera is evaluated at every time, with its pixels excluded from 
 
 Temporal evidence includes training sample counts per frame, nonzero velocity count, speed, endpoint displacement/opacity difference, and held-out first/last render differences. The same held-out renders are also compared against reversed-time targets from the same camera, reporting matched-time versus reversed-time mean PSNR for float and export. This is a full-image diagnostic without a motion ROI; static background can dominate the scores, and a positive difference does not by itself establish motion quality. Diagnostic WebP images are saved for each held-out camera at the first, middle, and last times.
 
-CPU checks cover unsafe NPZ/time schemas, unchanged static contracts, gradients through all temporal parameters, gsplat topology and optimizer alignment, RGS1 layout and bounded decompression, byte-exact decoding by the existing JavaScript codec, shader-equation agreement, and scene-last publication/failure behavior. They do not establish GPU rendering performance or reconstruction quality. Run the core checks with the existing local image:
+The test suites have two explicit dependency profiles. The default `ml/tests` discovery is the lightweight contract suite: it needs NumPy only and covers unsafe NPZ/time schemas, unchanged static contracts, RGS1 layout and bounded decompression, scene-last publication/failure behavior, and the existing JavaScript codec when Node is available. Publication tests inject a fake storage client into the worker entry point, exercising its actual publication logic without importing the Google SDK or contacting storage. This is the profile run by `ml-contract` CI.
+
+```sh
+PYTHONPATH=ml python3 -m unittest discover -s ml/tests -v
+```
+
+The separate `ml/tests/full_ml` suite requires the complete Torch/gsplat runtime and verifies gradients through all temporal parameters, gsplat topology and optimizer alignment, and export opacity equations including ties-to-even rounding. It must be run explicitly as part of ML validation; missing dependencies fail this suite rather than skipping its tests. The directory is outside default contract discovery so a NumPy-only CI job does not pretend to validate training dependencies.
+
+Run both profiles with the existing local trainer image, without GPU access or networking:
 
 ```sh
 docker run --rm --network=none --entrypoint python \
   -v "$PWD:/workspace:ro" -w /workspace -e PYTHONPATH=ml \
   rangle-trainer-ops:local -m unittest discover -s ml/tests -v
+docker run --rm --network=none --entrypoint python \
+  -v "$PWD:/workspace:ro" -w /workspace -e PYTHONPATH=ml:ml/tests \
+  rangle-trainer-ops:local -m unittest discover -s ml/tests/full_ml -v
 ruff check ml/rangle_training ml/tests
 ```
 
-The JavaScript codec oracle runs when Node is available; it can also run separately on the host:
+CPU validation does not establish GPU rendering performance or reconstruction quality. The JavaScript codec oracle runs when Node is available; it can also run separately on the host:
 
 ```sh
 PYTHONPATH=ml:ml/tests python3 -m unittest test_temporal.TemporalPackingTests -v

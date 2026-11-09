@@ -287,7 +287,7 @@ def build_scene(args, dataset):
     return scene
 
 
-def main():
+def main(*, storage_client_factory=None):
     args = parse_args()
     deadline = datetime.fromisoformat(args.deadline.replace("Z", "+00:00"))
     if deadline.tzinfo is None:
@@ -310,9 +310,11 @@ def main():
     watchdog.start()
     client = None
     try:
-        from google.cloud import storage
+        if storage_client_factory is None:
+            from google.cloud import storage
 
-        client = storage.Client()
+            storage_client_factory = storage.Client
+        client = storage_client_factory()
         with tempfile.TemporaryDirectory(prefix="rangle-training-") as temporary:
             directory = Path(temporary)
             source = client.bucket(input_bucket).blob(input_name)
