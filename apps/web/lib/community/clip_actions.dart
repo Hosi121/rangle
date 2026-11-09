@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/clip.dart';
+import '../widgets/cheer_embers.dart';
 import '../sharing/share_clip.dart';
 import '../sharing/share_sheet.dart';
 import 'account_controller.dart';
@@ -16,12 +17,20 @@ class ClipActions extends StatefulWidget {
     required this.share,
     required this.compact,
     required this.sheetWidth,
+    this.onCheer,
+    this.cheers = 0,
+    this.cheerPulse = 0,
+    this.showCommentsButton = true,
     super.key,
   });
   final Clip clip;
   final bool active, compact;
   final double sheetWidth;
   final AccountController? account;
+  final VoidCallback? onCheer;
+  final int cheers;
+  final int cheerPulse;
+  final bool showCommentsButton;
   final ClipShareAction share;
   @override
   State<ClipActions> createState() => _ClipActionsState();
@@ -135,7 +144,7 @@ class _ClipActionsState extends State<ClipActions> {
           isSelected: selected,
           style: IconButton.styleFrom(
             backgroundColor: Colors.black.withValues(alpha: .5),
-            foregroundColor: selected ? const Color(0xFFB9EF7E) : Colors.white,
+            foregroundColor: selected ? const Color(0xFFFF954A) : Colors.white,
           ),
           icon: Icon(icon, size: 28),
         ),
@@ -144,17 +153,30 @@ class _ClipActionsState extends State<ClipActions> {
       ],
     );
     final actions = [
-      action(
-        _value.liked ? 'いいねを取り消す' : 'いいね',
-        _value.liked ? Icons.favorite : Icons.favorite_border,
-        _pending ? null : _like,
-        count: _value.likes.toString(),
-        selected: _value.liked,
-      ),
-      action('コメント', Icons.chat_bubble_outline, () async {
-        await showComments(context, widget.clip.id, widget.account);
-        await _reload();
-      }, count: _value.comments.toString()),
+      if (widget.onCheer != null)
+        CheerEmbers(
+          trigger: widget.cheerPulse,
+          child: action(
+            '声援を送る（何度でも押せます）',
+            Icons.local_fire_department,
+            widget.onCheer,
+            count: widget.cheers.toString(),
+            selected: true,
+          ),
+        )
+      else
+        action(
+          _value.liked ? 'いいねを取り消す' : 'いいね',
+          _value.liked ? Icons.favorite : Icons.favorite_border,
+          _pending ? null : _like,
+          count: _value.likes.toString(),
+          selected: _value.liked,
+        ),
+      if (widget.showCommentsButton)
+        action('コメント', Icons.chat_bubble_outline, () async {
+          await showComments(context, widget.clip.id, widget.account);
+          await _reload();
+        }, count: _value.comments.toString()),
       action('共有', Icons.ios_share, _share),
     ];
     return widget.compact

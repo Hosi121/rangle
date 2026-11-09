@@ -9,6 +9,7 @@ import '../live/live_api.dart';
 import '../live/live_screen.dart';
 import '../viewer/viewer_adapter.dart';
 import '../widgets/viewer_modal.dart';
+import '../widgets/rangle_header.dart';
 import 'generation_api.dart';
 
 class GenerationScreen extends StatefulWidget {
@@ -417,8 +418,8 @@ class _GenerationScreenState extends State<GenerationScreen>
       _showLive ? _liveView() : _generationForm(context);
 
   Widget _generationForm(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('GSを生成'),
+    appBar: RangleHeader(
+      title: '生成',
       actions: [
         IconButton(
           tooltip: '状態を再読み込み',

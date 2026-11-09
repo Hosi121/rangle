@@ -57,20 +57,20 @@ class RangleApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const accent = Color(0xFFB9EF7E);
+    const accent = Color(0xFFFF6500);
     const colors = ColorScheme.dark(
       primary: accent,
-      onPrimary: Color(0xFF1C2B12),
+      onPrimary: Color(0xFF190C05),
       secondary: accent,
-      onSecondary: Color(0xFF1C2B12),
-      surface: Color(0xFF101211),
+      onSecondary: Color(0xFF190C05),
+      surface: Color(0xFF101010),
       onSurface: Color(0xFFF0F2ED),
-      onSurfaceVariant: Color(0xFFBAC1B7),
-      outline: Color(0xFF71796E),
-      outlineVariant: Color(0xFF30372F),
-      surfaceContainer: Color(0xFF191D19),
-      surfaceContainerHigh: Color(0xFF242A23),
-      surfaceContainerHighest: Color(0xFF30372F),
+      onSurfaceVariant: Color(0xFFC7C0BA),
+      outline: Color(0xFF7A716A),
+      outlineVariant: Color(0xFF39312C),
+      surfaceContainer: Color(0xFF191614),
+      surfaceContainerHigh: Color(0xFF25201D),
+      surfaceContainerHighest: Color(0xFF332B26),
     );
     return MaterialApp(
       title: 'rangle',
@@ -83,6 +83,19 @@ class RangleApp extends StatelessWidget {
         colorScheme: colors,
         scaffoldBackgroundColor: colors.surface,
         visualDensity: VisualDensity.standard,
+        cardTheme: CardThemeData(
+          elevation: 0,
+          color: colors.surfaceContainer,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+            side: BorderSide(color: colors.outlineVariant),
+          ),
+        ),
+        inputDecorationTheme: InputDecorationTheme(
+          filled: true,
+          fillColor: colors.surfaceContainer,
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+        ),
         tooltipTheme: const TooltipThemeData(waitDuration: Duration.zero),
         sliderTheme: const SliderThemeData(
           showValueIndicator: ShowValueIndicator.never,

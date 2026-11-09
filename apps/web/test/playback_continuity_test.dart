@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:rangle_web/models/clip.dart';
 import 'package:rangle_web/viewer/viewer_adapter.dart';
 import 'package:rangle_web/widgets/clip_card.dart';
-import 'package:rangle_web/widgets/edge_seek_bar.dart';
 
 class HandoffViewer extends ViewerAdapter {
   HandoffViewer({
@@ -25,11 +24,15 @@ class HandoffViewer extends ViewerAdapter {
   final completions = <Completer<bool>>[];
   final drawn = <int>[];
   bool disposed = false, paused = false;
+  PlaybackState? captureOverride;
   int frames = 20;
   @override
   ViewerValue get value => _value;
   @override
   Future<void> initialize() async {}
+  @override
+  Future<PlaybackState> capturePlayback() async =>
+      captureOverride ?? await super.capturePlayback();
   @override
   void configureContinuity(Uri preview, PreviewSceneMapping? declared) =>
       mapping = declared;
@@ -107,7 +110,11 @@ class HandoffViewer extends ViewerAdapter {
   }
 }
 
-Clip clip({String id = 'game', String revision = 'r1'}) => Clip(
+Clip clip({
+  String id = 'game',
+  String revision = 'r1',
+  PreviewSceneMapping? mapping = const PreviewSceneMapping(),
+}) => Clip(
   id: id,
   revision: revision,
   title: 'バスケットボール',
@@ -115,7 +122,7 @@ Clip clip({String id = 'game', String revision = 'r1'}) => Clip(
   description: '',
   previewUrl: Uri.parse('https://example.test/$id/$revision/preview.webm'),
   sceneUrl: Uri.parse('https://example.test/$id/$revision/scene.json'),
-  playbackMapping: const PreviewSceneMapping(),
+  playbackMapping: mapping,
 );
 
 Future<void> mount(
@@ -130,6 +137,10 @@ Future<void> mount(
   tester.view.devicePixelRatio = 1;
   await tester.pumpWidget(
     MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(disableAnimations: true),
+        child: child!,
+      ),
       home: Scaffold(
         body: ClipCard(
           key: const ValueKey('active-slot'),
@@ -186,12 +197,45 @@ void main() {
     );
   });
   testWidgets(
-    'focused .56 paused → first GS sample14 → sample19 → paused video, with explicit .80 end clamp',
+    'missing mapping starts scene at zero and preserves the original preview time and intent',
+    (tester) async {
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final videos = <HandoffViewer>[], scenes = <HandoffViewer>[];
+      await mount(tester, clip(mapping: null), videos, scenes);
+      videos.single.emit(const Duration(milliseconds: 560), true);
+      await tap(tester, '自由視点で見る');
+      scenes.single.prepared();
+      await tester.pumpAndSettle();
+      expect(scenes.single.requests.single.position, Duration.zero);
+      scenes.single.complete();
+      await tester.pumpAndSettle();
+      expect(scenes.single.value.playing, isFalse);
+      expect(find.textContaining('時刻の対応情報なし'), findsOneWidget);
+      scenes.single.emit(const Duration(milliseconds: 400), false);
+      await tap(tester, '動画に戻る');
+      expect(
+        videos.single.requests.single.position,
+        const Duration(milliseconds: 560),
+      );
+      expect(videos.single.requests.single.playing, isTrue);
+      videos.single.complete();
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'captured native time selects sample14; return awaits video restoration without remounting',
     (tester) async {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final videos = <HandoffViewer>[], scenes = <HandoffViewer>[];
       await mount(tester, clip(), videos, scenes);
+      videos.single.captureOverride = const PlaybackState(
+        Duration(milliseconds: 560),
+        false,
+      );
       await tap(tester, '自由視点で見る');
       scenes.single.prepared();
       await tester.pumpAndSettle();
@@ -201,36 +245,43 @@ void main() {
       );
       expect(scenes.single.requests.single.playing, isFalse);
       expect(scenes.single.drawn, isEmpty);
-      expect(videos.single.disposed, isFalse);
+      expect(find.text('動画に戻る'), findsNothing);
       scenes.single.complete();
       await tester.pumpAndSettle();
       expect(scenes.single.drawn, [14]);
-      expect(videos.single.disposed, isTrue);
-      scenes.single.emit(const Duration(milliseconds: 760), false);
-      await tester.pumpAndSettle();
-      await tap(tester, '動画に戻る');
-      expect(videos, hasLength(2));
       expect(
-        videos.last.requests.single.position,
+        videos.single.disposed,
+        isFalse,
+        reason: 'immersive design retains the same native player',
+      );
+      expect(videos.single.paused, isTrue);
+      scenes.single.emit(const Duration(milliseconds: 400), false);
+      scenes.single.captureOverride = const PlaybackState(
+        Duration(milliseconds: 760),
+        false,
+      );
+      await tap(tester, '動画に戻る');
+      expect(videos, hasLength(1));
+      expect(
+        videos.single.requests.single.position,
         const Duration(milliseconds: 760),
       );
-      expect(videos.last.requests.single.playing, isFalse);
+      expect(videos.single.requests.single.playing, isFalse);
       expect(
         scenes.single.paused,
         isFalse,
-        reason: 'old scene remains available during native player restoration',
+        reason: 'GS stays visible until native restoration is acknowledged',
       );
-      videos.last.complete();
+      videos.single.complete();
       await tester.pumpAndSettle();
       expect(scenes.single.paused, isTrue);
-      videos.last.emit(const Duration(milliseconds: 800), false);
-      await tester.pumpAndSettle();
-      await tap(tester, '自由視点で見る');
-      expect(
-        scenes,
-        hasLength(1),
-        reason: 'cached model and camera are retained',
+      expect(find.text('動画に戻る'), findsNothing);
+      videos.single.captureOverride = const PlaybackState(
+        Duration(milliseconds: 800),
+        false,
       );
+      await tap(tester, '自由視点で見る');
+      expect(scenes, hasLength(1), reason: 'model and camera are retained');
       expect(
         scenes.single.requests.last.position,
         const Duration(milliseconds: 760),
@@ -245,62 +296,53 @@ void main() {
   );
 
   testWidgets(
-    'video remains usable during preparation and only the latest requested time and play intent reveal GS',
+    'entry freezes a latched frame and restores the original play intent after reveal',
     (tester) async {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final videos = <HandoffViewer>[], scenes = <HandoffViewer>[];
       await mount(tester, clip(), videos, scenes);
       videos.single.emit(const Duration(milliseconds: 560), true);
-      await tester.pumpAndSettle();
       await tap(tester, '自由視点で見る');
       scenes.single.prepared();
       await tester.pumpAndSettle();
-      videos.single.emit(const Duration(milliseconds: 640), true);
+      expect(
+        videos.single.value.playing,
+        isFalse,
+        reason: 'video holds its frame during the transformation',
+      );
+      expect(
+        scenes.single.requests.single.playing,
+        isFalse,
+        reason: 'scene cannot advance behind the reveal',
+      );
+      videos.single.emit(const Duration(milliseconds: 640), false);
       await tester.pumpAndSettle();
       expect(
         scenes.single.requests,
         hasLength(1),
-        reason: 'automatic progress cannot indefinitely supersede a slow target draw',
+        reason: 'progress cannot starve the first draw',
       );
-      tester.widget<EdgeSeekBar>(find.byType(EdgeSeekBar).last).onSeek!(
-        const Duration(milliseconds: 720),
-      );
+      scenes.single.complete();
       await tester.pumpAndSettle();
-      expect(scenes.single.requests, hasLength(2));
-      expect(
-        scenes.single.requests.last.position,
-        const Duration(milliseconds: 720),
-      );
-      await tester.tap(find.byKey(const Key('video-playback-surface')));
-      await tester.pumpAndSettle();
-      expect(scenes.single.requests, hasLength(3));
-      scenes.single.complete(0);
-      await tester.pumpAndSettle();
-      expect(videos.single.disposed, isFalse);
-      expect(find.text('自由視点の準備をキャンセル'), findsOneWidget);
-      scenes.single.complete(2);
-      await tester.pumpAndSettle();
-      expect(videos.single.disposed, isTrue);
-      expect(scenes.single.value.position, const Duration(milliseconds: 720));
-      expect(scenes.single.value.playing, isFalse);
+      expect(scenes.single.value.position, const Duration(milliseconds: 560));
+      expect(scenes.single.value.playing, isTrue);
       scenes.single.emit(const Duration(milliseconds: 400), true);
-      await tester.pumpAndSettle();
       await tap(tester, '動画に戻る');
       expect(
-        videos.last.requests.single.position,
+        videos.single.requests.single.position,
         const Duration(milliseconds: 400),
       );
-      expect(videos.last.requests.single.playing, isTrue);
-      videos.last.complete();
+      expect(videos.single.requests.single.playing, isTrue);
+      videos.single.complete();
       await tester.pumpAndSettle();
-      expect(videos.last.value.playing, isTrue);
+      expect(videos.single.value.playing, isTrue);
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 
   testWidgets(
-    'cancel, retry and revision changes cannot resurrect stale playback acknowledgements',
+    'cancel, failure and revision changes ignore old acknowledgements',
     (tester) async {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
@@ -309,10 +351,10 @@ void main() {
       await tap(tester, '自由視点で見る');
       scenes.single.prepared();
       await tester.pumpAndSettle();
-      await tap(tester, '自由視点の準備をキャンセル');
+      await tap(tester, 'キャンセル');
       expect(scenes.first.disposed, isTrue);
+      expect(find.text('自由視点で見る'), findsOneWidget);
       videos.single.emit(const Duration(milliseconds: 200), false);
-      await tester.pumpAndSettle();
       await tap(tester, '自由視点で見る');
       scenes.last.prepared();
       await tester.pumpAndSettle();
@@ -332,13 +374,9 @@ void main() {
       );
       await mount(tester, clip(revision: 'r2'), videos, scenes);
       expect(scenes.every((scene) => scene.disposed), isTrue);
+      expect(videos.first.disposed, isTrue);
       expect(find.text('自由視点で見る'), findsOneWidget);
-      expect(
-        videos.last.requests,
-        isEmpty,
-        reason:
-            'new revision uses fresh VOD autoplay instead of stale restoration',
-      );
+      expect(videos.last.requests, isEmpty);
       await mount(tester, clip(id: 'next'), videos, scenes);
       expect(videos.last.requests, isEmpty);
       await mount(tester, clip(id: 'next'), videos, scenes, active: false);

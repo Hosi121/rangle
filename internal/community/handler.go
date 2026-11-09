@@ -56,6 +56,8 @@ func NewHandler(cfg Config) *Handler {
 	mux.HandleFunc("POST /api/v1/auth/login", h.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", h.logout)
 	mux.HandleFunc("GET /api/v1/clips/{clip}/engagement", h.engagement)
+	mux.HandleFunc("GET /api/v1/clips/{clip}/cheers", h.cheers)
+	mux.HandleFunc("POST /api/v1/clips/{clip}/cheers", h.cheers)
 	mux.HandleFunc("PUT /api/v1/clips/{clip}/likes", h.like)
 	mux.HandleFunc("DELETE /api/v1/clips/{clip}/likes", h.like)
 	mux.HandleFunc("GET /api/v1/clips/{clip}/comments", h.comments)

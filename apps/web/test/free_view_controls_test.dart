@@ -80,7 +80,9 @@ void _expectProtected(WidgetTester tester, Finder control) {
 Offset _expectSceneExposed(WidgetTester tester) {
   final surface = find.byKey(const Key('scene-input'));
   expect(find.ancestor(of: surface, matching: _interceptors), findsNothing);
-  final player = tester.getRect(surface);
+  final player = tester
+      .getRect(surface)
+      .intersect(tester.getRect(find.byKey(const Key('feed-player'))));
   final point = Offset(player.center.dx, player.top + player.height * .3);
   for (final element in _interceptors.evaluate()) {
     expect(
@@ -184,8 +186,7 @@ void main() {
         );
         for (final tooltip in [
           '共有',
-          'コメント',
-          'いいね',
+          '声援を送る（何度でも押せます）',
           '出典・詳細',
           '検索',
           'ログイン',
@@ -215,11 +216,12 @@ void main() {
         final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
         await mouse.addPointer(location: const Offset(1, 1));
         final pauses = scene.pauseCount, drags = scene.drags;
+        final initialSeek = scene.lastSeek;
         await mouse.moveTo(
           tester.getCenter(find.byKey(const Key('media-scrubber'))),
         );
         await tester.pump(const Duration(milliseconds: 80));
-        expect(scene.lastSeek, isNull);
+        expect(scene.lastSeek, initialSeek);
         expect(scene.value.playing, isTrue);
         expect(scene.pauseCount, pauses);
         expect(scene.drags, drags);
@@ -287,7 +289,13 @@ void main() {
     final scene = _Scene();
     await _pumpFreeView(tester, scene, const Size(390, 844));
     for (final tooltip in ['コメント', 'ログイン', '検索']) {
-      await tester.tap(find.byTooltip(tooltip));
+      if (tooltip == 'コメント') {
+        await tester.tap(find.byTooltip('出典・詳細'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('コメントを見る'));
+      } else {
+        await tester.tap(find.byTooltip(tooltip));
+      }
       await tester.pumpAndSettle();
       _expectModalProtected(tester);
       if (tooltip == '検索') {
@@ -302,6 +310,18 @@ void main() {
     final before = scene.drags;
     await _dragScene(tester, _expectSceneExposed(tester));
     expect(scene.drags, greaterThan(before));
+    expect(
+      tester
+          .widget<IconButton>(
+            find.byWidgetPredicate(
+              (w) => w is IconButton && w.tooltip == '次のハイライト',
+            ),
+          )
+          .onPressed,
+      isNull,
+    );
+    await tester.tap(find.text('動画に戻る'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('次のハイライト'));
     await tester.pumpAndSettle();
     expect(scene.disposed, isTrue);

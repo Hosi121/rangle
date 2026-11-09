@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../viewer/viewer_adapter.dart';
+import '../viewer/playback_controller.dart';
 import 'edge_seek_bar.dart';
 
 class PreviewViewer extends StatefulWidget {
@@ -21,6 +22,9 @@ class PreviewViewer extends StatefulWidget {
     this.onSourceError,
     this.sha256,
     this.sourceRevision = 0,
+    this.controller,
+    this.showControls = true,
+    this.interactive = true,
     this.playback,
     this.continuity = false,
     this.mapping,
@@ -45,6 +49,8 @@ class PreviewViewer extends StatefulWidget {
   final VoidCallback? onSourceError;
   final String? sha256;
   final int sourceRevision;
+  final PlaybackController? controller;
+  final bool showControls, interactive;
   final PlaybackState? playback;
   final bool continuity;
   final PreviewSceneMapping? mapping;
@@ -95,6 +101,7 @@ class _PreviewViewerState extends State<PreviewViewer>
     if (widget.continuity && widget.thumbnailSource != null) {
       _adapter.configureContinuity(widget.thumbnailSource!, widget.mapping);
     }
+    widget.controller?.attach(_adapter);
     _adapter.addListener(_reportStatus);
     if (!widget.visible || !_appVisible) unawaited(_adapter.pause());
     final playback = retry ?? widget.playback;
@@ -195,6 +202,10 @@ class _PreviewViewerState extends State<PreviewViewer>
     if (widget.playback != null && widget.playback != oldWidget.playback) {
       unawaited(_restore(widget.playback!));
     }
+    if (oldWidget.controller != widget.controller) {
+      oldWidget.controller?.detach(_adapter);
+      widget.controller?.attach(_adapter);
+    }
     if (widget.freeView &&
         (widget.source != oldWidget.source ||
             widget.sourceRevision != oldWidget.sourceRevision)) {
@@ -245,6 +256,7 @@ class _PreviewViewerState extends State<PreviewViewer>
   void _retry() {
     setState(() {
       _adapter.removeListener(_reportStatus);
+      widget.controller?.detach(_adapter);
       _adapter.dispose();
       _create(_lastGoodPlayback);
     });
@@ -263,6 +275,7 @@ class _PreviewViewerState extends State<PreviewViewer>
     _bufferingTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _adapter.removeListener(_reportStatus);
+    widget.controller?.detach(_adapter);
     _adapter.dispose();
     _playbackFocus.dispose();
     super.dispose();
@@ -364,7 +377,7 @@ class _PreviewViewerState extends State<PreviewViewer>
                 ),
                 ViewerStatus.ready => _adapter.buildView(),
               },
-              if (ready)
+              if (ready && widget.interactive)
                 Positioned.fill(
                   child: PointerInterceptor(
                     child: Semantics(
@@ -397,42 +410,44 @@ class _PreviewViewerState extends State<PreviewViewer>
                   left: 16,
                   child: IgnorePointer(child: Text('映像を読み込んでいます')),
                 ),
-              Positioned(
-                right: 8,
-                bottom: 52,
-                child: PointerInterceptor(
-                  child: IconButton.filledTonal(
-                    tooltip: value.muted ? 'ミュート解除' : 'ミュート',
-                    onPressed: ready
-                        ? () => unawaited(_adapter.toggleMute())
-                        : null,
-                    icon: Icon(
-                      value.muted ? Icons.volume_off : Icons.volume_up,
+              if (widget.showControls)
+                Positioned(
+                  right: 8,
+                  bottom: 52,
+                  child: PointerInterceptor(
+                    child: IconButton.filledTonal(
+                      tooltip: value.muted ? 'ミュート解除' : 'ミュート',
+                      onPressed: ready
+                          ? () => unawaited(_adapter.toggleMute())
+                          : null,
+                      icon: Icon(
+                        value.muted ? Icons.volume_off : Icons.volume_up,
+                      ),
                     ),
                   ),
                 ),
-              ),
             ],
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 0,
-              child: EdgeSeekBar(
-                position: value.position,
-                duration: value.duration,
-                label: widget.freeView ? 'シーンの時刻' : '再生位置',
-                thumbnailSource: widget.visible
-                    ? (widget.thumbnailSource ??
-                          (widget.freeView ? null : widget.source))
-                    : null,
-                intercepting: widget.visible,
-                onSeek: ready && value.duration > Duration.zero
-                    ? (position) =>
-                          unawaited(_interact(() => _adapter.seek(position)))
-                    : null,
-                onTogglePlayback: canPlay ? _togglePlayback : null,
+            if (widget.showControls)
+              Positioned(
+                left: 0,
+                right: 0,
+                bottom: 0,
+                child: EdgeSeekBar(
+                  position: value.position,
+                  duration: value.duration,
+                  label: widget.freeView ? 'シーンの時刻' : '再生位置',
+                  thumbnailSource: widget.visible
+                      ? (widget.thumbnailSource ??
+                            (widget.freeView ? null : widget.source))
+                      : null,
+                  intercepting: widget.visible,
+                  onSeek: ready && value.duration > Duration.zero
+                      ? (position) =>
+                            unawaited(_interact(() => _adapter.seek(position)))
+                      : null,
+                  onTogglePlayback: canPlay ? _togglePlayback : null,
+                ),
               ),
-            ),
           ],
         ),
       );

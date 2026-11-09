@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
@@ -19,6 +20,7 @@ import 'widgets/search_dialog.dart';
 import 'models/clip.dart';
 import 'viewer/viewer_adapter.dart';
 import 'widgets/clip_card.dart';
+import 'widgets/brand_art.dart';
 import 'widgets/preview_viewer.dart';
 
 export 'viewer/viewer_adapter.dart';
@@ -329,6 +331,31 @@ class _HighlightFeedState extends State<_HighlightFeed> {
   late final PageController _pages;
   late int _selected;
   bool _freeView = false;
+  Timer? _wheelIdle;
+  double _wheelDelta = 0;
+  bool _wheelLatched = false;
+  bool _pageTransition = false;
+
+  void _onWheel(PointerSignalEvent event) {
+    if (event is! PointerScrollEvent ||
+        event.scrollDelta.dy.abs() <= event.scrollDelta.dx.abs()) {
+      return;
+    }
+    // This listener lives inside the Scrollable: resolving here prevents its
+    // continuous wheel handler from racing page selection or skipping clips.
+    GestureBinding.instance.pointerSignalResolver.register(event, (_) {
+      _wheelIdle?.cancel();
+      _wheelIdle = Timer(const Duration(milliseconds: 240), () {
+        _wheelDelta = 0;
+        _wheelLatched = false;
+      });
+      if (_freeView || _wheelLatched) return;
+      _wheelDelta += event.scrollDelta.dy;
+      if (_wheelDelta.abs() < 24) return;
+      _wheelLatched = true;
+      _select(_selected + (_wheelDelta > 0 ? 1 : -1));
+    });
+  }
 
   @override
   void initState() {
@@ -339,16 +366,33 @@ class _HighlightFeedState extends State<_HighlightFeed> {
   }
 
   void _select(int index) {
+    if (_freeView || _pageTransition) return;
     if (index >= widget.paging.endIndex) {
       unawaited(widget.paging.loadNext());
       return;
     }
     if (index < widget.paging.firstIndex || index == _selected) return;
-    _pages.jumpToPage(index);
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _pages.jumpToPage(index);
+      return;
+    }
+    _pageTransition = true;
+    unawaited(
+      _pages
+          .animateToPage(
+            index,
+            duration: const Duration(milliseconds: 380),
+            curve: Curves.easeInOutCubic,
+          )
+          .whenComplete(() {
+            _pageTransition = false;
+          }),
+    );
   }
 
   @override
   void dispose() {
+    _wheelIdle?.cancel();
     _pages.dispose();
     super.dispose();
   }
@@ -387,55 +431,64 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                 child: Stack(
                   fit: StackFit.expand,
                   children: [
-                    PageView.builder(
-                      key: const Key('highlight-feed'),
-                      controller: _pages,
-                      scrollDirection: Axis.vertical,
-                      physics: _freeView
-                          ? const NeverScrollableScrollPhysics()
-                          : _FeedWindowPhysics(widget.paging),
-                      itemCount: widget.paging.endIndex,
-                      onPageChanged: (index) {
-                        setState(() {
-                          _selected = index;
-                          _freeView = false;
-                        });
-                        widget.paging.select(index);
-                      },
-                      itemBuilder: (context, index) {
-                        final offset = index - widget.paging.firstIndex;
-                        if (offset < 0) return const SizedBox.expand();
-                        final clip = widget.clips[offset];
-                        return ExcludeSemantics(
-                          key: ValueKey(clip.id),
-                          excluding: index != _selected,
-                          child: ClipCard(
-                            clip: clip,
-                            active: index == _selected,
-                            viewerFactory: widget.viewerFactory,
-                            sceneFactory: widget.sceneFactory,
-                            account: widget.account,
-                            shareAction: widget.shareAction,
-                            onTag: widget.onTag,
-                            onFreeViewChanged: (value) =>
-                                setState(() => _freeView = value),
-                            onNext:
-                                index < widget.paging.endIndex - 1 ||
-                                    widget.paging.hasMore
-                                ? () => _select(index + 1)
-                                : null,
-                            initialFreeView:
-                                widget.initialFreeView && index == 0,
-                          ),
-                        );
-                      },
+                    Listener(
+                      onPointerSignal: _onWheel,
+                      child: PageView.builder(
+                        key: const Key('highlight-feed'),
+                        controller: _pages,
+                        scrollDirection: Axis.vertical,
+                        physics: _freeView
+                            ? const NeverScrollableScrollPhysics()
+                            : _FeedWindowPhysics(
+                                widget.paging,
+                                transitioning: () => _pageTransition,
+                              ),
+                        itemCount: widget.paging.endIndex,
+                        onPageChanged: (index) {
+                          setState(() {
+                            _selected = index;
+                            _freeView = false;
+                          });
+                          widget.paging.select(index);
+                        },
+                        itemBuilder: (context, index) {
+                          final offset = index - widget.paging.firstIndex;
+                          if (offset < 0) return const SizedBox.expand();
+                          final clip = widget.clips[offset];
+                          return ExcludeSemantics(
+                            key: ValueKey(clip.id),
+                            excluding: index != _selected,
+                            child: Listener(
+                              onPointerSignal: _onWheel,
+                              child: ClipCard(
+                                clip: clip,
+                                active: index == _selected,
+                                viewerFactory: widget.viewerFactory,
+                                sceneFactory: widget.sceneFactory,
+                                account: widget.account,
+                                shareAction: widget.shareAction,
+                                onTag: widget.onTag,
+                                onFreeViewChanged: (value) =>
+                                    setState(() => _freeView = value),
+                                onNext:
+                                    index < widget.paging.endIndex - 1 ||
+                                        widget.paging.hasMore
+                                    ? () => _select(index + 1)
+                                    : null,
+                                initialFreeView:
+                                    widget.initialFreeView && index == 0,
+                              ),
+                            ),
+                          );
+                        },
+                      ),
                     ),
                     if (_selected >= widget.paging.endIndex - 2 &&
                         (widget.paging.loading ||
                             widget.paging.error != null ||
                             widget.paging.hasMore))
                       Positioned(
-                        bottom: 12,
+                        bottom: 142,
                         left: 16,
                         right: 72,
                         child: PointerInterceptor(
@@ -477,36 +530,37 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                               header: true,
                               label: 'rangle リプレイ アングル',
                               child: ExcludeSemantics(
-                                child: Text(
-                                  'rangle',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w800),
+                                child: Align(
+                                  alignment: Alignment.centerLeft,
+                                  child: RangleWordmark(width: 206),
                                 ),
                               ),
                             ),
                           ),
-                          Flexible(
-                            child: Semantics(
-                              liveRegion: true,
-                              label:
-                                  '取得済み${widget.paging.endIndex}件中${_selected + 1}件目${widget.paging.hasMore ? '、続きがあります' : ''}',
-                              child: ExcludeSemantics(
-                                child: Text(
-                                  '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.paging.endIndex.toString().padLeft(2, '0')}${widget.paging.hasMore ? '+' : ''}',
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: Theme.of(context).textTheme.labelMedium
-                                      ?.copyWith(
-                                        fontFeatures: const [
-                                          FontFeature.tabularFigures(),
-                                        ],
-                                      ),
+                          if (constraints.maxWidth >= 420)
+                            Flexible(
+                              flex: 0,
+                              child: Semantics(
+                                liveRegion: true,
+                                label:
+                                    '取得済み${widget.paging.endIndex}件中${_selected + 1}件目${widget.paging.hasMore ? '、続きがあります' : ''}',
+                                child: ExcludeSemantics(
+                                  child: Text(
+                                    '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.paging.endIndex.toString().padLeft(2, '0')}${widget.paging.hasMore ? '+' : ''}',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelMedium
+                                        ?.copyWith(
+                                          fontFeatures: const [
+                                            FontFeature.tabularFigures(),
+                                          ],
+                                        ),
+                                  ),
                                 ),
                               ),
                             ),
-                          ),
                           PointerInterceptor(
                             intercepting: _freeView,
                             child: IconButton(
@@ -567,6 +621,23 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                         ],
                       ),
                     ),
+                    if (constraints.maxWidth < 420)
+                      Positioned(
+                        top: 55,
+                        left: 16,
+                        child: IgnorePointer(
+                          child: Semantics(
+                            liveRegion: true,
+                            child: Text(
+                              '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.paging.endIndex.toString().padLeft(2, '0')}${widget.paging.hasMore ? '+' : ''}',
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.white54,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
                     if (widget.filterLabel.isNotEmpty)
                       Positioned(
                         top: 68,
@@ -612,7 +683,9 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           children: [
                             IconButton.filledTonal(
                               tooltip: '前のハイライト',
-                              onPressed: _selected > widget.paging.firstIndex
+                              onPressed:
+                                  !_freeView &&
+                                      _selected > widget.paging.firstIndex
                                   ? () => _select(_selected - 1)
                                   : null,
                               icon: const Icon(Icons.keyboard_arrow_up),
@@ -621,8 +694,9 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                             IconButton.filledTonal(
                               tooltip: '次のハイライト',
                               onPressed:
-                                  _selected < widget.paging.endIndex - 1 ||
-                                      widget.paging.hasMore
+                                  !_freeView &&
+                                      (_selected < widget.paging.endIndex - 1 ||
+                                          widget.paging.hasMore)
                                   ? () => _select(_selected + 1)
                                   : null,
                               icon: const Icon(Icons.keyboard_arrow_down),
@@ -644,12 +718,26 @@ class _HighlightFeedState extends State<_HighlightFeed> {
 
 /// Clamp backward gestures at the retained window without renumbering pages.
 class _FeedWindowPhysics extends ScrollPhysics {
-  const _FeedWindowPhysics(this.paging, {super.parent});
+  const _FeedWindowPhysics(
+    this.paging, {
+    required this.transitioning,
+    super.parent,
+  });
   final ClipPagingController paging;
+  final bool Function() transitioning;
+
+  // Animated scrolling temporarily ignores its children. Let the outer wheel
+  // listener consume momentum instead of cancelling the slide mid-frame.
+  @override
+  bool shouldAcceptUserOffset(ScrollMetrics position) =>
+      !transitioning() && super.shouldAcceptUserOffset(position);
 
   @override
-  _FeedWindowPhysics applyTo(ScrollPhysics? ancestor) =>
-      _FeedWindowPhysics(paging, parent: buildParent(ancestor));
+  _FeedWindowPhysics applyTo(ScrollPhysics? ancestor) => _FeedWindowPhysics(
+    paging,
+    transitioning: transitioning,
+    parent: buildParent(ancestor),
+  );
 
   @override
   double applyBoundaryConditions(ScrollMetrics position, double value) {

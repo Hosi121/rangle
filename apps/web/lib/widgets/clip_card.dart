@@ -1,12 +1,24 @@
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
-import '../models/clip.dart';
 import '../community/account_controller.dart';
+import '../community/account_dialog.dart';
+import '../community/cheer_controller.dart';
 import '../community/clip_actions.dart';
+import '../community/comments_sheet.dart';
+import '../community/community_api.dart';
+import '../feedback/haptics.dart' as haptics;
+import '../models/clip.dart';
 import '../sharing/share_clip.dart';
+import '../viewer/playback_controller.dart';
 import '../viewer/viewer_adapter.dart';
+import 'cheer_seek_bar.dart';
 import 'feed_sheet.dart';
+import 'immersive_effect.dart';
 import 'preview_viewer.dart';
 
 class ClipCard extends StatefulWidget {
@@ -24,352 +36,376 @@ class ClipCard extends StatefulWidget {
     super.key,
   });
   final Clip clip;
-  final bool active;
-  final ViewerFactory viewerFactory;
-  final ViewerFactory sceneFactory;
+  final bool active, initialFreeView;
+  final ViewerFactory viewerFactory, sceneFactory;
   final ValueChanged<bool> onFreeViewChanged;
   final VoidCallback? onNext;
   final AccountController? account;
   final ValueChanged<String>? onTag;
   final ClipShareAction shareAction;
-  final bool initialFreeView;
-
   @override
   State<ClipCard> createState() => _ClipCardState();
 }
 
-class _ClipCardState extends State<ClipCard> {
-  bool _freeView = false;
-  bool _sceneRequested = false;
-  bool _sceneReady = false;
-  bool _pendingScene = false;
-  bool _sceneError = false;
-  bool _pendingVideo = false, _videoError = false;
-  int _clipEpoch = 0, _sceneEpoch = 0, _videoAttempt = 0;
-  PlaybackState _playback = const PlaybackState(Duration.zero, false);
-  PlaybackState? _scenePlayback, _videoPlayback;
+class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
+  final _video = PlaybackController(), _scene = PlaybackController();
+  late final AnimationController _charge = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1200),
+  );
+  late final AnimationController _reveal = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2850),
+  );
+  late final AnimationController _fire = AnimationController(
+    vsync: this,
+    duration: const Duration(seconds: 4),
+  );
+  late CheerController _cheers;
+  bool _freeView = false,
+      _sceneRequested = false,
+      _sceneReady = false,
+      _sceneError = false;
+  bool _entering = false,
+      _armed = false,
+      _alignmentRequested = false,
+      _wasPlaying = false;
+  bool _hasEntered = false;
+  bool _videoRequested = true;
+  Duration _entryPosition = Duration.zero, _sceneTarget = Duration.zero;
+  bool _captureReady = false, _pendingVideo = false, _timeClamped = false;
+  PlaybackState? _videoPlayback;
   ViewerTimeline? _sceneTimeline;
-  bool _timeClamped = false;
-  ViewerAdapter? _videoAdapter, _sceneAdapter;
-  int _sceneCapture = 0, _returnCapture = 0;
+  int _generation = 0;
+  int _cheerPulse = 0;
+  String? _userId;
   Clip get clip => widget.clip;
-  bool get active => widget.active;
-  VoidCallback? get onNext => widget.onNext;
-
+  bool get _reduced => MediaQuery.disableAnimationsOf(context);
+  PlaybackController get _current => _freeView ? _scene : _video;
   @override
   void initState() {
     super.initState();
-    _freeView = widget.initialFreeView && active && clip.sceneUrl != null;
+    _freeView =
+        widget.initialFreeView && widget.active && clip.sceneUrl != null;
     _sceneRequested = _freeView;
+    _videoRequested = !_freeView;
+    _scene.addListener(_checkAlignment);
+    _charge.addStatusListener((s) {
+      if (s == AnimationStatus.completed && _entering) {
+        _armed = true;
+        haptics.pulse(35);
+        _tryReveal();
+      }
+    });
+    _reveal.addStatusListener((s) {
+      if (s == AnimationStatus.completed && _entering) _completeEntry();
+    });
+    _createCheers();
+    widget.account?.addListener(_accountChanged);
+    _userId = widget.account?.user?.id;
+  }
+
+  void _createCheers() {
+    _cheers = CheerController(
+      widget.account?.api,
+      clip.id,
+      onError: (e) {
+        if (!mounted) return;
+        if (e is CommunityFailure && e.code == 'not_authenticated') {
+          widget.account?.expired();
+          return;
+        }
+        if (mounted) _message('声援は送信待ちです。詳細から再送できます。');
+      },
+    );
+    if (widget.active) unawaited(_cheers.load());
+  }
+
+  void _accountChanged() {
+    final id = widget.account?.user?.id;
+    if (id == _userId) return;
+    _userId = id;
+    _cheers.dispose();
+    setState(_createCheers);
   }
 
   @override
-  void didUpdateWidget(ClipCard oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (!active ||
-        oldWidget.clip.id != clip.id ||
-        oldWidget.clip.sceneUrl != clip.sceneUrl ||
-        oldWidget.clip.previewUrl != clip.previewUrl ||
-        oldWidget.clip.revision != clip.revision) {
-      final wasFreeView = _freeView;
-      _clipEpoch++;
-      _sceneEpoch++;
-      _playback = const PlaybackState(Duration.zero, false);
-      _scenePlayback = _videoPlayback = null;
-      _sceneTimeline = null;
-      _timeClamped = false;
-      _pendingVideo = _videoError = false;
+  void didUpdateWidget(ClipCard old) {
+    super.didUpdateWidget(old);
+    if (!widget.active && old.active) unawaited(_cheers.flush());
+    if (!widget.active ||
+        old.clip.id != clip.id ||
+        old.clip.sceneUrl != clip.sceneUrl ||
+        old.clip.previewUrl != clip.previewUrl ||
+        old.clip.revision != clip.revision) {
+      final wasLocked = _freeView || _entering;
+      _resetEntry();
       _freeView = false;
+      _videoRequested = true;
       _sceneRequested = false;
       _sceneReady = false;
-      _pendingScene = false;
       _sceneError = false;
-      _videoAdapter = _sceneAdapter = null;
-      if (active && wasFreeView) {
-        final epoch = _clipEpoch;
+      _hasEntered = false;
+      _sceneTimeline = null;
+      _videoPlayback = null;
+      _pendingVideo = false;
+      if (widget.active && wasLocked) {
+        final generation = _generation;
         WidgetsBinding.instance.addPostFrameCallback((_) {
-          if (mounted && active && epoch == _clipEpoch) {
+          if (mounted && widget.active && generation == _generation) {
             widget.onFreeViewChanged(false);
           }
         });
       }
     }
-  }
-
-  Future<void> _toggleMode() async {
-    if (_freeView &&
-        !_pendingVideo &&
-        clip.previewUrl != null &&
-        _sceneAdapter != null) {
-      final epoch = _clipEpoch,
-          sceneEpoch = _sceneEpoch,
-          request = ++_returnCapture;
-      final adapter = _sceneAdapter!;
-      final captured = await adapter.capturePlayback();
-      if (!mounted ||
-          !active ||
-          epoch != _clipEpoch ||
-          sceneEpoch != _sceneEpoch ||
-          !identical(adapter, _sceneAdapter) ||
-          request != _returnCapture ||
-          !_freeView) {
-        return;
-      }
-      final mapping = _sceneTimeline?.mapping;
-      if (mapping != null) {
-        _playback = PlaybackState(
-          mapping.toPreview(captured.position),
-          _sceneTimeline!.frameCount > 1 ? captured.playing : _playback.playing,
-        );
-      }
+    if (old.clip.id != clip.id) {
+      _cheers.dispose();
+      _createCheers();
     }
-    setState(() {
-      if (_freeView) {
-        if (clip.previewUrl == null) {
-          _freeView = false;
-        } else if (_pendingVideo) {
-          _pendingVideo = false;
-        } else {
-          _pendingVideo = true;
-          _videoError = false;
-          _videoAttempt++;
-          _videoPlayback = PlaybackState(_playback.position, _playback.playing);
-        }
-      } else if (_pendingScene) {
-        _pendingScene = false;
-        _sceneRequested = false;
-        _sceneReady = false;
-        _sceneEpoch++;
-        _sceneTimeline = null;
-        _scenePlayback = null;
-      } else {
-        _sceneRequested = true;
-        _sceneError = false;
-        _pendingScene = true;
-        if (_sceneReady && _sceneTimeline == null) {
-          _freeView = true;
-          _pendingScene = false;
-        }
-      }
-    });
-    if (_pendingScene && _sceneTimeline != null) _syncScene(force: true);
-    widget.onFreeViewChanged(_freeView);
+    if (widget.active && !old.active) unawaited(_cheers.load());
+    if (old.account != widget.account) {
+      old.account?.removeListener(_accountChanged);
+      widget.account?.addListener(_accountChanged);
+      _cheers.dispose();
+      _createCheers();
+    }
   }
 
-  void _onSceneReady(int epoch) {
-    if (!active || !_sceneRequested || epoch != _sceneEpoch) return;
-    final reveal = _pendingScene || _freeView;
-    setState(() {
-      _sceneReady = true;
-      _pendingScene = false;
-      _freeView = reveal;
-      final mapping = _sceneTimeline?.mapping;
-      if (mapping != null && _scenePlayback != null) {
-        _playback = PlaybackState(
-          mapping.toPreview(_scenePlayback!.position),
-          _sceneTimeline!.frameCount > 1
-              ? _scenePlayback!.playing
-              : _playback.playing,
-        );
-      }
-    });
-    if (reveal) widget.onFreeViewChanged(true);
+  void _message(String text) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(text),
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 170),
+        ),
+      );
+    }
   }
 
-  void _onSceneStatus(ViewerStatus status, int epoch) {
-    if (!active ||
-        !_sceneRequested ||
-        epoch != _sceneEpoch ||
-        status != ViewerStatus.error) {
+  void _resetEntry() {
+    _generation++;
+    _entering = false;
+    _armed = false;
+    _alignmentRequested = false;
+    _captureReady = false;
+    _charge.stop();
+    _charge.value = 0;
+    _reveal.stop();
+    _reveal.value = 0;
+    _fire.stop();
+  }
+
+  Future<void> _beginEntry({bool accessible = false}) async {
+    if (!widget.active ||
+        _freeView ||
+        _entering ||
+        clip.sceneUrl == null ||
+        (clip.previewUrl != null &&
+            _video.value.status != ViewerStatus.ready)) {
       return;
     }
-    final wasFreeView = _freeView;
+    _generation++;
+    final generation = _generation;
+    _entryPosition = _video.value.position;
+    _wasPlaying = _video.value.playing;
     setState(() {
+      _entering = true;
+      _armed = false;
+      _sceneError = false;
+      _sceneReady = false;
+      _sceneRequested = true;
+      _alignmentRequested = false;
+    });
+    widget.onFreeViewChanged(true);
+    haptics.pulse(18);
+    if (!_reduced) _fire.repeat();
+    _charge.forward(from: 0);
+    if (accessible) _charge.value = 1;
+    final captured = await _video.capture();
+    if (!mounted || generation != _generation || !_entering) return;
+    _entryPosition = captured.position;
+    _wasPlaying = captured.playing;
+    await _video.pausePlayback();
+    if (!mounted || generation != _generation || !_entering) return;
+    _captureReady = true;
+    if (_scene.value.status == ViewerStatus.ready || _sceneTimeline != null) {
+      unawaited(_alignScene());
+    }
+  }
+
+  void _endHold() {
+    if (_entering && !_armed) _cancelEntry();
+  }
+
+  void _cancelEntry() {
+    if (!_entering) return;
+    final resume = _wasPlaying;
+    setState(() {
+      _resetEntry();
       _sceneRequested = false;
       _sceneReady = false;
-      _pendingScene = false;
-      _freeView = false;
-      _sceneError = true;
-      _sceneEpoch++;
       _sceneTimeline = null;
-      _scenePlayback = null;
-      if (wasFreeView) {
-        _videoPlayback = PlaybackState(_playback.position, _playback.playing);
-      }
-      _pendingVideo = false;
     });
-    if (wasFreeView) widget.onFreeViewChanged(false);
+    widget.onFreeViewChanged(false);
+    if (resume && widget.active) unawaited(_video.play());
   }
 
-  void _videoValue(ViewerValue value, int epoch) {
-    if (epoch != _clipEpoch ||
-        !active ||
-        _freeView ||
-        value.status != ViewerStatus.ready) {
+  Future<void> _alignScene() async {
+    if (!_entering ||
+        !_captureReady ||
+        _alignmentRequested ||
+        (_scene.value.status != ViewerStatus.ready && _sceneTimeline == null)) {
       return;
     }
-    final intent = value.playIntent ?? value.playing;
-    final changedIntent = intent != _playback.playing;
-    _playback = PlaybackState(value.position, intent);
-    // Automatic progress must not starve a slow first sort. Explicit user
-    // seeks and play/pause actions may supersede the latched handoff below.
-    if (changedIntent && _pendingScene && _sceneTimeline != null) _syncScene();
-  }
-
-  void _sceneValue(ViewerValue value, int epoch) {
-    final mapping = _sceneTimeline?.mapping;
-    if (epoch != _sceneEpoch ||
-        !active ||
-        !_freeView ||
-        _pendingVideo ||
-        value.status != ViewerStatus.ready ||
-        value.buffering ||
-        mapping == null) {
-      return;
+    final generation = _generation;
+    _alignmentRequested = true;
+    final timeline = _sceneTimeline;
+    final mapped = timeline?.mapping?.toScene(_entryPosition);
+    _timeClamped =
+        mapped != null &&
+        (mapped < Duration.zero ||
+            mapped > timeline!.atFrame(timeline.frameCount - 1));
+    _sceneTarget = timeline != null
+        ? timeline.sample(mapped ?? Duration.zero)
+        : Duration(
+            microseconds: math.min(
+              _entryPosition.inMicroseconds,
+              _scene.value.duration.inMicroseconds,
+            ),
+          );
+    final restored = await _scene.restore(PlaybackState(_sceneTarget, false));
+    if (mounted && generation == _generation) {
+      if (!restored) return;
+      _sceneTarget = _scene.value.position;
+      if (timeline == null) {
+        _checkAlignment();
+      } else {
+        _sceneReady = true;
+        _tryReveal();
+      }
     }
-    _playback = PlaybackState(
-      mapping.toPreview(value.position),
-      value.canPlay ? value.playIntent ?? value.playing : _playback.playing,
-    );
   }
 
-  Future<void> _syncScene({bool force = false}) async {
-    final epoch = _clipEpoch,
-        sceneEpoch = _sceneEpoch,
-        request = ++_sceneCapture;
-    if (_videoAdapter != null && !_freeView) {
-      final captured = await _videoAdapter!.capturePlayback();
-      if (!mounted ||
-          !active ||
-          epoch != _clipEpoch ||
-          sceneEpoch != _sceneEpoch ||
-          request != _sceneCapture ||
-          !_sceneRequested ||
-          !_pendingScene) {
+  void _onSceneReady() {
+    if (!mounted || !widget.active || !_sceneRequested) return;
+    if (_entering) {
+      unawaited(_alignScene());
+    } else if (_freeView) {
+      setState(() => _sceneReady = true);
+    }
+  }
+
+  void _checkAlignment() {
+    // Timelined viewers acknowledge restoration only after the target is drawn.
+    if (_sceneTimeline != null) return;
+    if (!_entering || !_alignmentRequested || _sceneReady) return;
+    final value = _scene.value;
+    if (value.status == ViewerStatus.ready &&
+        !value.buffering &&
+        (value.position - _sceneTarget).abs() <=
+            const Duration(milliseconds: 80)) {
+      _sceneReady = true;
+      _tryReveal();
+    }
+  }
+
+  void _tryReveal() {
+    if (!mounted ||
+        !_entering ||
+        !_armed ||
+        !_sceneReady ||
+        _reveal.isAnimating) {
+      {
         return;
       }
-      _playback = captured;
     }
-    final timeline = _sceneTimeline!;
-    final mapping = timeline.mapping;
-    final mapped = mapping?.toScene(_playback.position) ?? Duration.zero;
-    _timeClamped =
-        mapping != null &&
-        (mapped < Duration.zero ||
-            mapped > timeline.atFrame(timeline.frameCount - 1));
-    final position = mapping == null
-        ? Duration.zero
-        : timeline.sample(mapping.toScene(_playback.position));
-    final playing =
-        mapping != null && timeline.frameCount > 1 && _playback.playing;
-    if (!force &&
-        _scenePlayback?.position == position &&
-        _scenePlayback?.playing == playing) {
-      return;
+    if (_reduced) {
+      _completeEntry();
+    } else {
+      _reveal.forward(from: 0);
     }
-    setState(() => _scenePlayback = PlaybackState(position, playing));
   }
 
-  void _videoRestored(int epoch) {
-    if (epoch != _clipEpoch || !_pendingVideo || !active) return;
+  void _completeEntry() {
+    final play =
+        _wasPlaying &&
+        (_sceneTimeline == null ||
+            (_sceneTimeline!.mapping != null &&
+                _sceneTimeline!.frameCount > 1));
     setState(() {
+      _entering = false;
+      _freeView = true;
+      _hasEntered = true;
+      _fire.stop();
+    });
+    widget.onFreeViewChanged(true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _freeView && play) unawaited(_scene.play());
+    });
+  }
+
+  Future<void> _back() async {
+    if (!_freeView || _pendingVideo) return;
+    final generation = _generation;
+    final captured = await _scene.capture();
+    if (!mounted || !widget.active || generation != _generation || !_freeView) {
+      return;
+    }
+    final timeline = _sceneTimeline;
+    final position = timeline == null
+        ? captured.position
+        : timeline.mapping?.toPreview(captured.position) ?? _entryPosition;
+    final play =
+        timeline == null ||
+            (timeline.mapping != null && timeline.frameCount > 1)
+        ? captured.playing
+        : _wasPlaying;
+    setState(() {
+      _pendingVideo = true;
+      _videoRequested = true;
+      _videoPlayback = PlaybackState(position, play);
+    });
+  }
+
+  void _videoRestored() {
+    if (!mounted || !widget.active || !_pendingVideo) return;
+    setState(() {
+      _resetEntry();
       _freeView = false;
       _pendingVideo = false;
     });
     widget.onFreeViewChanged(false);
   }
 
-  String get _modeLabel => _sceneError
-      ? '自由視点を表示できませんでした'
-      : _videoError
-      ? '動画を表示できませんでした'
-      : _pendingScene
-      ? '通常動画・自由視点準備中'
-      : _freeView
-      ? _sceneTimeline != null && _sceneTimeline!.mapping == null
-            ? '自由視点・時刻の対応情報なし'
-            : _timeClamped
-            ? '自由視点・${(_scenePlayback!.position.inMicroseconds / 1000000).toStringAsFixed(2)}秒へ調整'
-            : '自由視点'
-      : clip.previewUrl == null
-      ? '映像準備中'
-      : '通常動画';
-
-  String get _modeAction => clip.sceneUrl == null
-      ? '自由視点は準備中'
-      : _freeView
-      ? _pendingVideo
-            ? '動画の準備をキャンセル'
-            : _videoError
-            ? '動画を再試行'
-            : '動画に戻る'
-      : _pendingScene
-      ? '自由視点の準備をキャンセル'
-      : _sceneError
-      ? '自由視点を再試行'
-      : '自由視点で見る';
-
-  Widget _ordinaryView(bool compact) {
-    if (clip.previewUrl != null && active) {
-      final epoch = _clipEpoch;
-      return PreviewViewer(
-        key: ValueKey('${clip.id}-$_clipEpoch-video-$_videoAttempt'),
-        source: clip.previewUrl!,
-        factory: (source) => _videoAdapter = widget.viewerFactory(source),
-        playback: _videoPlayback,
-        onValueChanged: (value) => _videoValue(value, epoch),
-        onPlaybackInteraction: (value) {
-          _videoValue(value, epoch);
-          if (epoch == _clipEpoch && _pendingScene && _sceneTimeline != null) {
-            _syncScene();
-          }
-        },
-        onPlaybackRestored: () => _videoRestored(epoch),
-        onStatusChanged: (status) {
-          if (epoch == _clipEpoch &&
-              active &&
-              _pendingVideo &&
-              status == ViewerStatus.error) {
-            setState(() {
-              _pendingVideo = false;
-              _videoError = true;
-            });
-          }
-        },
-      );
+  void _onSceneStatus(ViewerStatus status) {
+    if (status != ViewerStatus.error || !widget.active || !_sceneRequested) {
+      return;
     }
-    return Column(
-      children: [
-        Expanded(
-          child: compact
-              ? Center(
-                  child: Text(
-                    '映像を準備しています',
-                    style: Theme.of(context).textTheme.titleSmall,
-                  ),
-                )
-              : ViewerMessage(
-                  icon: Icons.video_library_outlined,
-                  title: '映像を準備しています',
-                  description: '公開されたハイライトが\nここに表示されます。',
-                  action: onNext == null
-                      ? null
-                      : OutlinedButton.icon(
-                          onPressed: onNext,
-                          icon: const Icon(Icons.arrow_downward, size: 18),
-                          label: const Text('次の項目を見る'),
-                        ),
-                ),
-        ),
-      ],
-    );
+    final wasPlaying = _wasPlaying;
+    setState(() {
+      _resetEntry();
+      _freeView = false;
+      _sceneRequested = false;
+      _sceneReady = false;
+      _sceneError = true;
+      _sceneTimeline = null;
+    });
+    widget.onFreeViewChanged(false);
+    if (wasPlaying) unawaited(_video.play());
+    _message('自由視点を表示できませんでした。通常動画を続けられます。');
   }
 
-  Widget _videoLayer(bool compact) => ColoredBox(
-    key: ValueKey('${clip.id}-$_clipEpoch-video-layer'),
-    color: Colors.black,
-    child: _ordinaryView(compact),
-  );
+  Future<void> _cheer() async {
+    if (_current.value.duration <= Duration.zero) return;
+    if (widget.account?.user == null) {
+      if (!await showAccountDialog(context, widget.account) || !mounted) return;
+    }
+    if (_cheers.cheer(_current.value.position, _current.value.duration)) {
+      setState(() => _cheerPulse++);
+      haptics.pulse(12);
+    }
+  }
 
   void _showDetails(double width) {
     showFeedSheet(
@@ -383,214 +419,417 @@ class _ClipCardState extends State<ClipCard> {
           Text(clip.title, style: Theme.of(context).textTheme.titleLarge),
           const SizedBox(height: 8),
           Text(clip.sport),
-          if (clip.tags.isNotEmpty)
-            Wrap(
-              spacing: 8,
-              children: clip.tags
-                  .map(
-                    (tag) => TextButton(
-                      onPressed: () {
-                        Navigator.pop(context);
-                        widget.onTag?.call(tag);
-                      },
-                      child: Text('#$tag'),
-                    ),
-                  )
-                  .toList(),
-            ),
-          const SizedBox(height: 16),
+          Wrap(
+            spacing: 8,
+            children: clip.tags
+                .map(
+                  (tag) => TextButton(
+                    onPressed: () {
+                      Navigator.pop(context);
+                      widget.onTag?.call(tag);
+                    },
+                    child: Text('#$tag'),
+                  ),
+                )
+                .toList(),
+          ),
+          const SizedBox(height: 12),
           SelectableText(clip.description, semanticsLabel: clip.description),
+          TextButton.icon(
+            onPressed: () {
+              Navigator.pop(context);
+              showComments(this.context, clip.id, widget.account);
+            },
+            icon: const Icon(Icons.chat_bubble_outline),
+            label: const Text('コメントを見る'),
+          ),
+          if (_cheers.hasPending)
+            TextButton(
+              onPressed: () => _cheers.flush(),
+              child: const Text('送信待ちの声援を再送'),
+            ),
         ],
       ),
     );
   }
 
+  Widget _videoSurface() => Stack(
+    fit: StackFit.expand,
+    children: [
+      PreviewViewer(
+        key: ValueKey('${clip.id}-${clip.revision}-${clip.previewUrl}-video'),
+        source: clip.previewUrl!,
+        factory: widget.viewerFactory,
+        controller: _video,
+        showControls: false,
+        interactive: false,
+        playback: _videoPlayback,
+        onPlaybackRestored: _videoRestored,
+        onStatusChanged: (status) {
+          if (status == ViewerStatus.error && _pendingVideo) {
+            setState(() => _pendingVideo = false);
+            _message('動画を表示できませんでした。もう一度戻る操作を試してください。');
+          }
+        },
+        visible: (!_freeView || _pendingVideo) && widget.active,
+      ),
+      if (_video.value.status == ViewerStatus.ready)
+        Positioned.fill(
+          child: PointerInterceptor(
+            child: GestureDetector(
+              key: const Key('video-playback-surface'),
+              onTap: _entering ? null : () => unawaited(_video.toggle()),
+              behavior: HitTestBehavior.opaque,
+              child: clip.sceneUrl != null && !_freeView
+                  ? Center(
+                      child: Semantics(
+                        label: '長押しで自由視点',
+                        button: true,
+                        onLongPress: _beginEntry,
+                        child: SizedBox(
+                          width: 200,
+                          height: 260,
+                          child: RawGestureDetector(
+                            key: const Key('immersive-hold-area'),
+                            behavior: HitTestBehavior.translucent,
+                            gestures: {
+                              LongPressGestureRecognizer:
+                                  GestureRecognizerFactoryWithHandlers<
+                                    LongPressGestureRecognizer
+                                  >(
+                                    () => LongPressGestureRecognizer(
+                                      duration: const Duration(
+                                        milliseconds: 280,
+                                      ),
+                                    ),
+                                    (instance) {
+                                      instance.onLongPressStart = (_) {
+                                        _beginEntry();
+                                      };
+                                      instance.onLongPressEnd = (_) {
+                                        _endHold();
+                                      };
+                                      instance.onLongPressCancel = _endHold;
+                                      instance.onLongPressMoveUpdate = (d) {
+                                        if (d.offsetFromOrigin.distance > 24 &&
+                                            !_armed) {
+                                          _cancelEntry();
+                                        }
+                                      };
+                                    },
+                                  ),
+                            },
+                          ),
+                        ),
+                      ),
+                    )
+                  : const SizedBox.expand(),
+            ),
+          ),
+        ),
+    ],
+  );
+  @override
+  void dispose() {
+    widget.account?.removeListener(_accountChanged);
+    unawaited(_cheers.finish());
+    _charge.dispose();
+    _reveal.dispose();
+    _fire.dispose();
+    _scene.removeListener(_checkAlignment);
+    _video.dispose();
+    _scene.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final largeText = MediaQuery.textScalerOf(context).scale(1) > 1.4;
-      final compact =
-          constraints.maxHeight < 500 ||
-          constraints.maxWidth < 360 ||
-          largeText;
-      final sceneEpoch = _sceneEpoch;
-      return ColoredBox(
-        color: Colors.black,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            if (_pendingVideo) _videoLayer(compact),
-            if (_sceneRequested && active && clip.sceneUrl != null)
-              PreviewViewer(
-                key: ValueKey('${clip.id}-$_clipEpoch-scene-$sceneEpoch'),
-                source: clip.sceneUrl!,
-                factory: (source) =>
-                    _sceneAdapter = widget.sceneFactory(source),
-                freeView: true,
-                thumbnailSource: clip.previewUrl,
-                continuity: true,
-                mapping: clip.playbackMapping,
-                playback: _scenePlayback,
-                visible: _freeView,
-                onReady: () {
-                  if (_sceneTimeline == null) _onSceneReady(sceneEpoch);
-                },
-                onPrepared: (timeline) {
-                  if (sceneEpoch != _sceneEpoch || !_sceneRequested) return;
-                  _sceneTimeline = timeline;
-                  _syncScene();
-                },
-                onPlaybackRestored: () => _onSceneReady(sceneEpoch),
-                onValueChanged: (value) => _sceneValue(value, sceneEpoch),
-                onStatusChanged: (status) => _onSceneStatus(status, sceneEpoch),
-              ),
-            if (!_freeView) _videoLayer(compact),
-            Positioned(
-              right: compact ? 72 : 8,
-              top: compact ? 64 : null,
-              bottom: compact ? null : constraints.maxHeight * .36,
-              child: PointerInterceptor(
-                intercepting: _freeView,
-                child: ClipActions(
-                  clip: clip,
-                  active: active,
-                  account: widget.account,
-                  share: widget.shareAction,
-                  compact: compact,
-                  sheetWidth: constraints.maxWidth,
-                ),
-              ),
-            ),
-            Positioned(
-              left: 16,
-              right: 72,
-              bottom: largeText ? 104 : 64,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IgnorePointer(
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: .72),
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(8),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Semantics(
-                              header: true,
-                              child: Text(
-                                clip.title,
-                                maxLines: compact ? 1 : 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w700),
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Semantics(
-                              liveRegion: true,
-                              child: Text(
-                                _freeView &&
-                                        (_timeClamped ||
-                                            (_sceneTimeline != null &&
-                                                _sceneTimeline!.mapping ==
-                                                    null))
-                                    ? _modeLabel
-                                    : '${clip.sport} · $_modeLabel',
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                            ),
-                          ],
+      final compact = constraints.maxHeight < 500;
+      return AnimatedBuilder(
+        animation: Listenable.merge([
+          _charge,
+          _reveal,
+          _fire,
+          _video,
+          _scene,
+          _cheers,
+        ]),
+        builder: (context, _) {
+          final current = _current.value,
+              ready = current.status == ViewerStatus.ready;
+          final zoom = _entering && !_reduced
+              ? entryZoom(_charge.value, _reveal.value)
+              : 1.0;
+          return ColoredBox(
+            color: Colors.black,
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                if (_sceneRequested && widget.active && clip.sceneUrl != null)
+                  Transform.scale(
+                    key: ValueKey(
+                      '${clip.id}-${clip.revision}-${clip.sceneUrl}-scene',
+                    ),
+                    scale: !_reduced && (_entering || _hasEntered)
+                        ? entryZoom(1, 1)
+                        : 1,
+                    child: ExcludeFocus(
+                      key: const Key('entry-scene-content'),
+                      excluding: !_freeView,
+                      child: ExcludeSemantics(
+                        excluding: !_freeView,
+                        child: IgnorePointer(
+                          ignoring: !_freeView,
+                          child: PreviewViewer(
+                            source: clip.sceneUrl!,
+                            factory: widget.sceneFactory,
+                            freeView: true,
+                            thumbnailSource: clip.previewUrl,
+                            continuity: true,
+                            mapping: clip.playbackMapping,
+                            onPrepared: (timeline) {
+                              _sceneTimeline = timeline;
+                              if (_entering) unawaited(_alignScene());
+                            },
+                            visible: _freeView || _entering,
+                            controller: _scene,
+                            showControls: false,
+                            onReady: _onSceneReady,
+                            onStatusChanged: _onSceneStatus,
+                          ),
                         ),
                       ),
                     ),
                   ),
-                  if (!compact && clip.tags.isNotEmpty)
-                    PointerInterceptor(
+                if (widget.active && _videoRequested && clip.previewUrl != null)
+                  Visibility(
+                    key: ValueKey('${clip.id}-retained-video'),
+                    visible: !_freeView,
+                    maintainState: true,
+                    child: Transform.scale(
+                      key: const Key('entry-video-transform'),
+                      scale: zoom,
+                      child: ColoredBox(
+                        key: ValueKey('${clip.id}-video-layer'),
+                        color: Colors.black,
+                        child: _videoSurface(),
+                      ),
+                    ),
+                  ),
+                if (clip.previewUrl == null && !_freeView)
+                  const ViewerMessage(
+                    icon: Icons.video_library_outlined,
+                    title: '映像を準備しています',
+                    description: '公開されたハイライトがここに表示されます。',
+                  ),
+                if (!_entering)
+                  Positioned(
+                    right: 8,
+                    bottom: compact ? null : constraints.maxHeight * .38,
+                    top: compact ? 72 : null,
+                    child: PointerInterceptor(
                       intercepting: _freeView,
-                      child: Wrap(
-                        spacing: 4,
-                        children: clip.tags
-                            .take(2)
-                            .map(
-                              (tag) => TextButton(
-                                style: TextButton.styleFrom(
-                                  minimumSize: const Size(48, 48),
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 8,
-                                  ),
-                                  backgroundColor: Colors.black.withValues(
-                                    alpha: .55,
-                                  ),
-                                ),
-                                onPressed: () => widget.onTag?.call(tag),
+                      child: ClipActions(
+                        clip: clip,
+                        active: widget.active,
+                        account: widget.account,
+                        share: widget.shareAction,
+                        compact: compact,
+                        sheetWidth: constraints.maxWidth,
+                        onCheer: () => unawaited(_cheer()),
+                        cheers: _cheers.total,
+                        cheerPulse: _cheerPulse,
+                        showCommentsButton: false,
+                      ),
+                    ),
+                  ),
+                if (!_entering)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 106,
+                    child: PointerInterceptor(
+                      intercepting: _freeView,
+                      child: InkWell(
+                        onTap: () => _showDetails(constraints.maxWidth),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(minHeight: 48),
+                          child: Row(
+                            children: [
+                              Flexible(
                                 child: Text(
-                                  '#$tag',
+                                  clip.title,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Flexible(
+                                child: Text(
+                                  _freeView
+                                      ? (_sceneTimeline != null &&
+                                                _sceneTimeline!.mapping == null
+                                            ? '自由視点・時刻の対応情報なし'
+                                            : _timeClamped
+                                            ? '自由視点・${(_sceneTarget.inMicroseconds / 1000000).toStringAsFixed(2)}秒へ調整'
+                                            : '自由視点')
+                                      : clip.sport,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.white70,
+                                  ),
+                                ),
+                              ),
+                              const Icon(
+                                Icons.info_outline,
+                                size: 14,
+                                color: Colors.white70,
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (!_entering && current.duration > Duration.zero)
+                  Positioned(
+                    left: 16,
+                    right: 16,
+                    bottom: 52,
+                    child: CheerSeekBar(
+                      bins: _cheers.bins,
+                      position: current.position,
+                      duration: current.duration,
+                      intercepting: _freeView,
+                      thumbnailSource: clip.previewUrl,
+                      onTogglePlayback: ready && current.canPlay
+                          ? () => unawaited(_current.toggle())
+                          : null,
+                      onSeek: ready && !_entering
+                          ? (p) => unawaited(_current.seek(p))
+                          : null,
+                    ),
+                  ),
+                if (!_entering)
+                  Positioned(
+                    left: 8,
+                    right: 8,
+                    bottom: 4,
+                    child: PointerInterceptor(
+                      intercepting: _freeView,
+                      child: Row(
+                        children: [
+                          IconButton(
+                            tooltip: current.playing ? '一時停止' : '再生',
+                            onPressed: ready && current.canPlay
+                                ? () => unawaited(_current.toggle())
+                                : null,
+                            icon: Icon(
+                              current.playing ? Icons.pause : Icons.play_arrow,
+                            ),
+                          ),
+                          if (_freeView)
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton(
+                                  onPressed: _back,
+                                  child: const Text(
+                                    '動画に戻る',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 ),
                               ),
                             )
-                            .toList(),
+                          else if (clip.sceneUrl != null)
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: TextButton(
+                                  onPressed: ready || clip.previewUrl == null
+                                      ? () => _beginEntry(accessible: true)
+                                      : null,
+                                  onLongPress: ready || clip.previewUrl == null
+                                      ? () => _beginEntry(accessible: true)
+                                      : null,
+                                  child: Text(
+                                    _sceneError ? '自由視点を再試行' : '自由視点で見る',
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ),
+                            )
+                          else
+                            const Spacer(),
+                          IconButton(
+                            tooltip: '出典・詳細',
+                            onPressed: () => _showDetails(constraints.maxWidth),
+                            icon: const Icon(Icons.info_outline),
+                          ),
+                          if (!_freeView)
+                            IconButton(
+                              tooltip: current.muted ? 'ミュート解除' : 'ミュート',
+                              onPressed: ready
+                                  ? () => unawaited(_video.mute())
+                                  : null,
+                              icon: Icon(
+                                current.muted
+                                    ? Icons.volume_off
+                                    : Icons.volume_up,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
-                  const SizedBox(height: 8),
-                  PointerInterceptor(
-                    intercepting: _freeView,
-                    child: Row(
-                      children: [
-                        if (compact)
-                          IconButton.filledTonal(
-                            tooltip: _modeAction,
-                            onPressed: clip.sceneUrl == null
-                                ? null
-                                : _toggleMode,
-                            icon: Icon(
-                              _pendingScene
-                                  ? Icons.hourglass_top
-                                  : _freeView
-                                  ? Icons.movie_outlined
-                                  : Icons.threed_rotation,
-                            ),
-                          )
-                        else
-                          Flexible(
-                            child: FilledButton.tonalIcon(
-                              onPressed: clip.sceneUrl == null
-                                  ? null
-                                  : _toggleMode,
-                              icon: Icon(
-                                _pendingScene
-                                    ? Icons.hourglass_top
-                                    : _freeView
-                                    ? Icons.movie_outlined
-                                    : Icons.threed_rotation,
-                                size: 18,
-                              ),
-                              label: Text(_modeAction),
-                            ),
-                          ),
-                        const SizedBox(width: 8),
-                        IconButton.filledTonal(
-                          tooltip: '出典・詳細',
-                          onPressed: () => _showDetails(constraints.maxWidth),
-                          icon: const Icon(Icons.info_outline),
+                  ),
+                if (!_hasEntered &&
+                    !_entering &&
+                    !_freeView &&
+                    clip.sceneUrl != null)
+                  const Positioned(
+                    top: 72,
+                    left: 16,
+                    right: 72,
+                    child: IgnorePointer(
+                      child: Text(
+                        '中央を長押しして、この瞬間の中へ',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: Color(0xFFFFD1A6),
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ],
-              ),
+                if (_entering)
+                  ImmersiveEffect(
+                    charge: _charge.value,
+                    reveal: _reveal.value,
+                    time: _fire.value * 4,
+                    reducedMotion: _reduced,
+                    waiting: _armed && !_sceneReady,
+                  ),
+                if (_entering)
+                  Positioned(
+                    right: 12,
+                    bottom: 12,
+                    child: TextButton(
+                      onPressed: _cancelEntry,
+                      child: const Text('キャンセル'),
+                    ),
+                  ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       );
     },
   );

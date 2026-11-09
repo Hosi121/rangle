@@ -15,6 +15,9 @@ import 'support/fake_viewer.dart';
 class CommunityFixture {
   Map<String, String>? user;
   bool liked = false, rejectLogin = false, loseFirstCommentResponse = false;
+  final cheerBins = List.filled(48, 0);
+  final cheerReceipts = <String>{};
+  Future<http.Response>? delayedCheers;
   final comments = <String, Map<String, Object?>>{};
   final posts = <Map<String, dynamic>>[];
   Future<http.Response>? delayedEngagement;
@@ -39,6 +42,22 @@ class CommunityFixture {
     if (path.endsWith('/auth/logout')) {
       user = null;
       return http.Response('', 204);
+    }
+    if (path.endsWith('/cheers')) {
+      if (request.method == 'POST') {
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        if (cheerReceipts.add(body['request_id'] as String)) {
+          final bins = (body['bins'] as List).cast<int>();
+          for (var i = 0; i < 48; i++) {
+            cheerBins[i] += bins[i];
+          }
+        }
+      } else if (delayedCheers != null) {
+        final delayed = delayedCheers!;
+        delayedCheers = null;
+        return delayed;
+      }
+      return reply({'bins': cheerBins});
     }
     if (path.endsWith('/engagement')) {
       final delayed = delayedEngagement;
@@ -123,21 +142,25 @@ Future<void> login(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('a late anonymous count cannot overwrite a completed like', (
+  testWidgets('late anonymous cheer totals cannot overwrite local applause', (
     tester,
   ) async {
     final initial = Completer<http.Response>();
-    final fixture = CommunityFixture()..delayedEngagement = initial.future;
+    final fixture = CommunityFixture()..delayedCheers = initial.future;
     await pumpCommunity(tester, fixture);
-    await tester.tap(find.byTooltip('いいね'));
+    await tester.tap(find.byTooltip('声援を送る（何度でも押せます）'));
     await tester.pumpAndSettle();
     await login(tester);
-    expect(find.byTooltip('いいねを取り消す'), findsOneWidget);
+    await tester.tap(find.byTooltip('声援を送る（何度でも押せます）'));
+    await tester.pump(const Duration(seconds: 2));
+    await tester.pumpAndSettle();
+    expect(fixture.cheerBins.reduce((a, b) => a + b), 2);
     initial.complete(
-      http.Response('{"likes":0,"comments":0,"liked":false}', 200),
+      http.Response(jsonEncode({'bins': List.filled(48, 0)}), 200),
     );
     await tester.pumpAndSettle();
-    expect(find.byTooltip('いいねを取り消す'), findsOneWidget);
+    expect(find.text('2'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
   testWidgets(
     'registration validates passwords and exposes only the public account',
@@ -180,23 +203,28 @@ void main() {
       expect(fixture.user, isNull);
     },
   );
-  testWidgets('liking asks for login and leaves the active viewer resident', (
-    tester,
-  ) async {
-    var videos = 0;
-    final fixture = CommunityFixture();
-    await pumpCommunity(tester, fixture, videoCreated: () => videos++);
-    await tester.tap(find.byTooltip('いいね'));
-    await tester.pumpAndSettle();
-    await login(tester);
-    expect(fixture.liked, isTrue);
-    expect(find.byTooltip('いいねを取り消す'), findsOneWidget);
-    expect(videos, 1);
-    await tester.tap(find.byTooltip('いいねを取り消す'));
-    await tester.pumpAndSettle();
-    expect(fixture.liked, isFalse);
-    expect(videos, 1);
-  });
+  testWidgets(
+    'repeatable cheering asks for login and retains the active viewer',
+    (tester) async {
+      var videos = 0;
+      final fixture = CommunityFixture();
+      await pumpCommunity(tester, fixture, videoCreated: () => videos++);
+      await tester.tap(find.byTooltip('声援を送る（何度でも押せます）'));
+      await tester.pumpAndSettle();
+      await login(tester);
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(find.byTooltip('声援を送る（何度でも押せます）'));
+        await tester.pump();
+      }
+      expect(videos, 1);
+      await tester.pump(const Duration(seconds: 2));
+      await tester.pumpAndSettle();
+      expect(fixture.cheerBins.reduce((a, b) => a + b), 4);
+      expect(find.text('4'), findsOneWidget);
+      expect(find.byIcon(Icons.favorite), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets('bad credentials keep the form open and show a useful error', (
     tester,
   ) async {
@@ -215,7 +243,9 @@ void main() {
         ..user = {'id': 'viewer', 'name': 'テスト'}
         ..loseFirstCommentResponse = true;
       await pumpCommunity(tester, fixture);
-      await tester.tap(find.byTooltip('コメント'));
+      await tester.tap(find.byTooltip('出典・詳細'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('コメントを見る'));
       await tester.pumpAndSettle();
       await tester.enterText(
         find.byType(TextField),

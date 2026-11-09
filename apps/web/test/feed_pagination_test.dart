@@ -254,7 +254,8 @@ void main() {
       await showFeed(tester, repo, initialClipId: id, scene: (_) => scene);
       expect(find.byKey(const Key('generated-scene')), findsOneWidget);
       await scene.seek(const Duration(seconds: 3));
-      await tester.tap(nextButton());
+      expect(tester.widget<IconButton>(nextButton()).onPressed, isNull);
+      await tester.tap(find.text('続きを読み込む'));
       await tester.pump();
       pending.complete(page(1, 20));
       await tester.pumpAndSettle();

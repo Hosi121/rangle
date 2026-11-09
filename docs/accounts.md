@@ -13,6 +13,7 @@
 | `GET /api/v1/clips/{id}/comments?cursor=...` | 新しい順に20件ずつ取得 |
 | `POST /api/v1/clips/{id}/comments` | `{text, request_id}` で投稿 |
 | `DELETE /api/v1/clips/{id}/comments/{comment}` | 自分のコメントを削除 |
+| `GET` / `POST /api/v1/clips/{id}/cheers` | [連打できる声援と再生位置ごとの熱量](immersive-ui.md#声援と熱量バー) |
 
 IDは半角英数字・`_`・`-`の3〜32文字で、大文字小文字を区別しない。表示名は任意・40文字以内、パスワードは15〜128文字。コメントは1〜500文字、`request_id`は32桁の小文字hex。同じ投稿の再送は同じIDを使い、二重投稿を防ぐ。
 

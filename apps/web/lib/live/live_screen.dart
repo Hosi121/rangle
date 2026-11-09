@@ -5,7 +5,10 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../viewer/free_view_adapter.dart';
 import '../viewer/viewer_adapter.dart';
+import '../viewer/playback_controller.dart';
 import '../widgets/preview_viewer.dart';
+import '../widgets/rangle_header.dart';
+import '../widgets/viewer_modal.dart';
 import 'live_api.dart';
 import 'live_controller.dart';
 
@@ -33,6 +36,7 @@ class LiveScreen extends StatefulWidget {
 
 class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
   LiveController? _controller;
+  final _playback = PlaybackController();
   LiveSegment? _displayed, _newest;
   DateTime? _sessionEpoch;
   final _known = <Uri, LiveSegment>{};
@@ -125,42 +129,55 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _retry?.cancel();
     _controller?.dispose();
+    _playback.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(
-      title: const Text('LIVE'),
-      leading: widget.onBack == null
-          ? null
-          : BackButton(onPressed: widget.onBack),
-      actions: [
-        if (_controller?.selectedId != null)
-          IconButton(
-            tooltip: 'LIVE一覧',
-            onPressed: () => _select(null),
-            icon: const Icon(Icons.list),
-          ),
-      ],
-    ),
+    backgroundColor: Colors.black,
     body: SafeArea(
-      top: false,
       child: Column(
         children: [
-          if (widget.jobStatus != null) widget.jobStatus!,
           Expanded(
-            child: _controller == null
-                ? const ViewerMessage(
-                    icon: Icons.cloud_off,
-                    title: 'LIVEに接続できません',
-                    description: '接続先または配信URLを確認してください。',
-                  )
-                : ListenableBuilder(
-                    listenable: _controller!,
-                    builder: (context, _) => _content(),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                _controller == null
+                    ? const ViewerMessage(
+                        icon: Icons.cloud_off,
+                        title: 'LIVEに接続できません',
+                        description: '接続先または配信URLを確認してください。',
+                      )
+                    : ListenableBuilder(
+                        listenable: _controller!,
+                        builder: (context, _) => _content(),
+                      ),
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  height: 64,
+                  child: PointerInterceptor(
+                    child: RangleHeader(
+                      title: 'LIVE',
+                      onBack: widget.onBack,
+                      actions: [
+                        if (_controller?.selectedId != null)
+                          IconButton(
+                            tooltip: 'LIVE一覧',
+                            onPressed: () => _select(null),
+                            icon: const Icon(Icons.list),
+                          ),
+                      ],
+                    ),
                   ),
+                ),
+              ],
+            ),
           ),
+          if (widget.jobStatus != null)
+            Material(color: const Color(0xFF191614), child: widget.jobStatus!),
         ],
       ),
     ),
@@ -185,15 +202,30 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
         );
       }
       return ListView(
+        padding: const EdgeInsets.fromLTRB(16, 84, 16, 24),
         children: [
+          Text(
+            '自由視点LIVE',
+            style: Theme.of(context).textTheme.headlineSmall
+                ?.copyWith(fontWeight: FontWeight.w800),
+          ),
+          const SizedBox(height: 8),
+          const Text('見たい配信を選んでください。', style: TextStyle(color: Colors.white60)),
+          const SizedBox(height: 24),
           if (controller.reconnecting) const ListTile(title: Text('再接続中')),
           for (final session in controller.sessions)
-            ListTile(
-              leading: const Icon(Icons.live_tv),
-              title: Text(session.title),
-              subtitle: Text(_state(session.state)),
-              trailing: const Icon(Icons.chevron_right),
-              onTap: () => _select(session.id),
+            Card(
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 14,
+                ),
+                leading: const Icon(Icons.live_tv, color: Color(0xFFFF954A)),
+                title: Text(session.title),
+                subtitle: Text(_state(session.state)),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _select(session.id),
+              ),
             ),
         ],
       );
@@ -272,6 +304,8 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
                   sha256: _known[source]?.sha256,
                 ),
             freeView: true,
+            controller: _playback,
+            showControls: false,
             onStatusChanged: (status) {
               if (status == ViewerStatus.error && _displayed == null) {
                 _sourceFailed(initial: true);
@@ -281,71 +315,140 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
             onSourceError: _sourceFailed,
           )
         else
-          ViewerMessage(
-            icon: Icons.live_tv,
-            title: session.terminal ? _state(session.state) : '最初の映像を準備しています',
-            description: '映像の準備ができるまで、この画面でお待ちいただけます。',
+          Padding(
+            padding: const EdgeInsets.only(top: 64),
+            child: Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Text(
+                    session.title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Expanded(
+                  child: ViewerMessage(
+                    icon: Icons.live_tv,
+                    title: session.terminal
+                        ? _state(session.state)
+                        : '最初の映像を準備しています',
+                    description: '映像の準備ができるまで、この画面でお待ちいただけます。',
+                  ),
+                ),
+              ],
+            ),
           ),
-        Positioned(
-          top: 8,
-          left: 12,
-          right: 12,
-          child: PointerInterceptor(
-            child: Material(
-              color: Colors.black.withValues(alpha: .75),
-              borderRadius: BorderRadius.circular(12),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            session.title,
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: '配信の出典',
-                          onPressed: () => showDialog<void>(
-                            context: context,
-                            builder: (context) => AlertDialog(
-                              title: const Text('配信の出典'),
-                              content: SingleChildScrollView(
-                                child: SelectableText(
-                                  '${session.attribution}\n${session.sourceUrl}\n${session.caveat}\n\n短い区間を順次更新して表示します。未取得の区間は補間しません。',
-                                ),
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(context),
-                                  child: const Text('閉じる'),
-                                ),
-                              ],
+        if (latest != null)
+          Positioned(
+            bottom: 64,
+            left: 12,
+            right: 12,
+            child: PointerInterceptor(
+              child: Material(
+                color: Colors.black.withValues(alpha: .75),
+                borderRadius: BorderRadius.circular(18),
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              session.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          icon: const Icon(Icons.info_outline),
-                        ),
-                      ],
-                    ),
-                    Text(
-                      '$label${delay == null ? '' : ' · 撮影から約${delay.round()}秒'}',
-                    ),
-                    if (_displayed != null)
-                      Text(
-                        '${_displayed!.start.toStringAsFixed(1)}–${_displayed!.end.toStringAsFixed(1)}秒の区間${_gap ? '（区間に間隔があります）' : ''}',
-                        style: Theme.of(context).textTheme.labelSmall,
+                          IconButton(
+                            tooltip: '配信の出典',
+                            onPressed: () => showViewerDialog<void>(
+                              context: context,
+                              builder: (context) => AlertDialog(
+                                title: const Text('配信の出典'),
+                                content: SingleChildScrollView(
+                                  child: SelectableText(
+                                    '${session.attribution}\n${session.sourceUrl}\n${session.caveat}\n\n短い区間を順次更新して表示します。未取得の区間は補間しません。',
+                                  ),
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () => Navigator.pop(context),
+                                    child: const Text('閉じる'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            icon: const Icon(Icons.info_outline),
+                          ),
+                        ],
                       ),
-                  ],
+                      if (delay != null)
+                        Text(
+                          '撮影から約${delay.round()}秒',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                      if (_displayed != null)
+                        Text(
+                          '${_displayed!.start.toStringAsFixed(1)}–${_displayed!.end.toStringAsFixed(1)}秒の区間${_gap ? '（区間に間隔があります）' : ''}',
+                          style: Theme.of(context).textTheme.labelSmall,
+                        ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
-        ),
+        if (latest != null)
+          Positioned(
+            bottom: 8,
+            left: 12,
+            right: 12,
+            child: PointerInterceptor(
+              child: ListenableBuilder(
+                listenable: _playback,
+                builder: (context, _) {
+                  final value = _playback.value;
+                  return Row(
+                    children: [
+                      IconButton(
+                        tooltip: value.playing ? '一時停止' : '再生',
+                        onPressed:
+                            value.status == ViewerStatus.ready && value.canPlay
+                            ? () => unawaited(_playback.toggle())
+                            : null,
+                        icon: Icon(
+                          value.playing ? Icons.pause : Icons.play_arrow,
+                        ),
+                      ),
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFEC5800),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          label,
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
       ],
     );
   }
