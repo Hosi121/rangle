@@ -25,7 +25,7 @@ Future<void> tapText(WidgetTester tester, String label) async {
 
 void main() {
   testWidgets(
-    'publication changes revalidate the first feed page once on return and release GS',
+    'direct generation publication revalidates the feed once on return and releases GS',
     (tester) async {
       tester.view.physicalSize = const Size(390, 844);
       tester.view.devicePixelRatio = 1;
@@ -57,34 +57,33 @@ void main() {
         client: feedClient,
       );
       final videos = <FakeViewer>[], scenes = <FakeViewer>[];
-      await tester.pumpWidget(
-        RangleApp(
-          repository: repository,
-          community: fixture.community,
-          generation: fixture.api,
-          viewerFactory: (_) {
-            final viewer = FakeViewer();
-            videos.add(viewer);
-            return viewer;
-          },
-          sceneFactory: (_) {
-            final scene = FakeViewer(surfaceKey: 'scene-${scenes.length}');
-            scenes.add(scene);
-            return scene;
-          },
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(find.text('既存のハイライト'), findsOneWidget);
+      Future<void> openGenerationLink() async {
+        await tester.pumpWidget(
+          RangleApp(
+            key: UniqueKey(),
+            initialGeneration: true,
+            repository: repository,
+            community: fixture.community,
+            generation: fixture.api,
+            viewerFactory: (_) {
+              final viewer = FakeViewer();
+              videos.add(viewer);
+              return viewer;
+            },
+            sceneFactory: (_) {
+              final scene = FakeViewer(surfaceKey: 'scene-${scenes.length}');
+              scenes.add(scene);
+              return scene;
+            },
+          ),
+        );
+        await tester.pumpAndSettle();
+      }
+
+      await openGenerationLink();
+      expect(find.byType(GenerationScreen), findsOneWidget);
       expect(requests, hasLength(1));
       expect(requests.single.headers['cache-control'], isNull);
-      await tester.tap(find.text('自由視点で見る'));
-      await tester.pumpAndSettle();
-      final originalScene = scenes.single;
-      await tester.tap(find.byTooltip('GSを生成'));
-      await tester.pumpAndSettle();
-      expect(originalScene.disposed, isTrue);
-      expect(videos.first.disposed, isTrue);
       await tapText(tester, 'フィードに掲載');
       expect(requests, hasLength(1));
       await tester.tap(find.byType(BackButton));
@@ -97,24 +96,24 @@ void main() {
       await tester.tap(find.text('自由視点で見る'));
       await tester.pumpAndSettle();
       final publishedScene = scenes.last;
-      expect(publishedScene, isNot(same(originalScene)));
       expect(publishedScene.disposed, isFalse);
-      await tester.tap(find.byTooltip('GSを生成'));
-      await tester.pumpAndSettle();
+      await openGenerationLink();
       expect(publishedScene.disposed, isTrue);
+      // Reloading a direct link loads the feed once before opening the form.
+      expect(requests, hasLength(3));
       await tapText(tester, '掲載を取り下げる');
-      expect(requests, hasLength(2));
+      expect(requests, hasLength(3));
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
       expect(find.text('既存のハイライト'), findsOneWidget);
       expect(find.text('掲載したGS'), findsNothing);
-      expect(requests, hasLength(3));
+      expect(requests, hasLength(4));
       expect(requests.last.headers['cache-control'], 'no-cache');
-      await tester.tap(find.byTooltip('GSを生成'));
-      await tester.pumpAndSettle();
+      await openGenerationLink();
       await tester.tap(find.byType(BackButton));
       await tester.pumpAndSettle();
-      expect(requests, hasLength(3));
+      expect(requests, hasLength(5));
+      expect(requests.last.headers['cache-control'], isNull);
       await repository.loadPage();
       expect(requests.last.headers['cache-control'], isNull);
       expect(requests.map((request) => request.url.toString()).toSet(), {

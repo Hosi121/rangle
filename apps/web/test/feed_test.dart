@@ -240,7 +240,7 @@ void main() {
         isTrue,
       );
       expect(find.textContaining('CC BY 4.0'), findsNothing);
-      await tester.tap(iconButton('出典・詳細'));
+      await tester.tap(iconButton('概要'));
       await tester.pumpAndSettle();
       expect(find.textContaining('CC BY 4.0'), findsOneWidget);
       final semantics = tester.ensureSemantics();
@@ -280,7 +280,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('real-scene-surface')), findsOneWidget);
       expect(tester.takeException(), isNull);
-      await tester.tap(iconButton('出典・詳細'));
+      await tester.tap(iconButton('概要'));
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.textContaining('CC BY 4.0'));
       expect(find.textContaining('CC BY 4.0'), findsOneWidget);

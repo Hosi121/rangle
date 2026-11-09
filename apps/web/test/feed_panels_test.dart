@@ -151,7 +151,7 @@ void main() {
       'details at $size fit the player and keep close visible at 2x',
       (tester) async {
         await _pumpFeed(tester, size: size, textScale: 2);
-        await tester.tap(find.byTooltip('出典・詳細'));
+        await tester.tap(find.byTooltip('概要'));
         await tester.pumpAndSettle();
         _expectPlayerWidth(tester);
         final close = tester.getRect(find.byTooltip('閉じる'));

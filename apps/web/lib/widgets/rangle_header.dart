@@ -6,11 +6,13 @@ class RangleHeader extends StatelessWidget implements PreferredSizeWidget {
   const RangleHeader({
     required this.title,
     this.onBack,
+    this.backLabel,
     this.actions = const [],
     super.key,
   });
   final String title;
   final VoidCallback? onBack;
+  final String? backLabel;
   final List<Widget> actions;
   @override
   Size get preferredSize => const Size.fromHeight(64);
@@ -19,7 +21,25 @@ class RangleHeader extends StatelessWidget implements PreferredSizeWidget {
     backgroundColor: Colors.black.withValues(alpha: .85),
     surfaceTintColor: Colors.transparent,
     toolbarHeight: 64,
-    leading: onBack == null ? null : BackButton(onPressed: onBack),
+    leadingWidth: onBack != null && backLabel != null
+        ? (MediaQuery.sizeOf(context).width * .55).clamp(144, 240)
+        : null,
+    leading: onBack == null
+        ? null
+        : backLabel == null
+        ? BackButton(onPressed: onBack)
+        : Tooltip(
+            message: backLabel!,
+            child: TextButton.icon(
+              onPressed: onBack,
+              icon: const BackButtonIcon(),
+              label: Text(
+                backLabel!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ),
     titleSpacing: 4,
     title: Row(
       children: [

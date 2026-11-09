@@ -187,7 +187,7 @@ void main() {
         for (final tooltip in [
           '共有',
           '声援を送る（何度でも押せます）',
-          '出典・詳細',
+          '概要',
           '検索',
           'ログイン',
           '前のハイライト',
@@ -260,7 +260,7 @@ void main() {
         _expectSceneExposed(tester);
         expect(scene.value.playing, isTrue);
 
-        await tester.tap(find.byTooltip('出典・詳細'));
+        await tester.tap(find.byTooltip('概要'));
         await tester.pumpAndSettle();
         _expectModalProtected(tester);
         expect(find.text('出典 CC BY 4.0'), findsOneWidget);
@@ -290,7 +290,7 @@ void main() {
     await _pumpFreeView(tester, scene, const Size(390, 844));
     for (final tooltip in ['コメント', 'ログイン', '検索']) {
       if (tooltip == 'コメント') {
-        await tester.tap(find.byTooltip('出典・詳細'));
+        await tester.tap(find.byTooltip('概要'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('コメントを見る'));
       } else {

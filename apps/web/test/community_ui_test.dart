@@ -243,7 +243,7 @@ void main() {
         ..user = {'id': 'viewer', 'name': 'テスト'}
         ..loseFirstCommentResponse = true;
       await pumpCommunity(tester, fixture);
-      await tester.tap(find.byTooltip('出典・詳細'));
+      await tester.tap(find.byTooltip('概要'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('コメントを見る'));
       await tester.pumpAndSettle();

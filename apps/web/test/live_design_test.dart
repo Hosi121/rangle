@@ -81,27 +81,31 @@ void main() {
           );
         });
         final key = GlobalKey();
-        await tester.pumpWidget(
-          RepaintBoundary(
-            key: key,
-            child: RangleApp(
-              repository: const DemoClipRepository(),
-              community: generation.community,
-              generation: generation.api,
-              live: LiveApi(
-                endpoint: Uri.parse('https://app.example.test/api/v1/live'),
-                client: client,
+        Future<void> showApp({bool initialGeneration = false}) =>
+            tester.pumpWidget(
+              RepaintBoundary(
+                key: key,
+                child: RangleApp(
+                  key: ValueKey(initialGeneration),
+                  initialGeneration: initialGeneration,
+                  repository: const DemoClipRepository(),
+                  community: generation.community,
+                  generation: generation.api,
+                  live: LiveApi(
+                    endpoint: Uri.parse('https://app.example.test/api/v1/live'),
+                    client: client,
+                  ),
+                  viewerFactory: (_) => FakeViewer(),
+                  sceneFactory: (_) => FakeViewer(),
+                  liveFactory: (source) {
+                    final viewer = live_fixture.UpdatingViewer(source);
+                    viewers.add(viewer);
+                    return viewer;
+                  },
+                ),
               ),
-              viewerFactory: (_) => FakeViewer(),
-              sceneFactory: (_) => FakeViewer(),
-              liveFactory: (source) {
-                final viewer = live_fixture.UpdatingViewer(source);
-                viewers.add(viewer);
-                return viewer;
-              },
-            ),
-          ),
-        );
+            );
+        await showApp();
         await tester.pumpAndSettle();
         Future<void> capture(String stage) async {
           const dir = String.fromEnvironment('RANGLE_CAPTURE_DIR');
@@ -127,7 +131,15 @@ void main() {
         await capture('list');
         await tester.tap(find.byType(ListTile));
         await tester.pumpAndSettle();
-        expect(tester.getSize(find.byKey(const Key('live-surface'))), size);
+        // Navigation reserves its own 64px instead of overlapping the viewer.
+        expect(
+          tester.getSize(find.byKey(const Key('live-surface'))),
+          Size(size.width, size.height - 64),
+        );
+        expect(
+          tester.getRect(find.byType(RangleHeader)).bottom,
+          tester.getRect(find.byKey(const Key('live-surface'))).top,
+        );
         expect(tester.getSize(find.byType(RangleHeader)).height, 64);
         for (final element in find.byType(PointerInterceptor).evaluate()) {
           expect(
@@ -155,10 +167,10 @@ void main() {
         );
         await tester.tap(find.text('閉じる'));
         await tester.pumpAndSettle();
-        await tester.tap(find.byType(BackButton));
+        await tester.tap(find.text('フィードに戻る'));
         await tester.pumpAndSettle();
         expect(viewers.single.disposed, isTrue);
-        await tester.tap(find.text('生成'));
+        await showApp(initialGeneration: true);
         await tester.pumpAndSettle();
         await capture('generation');
         await tester.ensureVisible(find.text('LIVEを開始'));
@@ -170,6 +182,17 @@ void main() {
         await tester.tap(find.text('LIVEを見る'));
         await tester.pumpAndSettle();
         await capture('owner');
+        await tester.tap(find.text('生成に戻る'));
+        await tester.pumpAndSettle();
+        await tester.scrollUntilVisible(
+          find.text('LIVEを見る'),
+          200,
+          scrollable: find.byType(Scrollable).first,
+        );
+        await tester.ensureVisible(find.text('LIVEを見る'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('LIVEを見る'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('LIVEを停止'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('中止する'));

@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:pointer_interceptor/pointer_interceptor.dart';
 import 'package:rangle_web/config/app_config.dart';
 import 'package:rangle_web/data/clip_repository.dart';
 import 'package:rangle_web/live/live_api.dart';
@@ -13,6 +14,9 @@ import 'package:rangle_web/live/live_controller.dart';
 import 'package:rangle_web/live/live_screen.dart';
 import 'package:rangle_web/main.dart';
 import 'package:rangle_web/viewer/viewer_adapter.dart';
+import 'package:rangle_web/widgets/rangle_header.dart';
+
+import 'support/fake_viewer.dart';
 
 const base = 'https://app.example.test';
 final digest = List.filled(64, 'a').join();
@@ -504,6 +508,131 @@ void main() {
     expect(find.text('バスケットボール LIVE'), findsOneWidget);
     await tester.pumpWidget(const SizedBox.shrink());
   });
+  for (final direct in [false, true]) {
+    for (final state in ['ready', 'waiting', 'error']) {
+      testWidgets(
+        '${direct ? 'direct LIVE link' : 'feed LIVE entry'} returns from $state${direct && state == 'waiting' ? ' via route back' : ''} and restores feed controls',
+        (tester) async {
+          tester.view.physicalSize = const Size(320, 720);
+          tester.view.devicePixelRatio = 1;
+          tester.view.padding = const FakeViewPadding(top: 24);
+          tester.platformDispatcher.textScaleFactorTestValue = 2;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          addTearDown(tester.view.resetPadding);
+          addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+          final videos = <FakeViewer>[], scenes = <FakeViewer>[];
+          final liveViewers = <UpdatingViewer>[];
+          final client = MockClient((request) async {
+            if (state == 'error') return http.Response('{}', 404);
+            final session = liveSession(sequence: state == 'ready' ? 1 : 0);
+            return reply(
+              request.url.path.endsWith('/game')
+                  ? session
+                  : {
+                      'version': 1,
+                      'sessions': [session],
+                    },
+            );
+          });
+          addTearDown(client.close);
+          await tester.pumpWidget(
+            RangleApp(
+              repository: const DemoClipRepository(
+                sceneUrl: 'https://example.invalid/scene.json',
+              ),
+              initialLiveId: direct ? 'game' : null,
+              live: api(client),
+              viewerFactory: (_) {
+                final viewer = FakeViewer();
+                videos.add(viewer);
+                return viewer;
+              },
+              sceneFactory: (_) {
+                final viewer = FakeViewer(surfaceKey: 'feed-scene');
+                scenes.add(viewer);
+                return viewer;
+              },
+              liveFactory: (source) {
+                final viewer = UpdatingViewer(source);
+                liveViewers.add(viewer);
+                return viewer;
+              },
+            ),
+          );
+          await tester.pumpAndSettle();
+          if (!direct) {
+            await tester.tap(find.text('自由視点で見る'));
+            await tester.pumpAndSettle();
+            await tester.tap(find.byTooltip('LIVEを開く'));
+            await tester.pumpAndSettle();
+            expect(videos.first.disposed, isTrue);
+            expect(scenes.single.disposed, isTrue);
+            if (state != 'error') {
+              await tester.tap(find.byType(ListTile));
+              await tester.pumpAndSettle();
+            }
+          }
+          final back = find.widgetWithText(TextButton, 'フィードに戻る');
+          expect(back.hitTestable(), findsOneWidget);
+          expect(
+            find.ancestor(
+              of: back,
+              matching: find.byWidgetPredicate(
+                (widget) => widget is PointerInterceptor && widget.intercepting,
+              ),
+            ),
+            findsOneWidget,
+          );
+          if (state == 'ready') {
+            // This also holds with a top safe inset and enlarged text: the
+            // HTML surface cannot extend beneath the return button.
+            expect(
+              tester.getRect(find.byType(RangleHeader)).bottom,
+              lessThanOrEqualTo(
+                tester.getRect(find.byKey(const Key('live-surface'))).top,
+              ),
+            );
+          }
+          if (state == 'ready') {
+            await tester.tap(find.byTooltip('LIVE一覧'));
+            await tester.pumpAndSettle();
+            expect(liveViewers.first.disposed, isTrue);
+            await tester.tap(find.byType(ListTile));
+            await tester.pumpAndSettle();
+          }
+          if (direct && state == 'waiting') {
+            await tester.binding.handlePopRoute();
+          } else {
+            await tester.tap(back);
+          }
+          await tester.pumpAndSettle();
+          expect(find.byType(LiveScreen), findsNothing);
+          expect(liveViewers.every((viewer) => viewer.disposed), isTrue);
+          expect(videos.last.disposed, isFalse);
+          await tester.tap(find.byTooltip('検索'));
+          await tester.pumpAndSettle();
+          expect(find.byType(TextField), findsOneWidget);
+          await tester.tap(find.text('キャンセル'));
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('自由視点で見る'));
+          await tester.pumpAndSettle();
+          expect(find.text('動画に戻る'), findsOneWidget);
+          await tester.tap(find.text('動画に戻る'));
+          await tester.pumpAndSettle();
+          await tester.drag(
+            find.byKey(const Key('highlight-feed')),
+            const Offset(0, -500),
+          );
+          await tester.pumpAndSettle();
+          expect(find.text('バスケットボール 02'), findsOneWidget);
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
+
   testWidgets(
     'unknown sessions stop automatic retry and retain an explicit recovery action',
     (tester) async {

@@ -115,7 +115,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
           widget.account?.expired();
           return;
         }
-        if (mounted) _message('声援は送信待ちです。詳細から再送できます。');
+        if (mounted) _message('声援は送信待ちです。概要から再送できます。');
       },
     );
     if (widget.active) unawaited(_cheers.load());
@@ -410,7 +410,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
   void _showDetails(double width) {
     showFeedSheet(
       context,
-      title: '出典・詳細',
+      title: '概要',
       width: width,
       builder: (context) => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -771,7 +771,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                           else
                             const Spacer(),
                           IconButton(
-                            tooltip: '出典・詳細',
+                            tooltip: '概要',
                             onPressed: () => _showDetails(constraints.maxWidth),
                             icon: const Icon(Icons.info_outline),
                           ),
@@ -788,24 +788,6 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                               ),
                             ),
                         ],
-                      ),
-                    ),
-                  ),
-                if (!_hasEntered &&
-                    !_entering &&
-                    !_freeView &&
-                    clip.sceneUrl != null)
-                  const Positioned(
-                    top: 72,
-                    left: 16,
-                    right: 72,
-                    child: IgnorePointer(
-                      child: Text(
-                        '中央を長押しして、この瞬間の中へ',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: Color(0xFFFFD1A6),
-                        ),
                       ),
                     ),
                   ),
