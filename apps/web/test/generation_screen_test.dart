@@ -38,6 +38,7 @@ Future<AccountController> _show(
   Size size = const Size(390, 844),
   double scale = 1,
   ValueChanged<Uri>? onOpen,
+  VoidCallback? onPublicationChanged,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -54,6 +55,7 @@ Future<AccountController> _show(
           account: account,
           api: fixture.api,
           onOpenResult: onOpen ?? (_) {},
+          onPublicationChanged: onPublicationChanged,
         ),
       ),
     ),
@@ -77,6 +79,105 @@ Future<void> _tap(WidgetTester tester, String text) async {
 }
 
 void main() {
+  testWidgets(
+    'successful results can be listed and withdrawn without a GPU job',
+    (tester) async {
+      final fixture = GenerationFixture()..state = 'succeeded';
+      var changes = 0;
+      await _show(tester, fixture, onPublicationChanged: () => changes++);
+      await _tap(tester, 'フィードに掲載');
+      expect(fixture.publications, [true]);
+      expect(changes, 1);
+      expect(find.text('フィードに掲載中'), findsOneWidget);
+      expect(find.textContaining('取り下げ後も結果を開けます'), findsOneWidget);
+      await _tap(tester, '掲載を取り下げる');
+      expect(fixture.publications, [true, false]);
+      expect(changes, 2);
+      expect(find.text('フィードに掲載中'), findsNothing);
+      expect(fixture.creates, isEmpty);
+    },
+  );
+
+  testWidgets(
+    'ambiguous listing retries the same intent and reports failures',
+    (tester) async {
+      final fixture = GenerationFixture()
+        ..state = 'succeeded'
+        ..dropFirstPublication = true;
+      var changes = 0;
+      await _show(tester, fixture, onPublicationChanged: () => changes++);
+      await _tap(tester, 'フィードに掲載');
+      expect(fixture.published, isTrue);
+      expect(changes, 0);
+      expect(find.textContaining('接続を確認'), findsOneWidget);
+      await _tap(tester, 'フィードに掲載');
+      expect(fixture.publications, [true, true]);
+      expect(changes, 1);
+      fixture.publicationError = 'publication_unavailable';
+      await _tap(tester, '掲載を取り下げる');
+      expect(find.text('フィードに掲載中'), findsOneWidget);
+      expect(find.textContaining('掲載するデータを確認できませんでした'), findsOneWidget);
+      expect(changes, 1);
+    },
+  );
+
+  testWidgets('late publication responses cannot restore a signed-out owner', (
+    tester,
+  ) async {
+    final fixture = GenerationFixture()
+      ..state = 'succeeded'
+      ..pendingPublication = Completer<http.Response>();
+    var changes = 0;
+    final account = await _show(
+      tester,
+      fixture,
+      onPublicationChanged: () => changes++,
+    );
+    await _tap(tester, 'フィードに掲載');
+    final button = find.widgetWithText(OutlinedButton, '状態を確認しています');
+    expect(tester.widget<OutlinedButton>(button).onPressed, isNull);
+    await account.logout();
+    await tester.pumpAndSettle();
+    fixture.pendingPublication!.complete(
+      fixture.reply(generationResult('succeeded', published: true)),
+    );
+    await tester.pumpAndSettle();
+    expect(changes, 0);
+    expect(find.text('フィードに掲載中'), findsNothing);
+    expect(find.text('ログインして生成する'), findsOneWidget);
+  });
+
+  testWidgets(
+    'an unconfirmed publication response retries the same boolean intent',
+    (tester) async {
+      final fixture = GenerationFixture()
+        ..state = 'succeeded'
+        ..pendingPublication = Completer<http.Response>();
+      var changes = 0;
+      await _show(tester, fixture, onPublicationChanged: () => changes++);
+      await _tap(tester, 'フィードに掲載');
+      fixture.published = true;
+      final result = generationResult('succeeded', published: true);
+      (result['job'] as Map<String, Object?>).remove('published');
+      fixture.pendingPublication!.complete(fixture.reply(result));
+      await tester.pumpAndSettle();
+      expect(changes, 0);
+      expect(find.textContaining('掲載するデータを確認できませんでした'), findsOneWidget);
+      fixture.pendingPublication = null;
+      await _tap(tester, 'フィードに掲載');
+      expect(fixture.publications, [true, true]);
+      expect(changes, 1);
+      expect(find.text('フィードに掲載中'), findsOneWidget);
+    },
+  );
+
+  testWidgets('running jobs do not offer listing controls', (tester) async {
+    final fixture = GenerationFixture()..state = 'running';
+    await _show(tester, fixture);
+    expect(find.text('フィードに掲載'), findsNothing);
+    expect(find.text('掲載を取り下げる'), findsNothing);
+  });
+
   testWidgets('dynamic preset and active job are labeled as moving 4DGS', (
     tester,
   ) async {

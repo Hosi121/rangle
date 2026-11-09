@@ -4,6 +4,11 @@ abstract interface class ClipRepository {
   Future<List<Clip>> load({String query = '', String tag = '', String? clipId});
 }
 
+/// A known catalog change asks the next load to revalidate its HTTP cache.
+abstract interface class RefreshableClipRepository implements ClipRepository {
+  void invalidateCache();
+}
+
 /// One public catalog page. A null cursor alone denotes the server's end.
 class ClipPage {
   const ClipPage(this.clips, {this.nextCursor});

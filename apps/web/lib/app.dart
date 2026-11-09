@@ -73,12 +73,14 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
 
   Future<void> _openGeneration() async {
     if (_generationOpen) return;
+    var publicationChanged = false;
     setState(() => _generationOpen = true);
     final result = await Navigator.of(context).push<Uri>(
       MaterialPageRoute(
         builder: (context) => GenerationScreen(
           account: _account,
           api: widget.generation,
+          onPublicationChanged: () => publicationChanged = true,
           onOpenResult: (uri) {
             if (!openGeneratedViewer(uri)) Navigator.pop(context, uri);
           },
@@ -86,12 +88,17 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
       ),
     );
     if (!mounted) return;
+    if (publicationChanged && widget.repository is RefreshableClipRepository) {
+      (widget.repository as RefreshableClipRepository).invalidateCache();
+    }
     setState(() {
       _generationOpen = false;
       if (result != null) {
         _query = _tag = '';
         _clipId = result.queryParameters['clip'];
         unawaited(_paging.reset(clipId: _clipId));
+      } else if (publicationChanged) {
+        _reload();
       }
     });
   }

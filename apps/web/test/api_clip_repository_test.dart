@@ -18,6 +18,132 @@ Map<String, Object?> clip() => {
 
 void main() {
   test(
+    'publication invalidation revalidates one public first page and retries',
+    () async {
+      final requests = <http.Request>[];
+      var fail = false;
+      final client = MockClient((request) async {
+        requests.add(request);
+        return http.Response(
+          jsonEncode({
+            'clips': [clip()],
+          }),
+          fail ? 503 : 200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+      addTearDown(client.close);
+      final repo = ApiClipRepository(
+        endpoint: 'https://rangle.test/api/v1/clips',
+        client: client,
+      );
+      await repo.loadPage();
+      expect(requests.last.headers['cache-control'], isNull);
+      repo.invalidateCache();
+      fail = true;
+      await expectLater(repo.loadPage(), throwsA(isA<http.ClientException>()));
+      expect(requests.last.headers['cache-control'], 'no-cache');
+      fail = false;
+      await repo.loadPage();
+      expect(requests.last.headers['cache-control'], 'no-cache');
+      await repo.loadPage();
+      expect(requests.last.headers['cache-control'], isNull);
+      expect(requests.map((r) => r.url.toString()).toSet(), {
+        'https://rangle.test/api/v1/clips?limit=20',
+      });
+    },
+  );
+
+  test(
+    'an older completion cannot consume a newer cache invalidation',
+    () async {
+      final pending = Completer<http.Response>();
+      final started = Completer<void>();
+      final requests = <http.Request>[];
+      final client = MockClient((request) async {
+        requests.add(request);
+        if (requests.length == 1) {
+          started.complete();
+          return pending.future;
+        }
+        return http.Response(
+          jsonEncode({
+            'clips': [clip()],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+      addTearDown(client.close);
+      final repo = ApiClipRepository(
+        endpoint: 'https://rangle.test/api/v1/clips',
+        client: client,
+      )..invalidateCache();
+      final older = repo.loadPage();
+      await started.future;
+      repo.invalidateCache();
+      pending.complete(
+        http.Response(
+          jsonEncode({
+            'clips': [clip()],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ),
+      );
+      await older;
+      await repo.loadPage();
+      expect(
+        requests.every((r) => r.headers['cache-control'] == 'no-cache'),
+        isTrue,
+      );
+      await repo.loadPage();
+      expect(requests.last.headers['cache-control'], isNull);
+    },
+  );
+
+  test('a late older load cannot roll back a validated cache epoch', () async {
+    final pending = Completer<http.Response>();
+    final started = Completer<void>();
+    final requests = <http.Request>[];
+    http.Response response() => http.Response(
+      jsonEncode({
+        'clips': [clip()],
+      }),
+      200,
+      headers: {'content-type': 'application/json; charset=utf-8'},
+    );
+    final client = MockClient((request) async {
+      requests.add(request);
+      if (requests.length == 1) {
+        started.complete();
+        return pending.future;
+      }
+      return response();
+    });
+    addTearDown(client.close);
+    final repo = ApiClipRepository(
+      endpoint: 'https://rangle.test/api/v1/clips',
+      client: client,
+    )..invalidateCache();
+    final older = repo.loadPage();
+    await started.future;
+    repo.invalidateCache();
+    await repo.loadPage();
+    pending.complete(response());
+    await older;
+    await repo.loadPage();
+    expect(requests.map((request) => request.headers['cache-control']), [
+      'no-cache',
+      'no-cache',
+      null,
+    ]);
+    expect(requests.map((request) => request.url.toString()).toSet(), {
+      'https://rangle.test/api/v1/clips?limit=20',
+    });
+  });
+
+  test(
     'opaque next cursors and shared metadata stay on canonical public URLs',
     () async {
       final urls = <Uri>[];

@@ -7,11 +7,16 @@ import 'package:rangle_web/community/community_api.dart';
 import 'package:rangle_web/generation/generation_api.dart';
 
 const generationJobId = '0123456789abcdef0123456789abcdef';
-Map<String, Object?> generationJob(String state, {String mode = 'static'}) => {
+Map<String, Object?> generationJob(
+  String state, {
+  String mode = 'static',
+  bool published = false,
+}) => {
   'id': generationJobId,
   'preset': 'reviewed-sports',
   'state': state,
   'mode': mode,
+  'published': published,
   'created_at': '2026-11-09T00:00:00Z',
   'updated_at': '2026-11-09T00:00:01Z',
 };
@@ -19,8 +24,9 @@ Map<String, Object?> generationJob(String state, {String mode = 'static'}) => {
 Map<String, Object?> generationResult(
   String state, {
   String mode = 'static',
+  bool published = false,
 }) => {
-  'job': generationJob(state, mode: mode),
+  'job': generationJob(state, mode: mode, published: published),
   if (state == 'succeeded') ...{
     'viewer_url': '/demo/?clip=generated-$generationJobId',
     'scene_url':
@@ -32,6 +38,10 @@ class GenerationFixture {
   Map<String, String>? user = {'id': 'viewer', 'name': 'テストユーザー'};
   String? state;
   String mode = 'static';
+  bool published = false, dropFirstPublication = false;
+  String? publicationError;
+  Completer<http.Response>? pendingPublication;
+  final publications = <bool>[];
   String? createError, pollError;
   int? presetsStatus;
   bool dropFirstCreate = false;
@@ -89,8 +99,25 @@ class GenerationFixture {
     }
     if (path.endsWith('/generation/jobs') && request.method == 'GET') {
       return reply({
-        'jobs': [if (state != null) generationJob(state!, mode: mode)],
+        'jobs': [
+          if (state != null)
+            generationJob(state!, mode: mode, published: published),
+        ],
       });
+    }
+    if (path.endsWith('/generation/jobs/$generationJobId/publication') &&
+        request.method == 'PUT') {
+      final value = jsonDecode(request.body)['published'] as bool;
+      publications.add(value);
+      if (pendingPublication != null) return pendingPublication!.future;
+      if (publicationError != null) {
+        return reply({'error': publicationError}, 503);
+      }
+      published = value;
+      if (dropFirstPublication && publications.length == 1) {
+        throw http.ClientException('Publication response lost');
+      }
+      return reply(generationResult(state!, mode: mode, published: published));
     }
     if (path.endsWith('/generation/jobs') && request.method == 'POST') {
       creates.add(jsonDecode(request.body) as Map<String, dynamic>);
@@ -118,7 +145,9 @@ class GenerationFixture {
           'error': pollError,
         }, pollError == 'not_authenticated' ? 401 : 429);
       }
-      return reply(generationResult(state ?? 'running', mode: mode));
+      return reply(
+        generationResult(state ?? 'running', mode: mode, published: published),
+      );
     }
     throw StateError('Unexpected request: ${request.method} ${request.url}');
   });
