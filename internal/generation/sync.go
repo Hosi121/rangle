@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"regexp"
 	"strings"
 	"time"
 
@@ -60,11 +59,10 @@ func newSyncHandler(service *Service, audience string, validate tokenValidator) 
 		return nil, err
 	}
 	target, err := url.Parse(audience)
-	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil || target.Opaque != "" || target.RawQuery != "" || target.ForceQuery || target.Fragment != "" || target.Path != SyncPath || target.EscapedPath() != SyncPath {
-		return nil, fmt.Errorf("generation sync audience must be the exact HTTPS sync endpoint")
+	if err != nil || target.Scheme != "https" || target.Host == "" || target.User != nil || target.Opaque != "" || target.RawQuery != "" || target.ForceQuery || target.Fragment != "" || (target.Path != "" && (target.Path != SyncPath || target.EscapedPath() != SyncPath)) {
+		return nil, fmt.Errorf("generation sync audience must be the HTTPS service base URL or exact sync endpoint")
 	}
 	identity := "rangle-stg-generation-sync@" + service.Config.Project + ".iam.gserviceaccount.com"
-	subject := regexp.MustCompile(`^[0-9]{6,32}$`)
 	limiter := rate.NewLimiter(rate.Every(time.Minute), 1)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -99,10 +97,7 @@ func newSyncHandler(service *Service, audience string, validate tokenValidator) 
 		defer cancel()
 		payload, err := validate(ctx, parts[1], audience)
 		now := service.now()
-		if err != nil || payload == nil || payload.Audience != audience ||
-			(payload.Issuer != "https://accounts.google.com" && payload.Issuer != "accounts.google.com") ||
-			!subject.MatchString(payload.Subject) || payload.Expires <= now.Unix() || payload.IssuedAt <= 0 || payload.IssuedAt > now.Add(time.Minute).Unix() ||
-			payload.Claims["email"] != identity || payload.Claims["email_verified"] != true {
+		if err != nil || !validGoogleIdentity(payload, audience, identity, now) {
 			fail(401, "not_authenticated")
 			return
 		}
