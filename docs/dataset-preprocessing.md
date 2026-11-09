@@ -109,6 +109,8 @@ The sidecar schema `rangle-prepared-dataset-v1` records source/license/attributi
 
 On the approved VRU `gz` input, the reusable CLI was run against the original 34 videos, supplied COLMAP calibration, and colored seed PLY. The regenerated 20×34×270×480 RGB NPZ was byte-identical to the earlier prepared input: 171,336,472 bytes, SHA256 `f735fbbdfd9b17846941d7fdede7a2617999fc77a06cb0f6dc906000a7e55c53`. All eight arrays matched, and frame zero exactly matched the previously validated static input. Seed 0, 99,330 points, 30 training / four held-out cameras, normalization, and `0,0.04,…,0.76` times were retained. This is preprocessing equivalence on that input, not a quality claim for arbitrary media.
 
+A second cached sequence was also converted through the generic adapter from calibrated RGB images, matching K/poses, and an untrained seed PLY, rather than loading a canonical NPZ. This research-restricted material was checked on local CPU only; its data, output NPZ, images, and metadata remain private, with no cloud or public transfer. The check used existing calibrated RGB derivatives because the original RGBA PNGs are rejected by the explicit RGB contract. It establishes input-conversion coverage, not successful training on a second sport or sequence.
+
 The NumPy-only CPU suite covers real generic NPY conversion, source checksums and path boundaries, strict schemas, normalization projection invariance, static/temporal contracts and frame stride, deterministic seed sampling, COLMAP adapter parsing, provenance, and overwrite refusal:
 
 ```sh
