@@ -89,28 +89,30 @@ resource "google_workflows_workflow" "guard" {
   call_log_level      = "LOG_ERRORS_ONLY"
   labels              = local.labels
   source_contents = templatefile("${path.module}/shutdown.yaml.tftpl", {
-    deadline                = var.deadline
-    subscription            = "projects/${var.project_id}/subscriptions/${local.prefix}-budget-guard"
-    budget_display_name     = var.budget_display_name
-    budget_currency         = var.budget_currency
-    stop_amount             = var.budget_stop_amount
-    project_id              = var.project_id
-    edge_prefix             = local.prefix
-    service                 = local.service_name
-    operation_prefix        = "projects/${var.project_id}/locations/${var.region}/operations/"
-    deployer                = "projects/${var.project_id}/serviceAccounts/${local.prefix}-deploy@${var.project_id}.iam.gserviceaccount.com"
-    receipt_bucket          = google_storage_bucket.private["inputs"].name
-    scheduler               = local.job_name
-    generation_enabled      = local.generation_enabled
-    generation_sync_enabled = local.generation_sync_enabled
-    generation_sync_job     = local.generation_sync_job
+    deadline                   = var.deadline
+    subscription               = "projects/${var.project_id}/subscriptions/${local.prefix}-budget-guard"
+    budget_display_name        = var.budget_display_name
+    budget_currency            = var.budget_currency
+    stop_amount                = var.budget_stop_amount
+    project_id                 = var.project_id
+    edge_prefix                = local.prefix
+    service                    = local.service_name
+    operation_prefix           = "projects/${var.project_id}/locations/${var.region}/operations/"
+    deployer                   = "projects/${var.project_id}/serviceAccounts/${local.prefix}-deploy@${var.project_id}.iam.gserviceaccount.com"
+    receipt_bucket             = google_storage_bucket.private["inputs"].name
+    scheduler                  = local.job_name
+    generation_enabled         = local.generation_enabled
+    generation_manager_enabled = local.generation_enabled
+    generation_manager_service = "projects/${var.project_id}/locations/${var.region}/services/${local.prefix}-generation"
+    generation_sync_enabled    = local.generation_sync_enabled
+    generation_sync_job        = local.generation_sync_job
     generation_functions = templatefile("${path.module}/generation-shutdown.yaml.tftpl", {
       project_id     = var.project_id
       project_number = var.project_number
       region         = var.region
     })
   })
-  depends_on = [google_project_service.required, google_service_account_iam_member.disable_deployer, google_project_iam_member.pause_guard, google_pubsub_subscription_iam_member.guard, google_storage_bucket_iam_member.guard_receipt, google_project_iam_member.run_operations, google_project_iam_member.inspect_run, google_project_iam_member.edge_reader, google_project_iam_member.stop_forwarding_rules, google_project_iam_member.release_address, google_project_iam_member.generation_guard]
+  depends_on = [google_project_service.required, google_service_account_iam_member.disable_deployer, google_project_iam_member.pause_guard, google_pubsub_subscription_iam_member.guard, google_storage_bucket_iam_member.guard_receipt, google_project_iam_member.run_operations, google_project_iam_member.inspect_run, google_project_iam_member.edge_reader, google_project_iam_member.stop_forwarding_rules, google_project_iam_member.release_address, google_project_iam_member.generation_guard, google_project_iam_member.detach_service_security, google_project_iam_member.cleanup_security]
 }
 resource "google_project_iam_custom_role" "invoke_guard" {
   project     = var.project_id

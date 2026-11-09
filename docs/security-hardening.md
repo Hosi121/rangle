@@ -12,7 +12,11 @@
 
 backend bucket 用の edge policy はレート制限・本文 WAF を提供しない。許可済みの大きな媒体を繰り返し取得する攻撃の課金を、この設定だけで抑え切ることはできない。署名 URL/cookie、視聴者制限、媒体配信構成の変更は公開視聴の製品要件に関わるため、別の判断が必要。[policy の対応機能](https://docs.cloud.google.com/armor/docs/security-policy-overview)
 
-Standard のサービス単位 policy だけを使い、Enterprise や hierarchical policy を作らない。policy 2個と rule 8個なら固定分は月換算 USD18（時間単位で按分）、global request は100万件あたり USD0.75。媒体 CDN/LB/egress の既存課金は別途発生する。domain 未設定の foundation には Armor policy を作らない。停止 guard は ingress を閉じるが policy 自体は削除しないため、発表後の後片付けで attachment を外して policy を削除する。[公式料金](https://cloud.google.com/armor/pricing)
+Standard のサービス単位 policy だけを使い、Enterprise や hierarchical policy を作らない。policy 2個と rule 8個なら固定分は月換算 USD18（時間単位で按分）、global request は100万件あたり USD0.75。媒体 CDN/LB/egress の既存課金は別途発生する。domain 未設定の foundation には Armor policy を作らない。停止 guard は owned forwarding rules の消失を確認した後、上記4 backend の owned policy を解除し、上記2 policy を削除して固定費を止める。異なる policy が付いていれば解除せず失敗記録を残す。削除失敗時は guard を継続させるため、記録を確認して解消する。[公式料金](https://cloud.google.com/armor/pricing)
+
+解除 API は backend service の `setSecurityPolicy`、bucket の `setEdgeSecurityPolicy` に空の `securityPolicy` を渡す。操作完了を有限回待ち、404 は既に停止済みとして扱う。guard は生成管理サービス `rangle-stg-generation` を公開 Run service より先に削除する。Armor・manager・公開 Run のいずれかで失敗しても後続の停止と GPU cancellation を試み、失敗 receipt を残し、budget 通知の ack と guard 自身の pause を行わない。[解除仕様](https://docs.cloud.google.com/armor/docs/manage-security-policies)
+
+backend service の get/setSecurityPolicy 権限は owned app/candidate の `resource.name` 条件で制限する。backend bucket と service-level security policy は公式の名前条件対応表に載らないため、bucket get/setSecurityPolicy と policy get/delete の4権限は guard のみに project scope で付ける。これは IAM による対象名の制限ではなく、固定対象リストと既存 attachment の所有確認による実行範囲の制限。policy create/update/use、bucket delete は付けない。[IAM resource attribute の対応範囲](https://docs.cloud.google.com/iam/docs/conditions-resource-attributes)
 
 ## Firestore の復旧
 

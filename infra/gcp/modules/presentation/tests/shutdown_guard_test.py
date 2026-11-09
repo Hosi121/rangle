@@ -17,7 +17,16 @@ import unittest
 
 MODULE = Path(__file__).resolve().parents[1]
 SERVICE = "projects/rangle-example/locations/asia-northeast1/services/rangle-stg"
+MANAGER = SERVICE + "-generation"
 OPERATION = "projects/rangle-example/locations/asia-northeast1/operations/delete-1"
+COMPUTE = "https://compute.googleapis.com/compute/v1/"
+GLOBAL = "projects/rangle-example/global/"
+BACKENDS = {
+    GLOBAL + "backendServices/rangle-stg-app": ("setSecurityPolicy", "securityPolicy", "app"),
+    GLOBAL + "backendServices/rangle-stg-candidate": ("setSecurityPolicy", "securityPolicy", "app"),
+    GLOBAL + "backendBuckets/rangle-stg-media": ("setEdgeSecurityPolicy", "edgeSecurityPolicy", "media"),
+    GLOBAL + "backendBuckets/rangle-stg-live-index": ("setEdgeSecurityPolicy", "edgeSecurityPolicy", "media"),
+}
 
 
 def render():
@@ -28,6 +37,7 @@ def render():
         operation_prefix=OPERATION.rsplit("/", 1)[0] + "/", deployer="projects/rangle-example/serviceAccounts/deploy",
         receipt_bucket="private-inputs", scheduler="projects/rangle-example/locations/asia-northeast1/jobs/guard",
         generation_enabled=True, generation_sync_enabled=False, generation_sync_job="unused",
+        generation_manager_enabled=True, generation_manager_service=MANAGER,
     )
     generation = f'templatefile({json.dumps(str(MODULE / "generation-shutdown.yaml.tftpl"))}, {{project_id="rangle-example", project_number="123456789012", region="asia-northeast1"}})'
     expression = f'jsonencode(yamldecode(templatefile({json.dumps(str(MODULE / "shutdown.yaml.tftpl"))}, merge({json.dumps(variables)}, {{generation_functions={generation}}}))))'
@@ -75,7 +85,7 @@ class ShutdownPath:
     def __init__(self, workflow, http, cancel):
         self.workflow, self.http, self.cancel = workflow, http, cancel
         self.state = {}
-        self.remaining_steps = 500
+        self.remaining_steps = 5000
         self.builtins = dict(
             null=None, true=True, false=False, len=len,
             map=SimpleNamespace(get=lambda value, key: value.get(key)),
@@ -128,12 +138,19 @@ class ShutdownPath:
             for assignment in step["assign"]:
                 for name, value in assignment.items():
                     self.state[name] = objects(self.value(value))
+        elif "for" in step:
+            loop = step["for"]
+            for item in self.value(loop["in"]):
+                self.state[loop["value"]] = objects(item)
+                self.steps(loop["steps"])
         elif "call" in step:
             name, arguments = step["call"], self.value(step.get("args", {}))
             if name.startswith("http."):
                 result = self.http(name, arguments)
             elif name == "cancel_generation_jobs":
                 result = self.cancel()
+            elif name == "sys.sleep":
+                result = None
             else:
                 saved = self.state
                 self.state = arguments.copy()
@@ -165,12 +182,17 @@ class GuardFailureTests(unittest.TestCase):
     def setUpClass(cls):
         cls.workflow = render()
 
-    def exercise(self, initial_error=None, operation=OPERATION, operation_error=None, cancel_error=None, failure=True):
+    def exercise(self, initial_error=None, operation=OPERATION, operation_error=None, cancel_error=None,
+                 failure=True, start_phase="stop_owned_service", manager_error=None,
+                 manager_present=False, manager_operation=OPERATION, compute_errors=None,
+                 foreign_policy=False, compute_absent=False, compute_operation="cleanup-1",
+                 active_ingress=False):
         events, receipts = [], []
-        service_reads = 0
+        service_reads, manager_reads = 0, 0
+        compute_errors = compute_errors or {}
 
         def http(method, arguments):
-            nonlocal service_reads
+            nonlocal service_reads, manager_reads
             url = arguments["url"]
             events.append((method, url))
             if method == "http.get" and url.endswith(SERVICE):
@@ -186,6 +208,45 @@ class GuardFailureTests(unittest.TestCase):
                 if operation_error:
                     raise Failure({"code": operation_error})
                 return {"body": {"done": True}}
+            if method == "http.get" and url.endswith(MANAGER):
+                manager_reads += 1
+                if manager_reads == 1 and manager_error:
+                    raise Failure({"code": manager_error, "message": "Manager inspection failed"})
+                if not manager_present or manager_reads > 1:
+                    raise Failure({"code": 404})
+                return {"body": {}}
+            if method == "http.delete" and url.endswith(MANAGER):
+                return {"body": {"name": manager_operation}}
+            if url.startswith(COMPUTE):
+                resource = url.removeprefix(COMPUTE)
+                if (method, resource) in compute_errors:
+                    raise Failure({"code": compute_errors[method, resource]})
+                if "/forwardingRules/" in resource:
+                    if active_ingress:
+                        return {"body": {}}
+                    raise Failure({"code": 404})
+                if method == "http.get" and resource in BACKENDS:
+                    if compute_absent:
+                        raise Failure({"code": 404})
+                    _, field, policy = BACKENDS[resource]
+                    name = "foreign" if foreign_policy else f"rangle-stg-{policy}-security"
+                    return {"body": {field: COMPUTE + GLOBAL + "securityPolicies/" + name}}
+                if method == "http.post":
+                    backend, action = resource.rsplit("/", 1)
+                    self.assertEqual(action, BACKENDS[backend][0])
+                    self.assertEqual(arguments["body"], {"securityPolicy": ""})
+                    return {"body": {"name": compute_operation}}
+                if method == "http.get" and "/operations/" in resource:
+                    return {"body": {"status": "DONE"}}
+                if "/securityPolicies/" in resource:
+                    self.assertIn(resource, [GLOBAL + "securityPolicies/rangle-stg-app-security",
+                                             GLOBAL + "securityPolicies/rangle-stg-media-security"])
+                    if method == "http.get":
+                        if compute_absent:
+                            raise Failure({"code": 404})
+                        return {"body": {}}
+                    if method == "http.delete":
+                        return {"body": {"name": compute_operation}}
             if method == "http.post" and "storage.googleapis.com/" in url:
                 receipts.append((arguments["query"]["name"], json.loads(arguments["body"])))
                 return {}
@@ -203,8 +264,8 @@ class GuardFailureTests(unittest.TestCase):
         main = self.workflow["main"]["steps"]
         path.steps(main[:1])
         path.state.update(stop=True, reason="budget", ack_ids=["unacknowledged-budget-message"])
-        # Start at the Run phase; IAM/Compute deletion is outside this regression's scope.
-        start = next(i for i, step in enumerate(main) if "stop_owned_service" in step or "inspect_before_delete" in step)
+        # Each case starts at its relevant phase; all later phases execute.
+        start = next(i for i, step in enumerate(main) if start_phase in step)
         with self.assertRaises(Failure if failure else Returned):
             path.steps(main[start:])
         self.assertEqual(len(receipts), 1)
@@ -250,6 +311,86 @@ class GuardFailureTests(unittest.TestCase):
         _, receipt = self.exercise(initial_error=403, cancel_error=503)
         self.assertEqual([error["code"] for error in receipt["errors"]], [403, 503])
         self.assertIsNone(receipt["generation"])
+
+    def test_manager_inspection_failures_still_stop_public_and_gpu(self):
+        for status in (403, 503):
+            with self.subTest(status=status):
+                events, receipt = self.exercise(start_phase="stop_owned_generation_manager", manager_error=status)
+                self.assertFalse(any(method == "http.delete" and url.endswith(MANAGER) for method, url in events))
+                self.assertTrue(any(method == "http.delete" and url.endswith(SERVICE) for method, url in events))
+                self.assertEqual(receipt["errors"][0]["code"], status)
+
+    def test_manager_absence_and_successful_deletion_are_idempotent(self):
+        for present in (False, True):
+            with self.subTest(present=present):
+                events, _ = self.exercise(start_phase="stop_owned_generation_manager", manager_present=present, failure=False)
+                manager_get = next(i for i, (_, url) in enumerate(events) if url.endswith(MANAGER))
+                public_get = next(i for i, (_, url) in enumerate(events) if url.endswith(SERVICE))
+                self.assertLess(manager_get, public_get)
+                self.assertEqual(any(method == "http.delete" and url.endswith(MANAGER) for method, url in events), present)
+
+    def test_manager_foreign_operation_is_not_polled_and_public_still_stops(self):
+        events, receipt = self.exercise(start_phase="stop_owned_generation_manager", manager_present=True,
+                                       manager_operation="projects/foreign/locations/elsewhere/operations/foreign-1")
+        self.assertFalse(any("foreign-1" in url for _, url in events))
+        self.assertTrue(any(method == "http.delete" and url.endswith(SERVICE) for method, url in events))
+        self.assertIn("Unexpected Cloud Run operation resource name", receipt["errors"])
+
+    def test_security_cleanup_detaches_all_owned_backends_then_deletes_policies(self):
+        events, _ = self.exercise(start_phase="cleanup_owned_security", failure=False)
+        mutations = [(method, url.removeprefix(COMPUTE)) for method, url in events
+                     if url.startswith(COMPUTE) and method in ("http.post", "http.delete")]
+        self.assertEqual(mutations[:4], [("http.post", path + "/" + action) for path, (action, _, _) in BACKENDS.items()])
+        self.assertEqual(mutations[4:], [("http.delete", GLOBAL + "securityPolicies/rangle-stg-app-security"),
+                                        ("http.delete", GLOBAL + "securityPolicies/rangle-stg-media-security")])
+
+    def test_security_404_is_idempotent_without_mutations(self):
+        events, _ = self.exercise(start_phase="cleanup_owned_security", failure=False, compute_absent=True)
+        self.assertFalse(any(method != "http.get" and url.startswith(COMPUTE) for method, url in events))
+
+    def test_cleanup_failures_continue_remaining_targets_public_and_gpu(self):
+        cases = [
+            {("http.post", GLOBAL + "backendServices/rangle-stg-app/setSecurityPolicy"): 503},
+            {("http.delete", GLOBAL + "securityPolicies/rangle-stg-app-security"): 409},
+        ]
+        for errors in cases:
+            with self.subTest(errors=errors):
+                events, _ = self.exercise(start_phase="cleanup_owned_security", compute_errors=errors)
+                self.assertTrue(any(method == "http.delete" and url.endswith("securityPolicies/rangle-stg-media-security") for method, url in events))
+                self.assertTrue(any(method == "http.delete" and url.endswith(SERVICE) for method, url in events))
+
+    def test_unknown_ingress_preserves_policies_and_still_stops_public(self):
+        events, _ = self.exercise(start_phase="cleanup_owned_security", compute_errors={
+            ("http.get", GLOBAL + "forwardingRules/rangle-stg-http"): 503,
+        })
+        self.assertFalse(any(url.startswith(COMPUTE) and method != "http.get" for method, url in events))
+        self.assertTrue(any(method == "http.delete" and url.endswith(SERVICE) for method, url in events))
+
+    def test_live_ingress_preserves_policies_and_still_stops_public(self):
+        events, _ = self.exercise(start_phase="cleanup_owned_security", active_ingress=True)
+        self.assertFalse(any(url.startswith(COMPUTE) and method != "http.get" for method, url in events))
+        self.assertTrue(any(method == "http.delete" and url.endswith(SERVICE) for method, url in events))
+
+    def test_foreign_attached_policy_is_not_detached(self):
+        events, _ = self.exercise(start_phase="cleanup_owned_security", foreign_policy=True)
+        self.assertFalse(any(url.startswith(COMPUTE) and method == "http.post" for method, url in events))
+
+    def test_foreign_compute_operation_is_never_polled(self):
+        events, _ = self.exercise(start_phase="cleanup_owned_security", compute_operation="projects/foreign/global/operations/evil")
+        self.assertFalse(any("operations/evil" in url for _, url in events))
+        self.assertTrue(any(method == "http.delete" and url.endswith(SERVICE) for method, url in events))
+
+    def test_helpers_reject_foreign_targets_without_http(self):
+        def unexpected(*args):
+            self.fail(f"Foreign target caused a call: {args}")
+        for name, argument in [("delete_owned_run_service", {"service_path": "projects/foreign/locations/elsewhere/services/other"}),
+                               ("delete_compute_resource", {"resource_path": GLOBAL + "securityPolicies/other"}),
+                               ("detach_owned_security_policy", {"resource_path": GLOBAL + "backendServices/other"})]:
+            with self.subTest(helper=name):
+                path = ShutdownPath(self.workflow, unexpected, unexpected)
+                path.state.update(argument)
+                with self.assertRaises(Failure):
+                    path.steps(self.workflow[name]["steps"])
 
 
 if __name__ == "__main__":

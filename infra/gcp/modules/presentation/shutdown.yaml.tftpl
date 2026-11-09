@@ -94,6 +94,30 @@ main:
                     - record_edge_error:
                         assign:
                           - errors: $${list.concat(errors, error)}
+    - cleanup_owned_security:
+        try:
+          call: cleanup_security_policies
+        except:
+          as: error
+          steps:
+            - record_security_error:
+                assign:
+                  - errors: $${list.concat(errors, error)}
+    - stop_owned_generation_manager:
+        switch:
+          - condition: ${generation_manager_enabled}
+            steps:
+              - delete_manager:
+                  try:
+                    call: delete_owned_run_service
+                    args:
+                      service_path: "${generation_manager_service}"
+                  except:
+                    as: error
+                    steps:
+                      - record_manager_error:
+                          assign:
+                            - errors: $${list.concat(errors, error)}
     # An unknown Run state must skip deletion without skipping GPU cancellation.
     - stop_owned_service:
         try:
@@ -396,9 +420,17 @@ wait_until_operation_done:
 delete_compute_resource:
   params: [resource_path]
   steps:
+    - owned_targets:
+        assign:
+          - allowed_targets:
+              - "projects/${project_id}/global/forwardingRules/${edge_prefix}-http"
+              - "projects/${project_id}/global/forwardingRules/${edge_prefix}-https"
+              - "projects/${project_id}/global/addresses/${edge_prefix}-edge"
+              - "projects/${project_id}/global/securityPolicies/${edge_prefix}-app-security"
+              - "projects/${project_id}/global/securityPolicies/${edge_prefix}-media-security"
     - validate_target:
         switch:
-          - condition: $${not (resource_path in ["projects/${project_id}/global/forwardingRules/${edge_prefix}-http", "projects/${project_id}/global/forwardingRules/${edge_prefix}-https", "projects/${project_id}/global/addresses/${edge_prefix}-edge"])}
+          - condition: $${not (resource_path in allowed_targets)}
             steps:
               - foreign_target:
                   raise: "Unexpected Compute shutdown target"
@@ -437,9 +469,18 @@ delete_compute_resource:
                           return: "absent"
             - delete_failed:
                 raise: $${error}
+    - wait_for_operation:
+        call: wait_compute_operation
+        args:
+          operation_name: $${deletion.body.name}
+    - complete:
+        return: "deleted"
+
+wait_compute_operation:
+  params: [operation_name]
+  steps:
     - initialize:
         assign:
-          - operation_name: $${deletion.body.name}
           - attempts: 0
     - validate_operation:
         switch:
@@ -464,7 +505,7 @@ delete_compute_resource:
                         - operation_failed:
                             raise: $${operation.body.error}
               - complete:
-                  return: "deleted"
+                  return: "done"
     - increment:
         assign:
           - attempts: $${attempts + 1}
@@ -478,5 +519,229 @@ delete_compute_resource:
         call: sys.sleep
         args: {seconds: 5}
         next: inspect_operation
+
+delete_owned_run_service:
+  params: [service_path]
+  steps:
+    - owned_targets:
+        assign:
+          - allowed_targets: ["${service}", "${generation_manager_service}"]
+    - validate_target:
+        switch:
+          - condition: $${not (service_path in allowed_targets)}
+            steps:
+              - foreign_target:
+                  raise: "Unexpected Cloud Run shutdown target"
+    - inspect_before_delete:
+        call: service_is_absent
+        args:
+          url: $${"https://run.googleapis.com/v2/" + service_path}
+        result: already_absent
+    - skip_missing_service:
+        switch:
+          - condition: $${already_absent}
+            steps:
+              - absent:
+                  return: "absent"
+    - delete_service:
+        try:
+          call: http.delete
+          args:
+            url: $${"https://run.googleapis.com/v2/" + service_path}
+            auth: {type: OAuth2}
+          result: deletion
+        except:
+          as: error
+          steps:
+            - accept_absent_service:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent_after_inspect:
+                          return: "absent"
+            - deletion_failed:
+                raise: $${error}
+    - wait_for_operation:
+        call: wait_until_operation_done
+        args:
+          operation_name: $${deletion.body.name}
+        result: operation_ok
+    - verify_operation:
+        switch:
+          - condition: $${not operation_ok}
+            steps:
+              - operation_failed:
+                  raise: "Owned Run deletion operation failed or timed out"
+    - verify_absence:
+        call: wait_until_absent
+        args:
+          url: $${"https://run.googleapis.com/v2/" + service_path}
+        result: service_absent
+    - verify_deletion:
+        switch:
+          - condition: $${not service_absent}
+            steps:
+              - deletion_unconfirmed:
+                  raise: "Owned Run service deletion was not confirmed"
+    - complete:
+        return: "deleted"
+
+cleanup_security_policies:
+  steps:
+    # Never remove edge protection while either owned public entry point lives.
+    # A failed/unknown check aborts this cleanup, but main still stops Run/GPU.
+    - confirm_ingress_stopped:
+        for:
+          value: forwarding_rule
+          in:
+            - "projects/${project_id}/global/forwardingRules/${edge_prefix}-http"
+            - "projects/${project_id}/global/forwardingRules/${edge_prefix}-https"
+          steps:
+            - inspect_forwarding_rule:
+                call: service_is_absent
+                args:
+                  url: $${"https://compute.googleapis.com/compute/v1/" + forwarding_rule}
+                result: absent
+            - reject_active_ingress:
+                switch:
+                  - condition: $${not absent}
+                    steps:
+                      - ingress_still_active:
+                          raise: "Owned ingress still exists; preserve Armor protection"
+    - initialize:
+        assign:
+          - errors: []
+    - detach_policies:
+        for:
+          value: backend_path
+          in:
+            - "projects/${project_id}/global/backendServices/${edge_prefix}-app"
+            - "projects/${project_id}/global/backendServices/${edge_prefix}-candidate"
+            - "projects/${project_id}/global/backendBuckets/${edge_prefix}-media"
+            - "projects/${project_id}/global/backendBuckets/${edge_prefix}-live-index"
+          steps:
+            - detach_one_policy:
+                try:
+                  call: detach_owned_security_policy
+                  args:
+                    resource_path: $${backend_path}
+                except:
+                  as: error
+                  steps:
+                    - record_detach_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+    - delete_policies:
+        for:
+          value: policy_path
+          in:
+            - "projects/${project_id}/global/securityPolicies/${edge_prefix}-app-security"
+            - "projects/${project_id}/global/securityPolicies/${edge_prefix}-media-security"
+          steps:
+            - delete_one_policy:
+                try:
+                  call: delete_compute_resource
+                  args:
+                    resource_path: $${policy_path}
+                except:
+                  as: error
+                  steps:
+                    - record_policy_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+    - verify_cleanup:
+        switch:
+          - condition: $${len(errors) > 0}
+            steps:
+              - cleanup_failed:
+                  raise: $${json.encode_to_string(errors)}
+    - complete:
+        return: "deleted"
+
+detach_owned_security_policy:
+  params: [resource_path]
+  steps:
+    - owned_targets:
+        assign:
+          - targets:
+              "projects/${project_id}/global/backendServices/${edge_prefix}-app":
+                method: "setSecurityPolicy"
+                field: "securityPolicy"
+                policy: "projects/${project_id}/global/securityPolicies/${edge_prefix}-app-security"
+              "projects/${project_id}/global/backendServices/${edge_prefix}-candidate":
+                method: "setSecurityPolicy"
+                field: "securityPolicy"
+                policy: "projects/${project_id}/global/securityPolicies/${edge_prefix}-app-security"
+              "projects/${project_id}/global/backendBuckets/${edge_prefix}-media":
+                method: "setEdgeSecurityPolicy"
+                field: "edgeSecurityPolicy"
+                policy: "projects/${project_id}/global/securityPolicies/${edge_prefix}-media-security"
+              "projects/${project_id}/global/backendBuckets/${edge_prefix}-live-index":
+                method: "setEdgeSecurityPolicy"
+                field: "edgeSecurityPolicy"
+                policy: "projects/${project_id}/global/securityPolicies/${edge_prefix}-media-security"
+          - target: $${map.get(targets, resource_path)}
+    - validate_target:
+        switch:
+          - condition: $${target == null}
+            steps:
+              - foreign_target:
+                  raise: "Unexpected security policy detach target"
+    - inspect:
+        try:
+          call: http.get
+          args:
+            url: $${"https://compute.googleapis.com/compute/v1/" + resource_path}
+            auth: {type: OAuth2}
+          result: backend
+        except:
+          as: error
+          steps:
+            - accept_missing_backend:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent:
+                          return: "absent"
+            - inspection_failed:
+                raise: $${error}
+    - inspect_policy:
+        assign:
+          - policy: $${default(map.get(backend.body, target.field), "")}
+    - validate_policy:
+        switch:
+          - condition: $${policy == ""}
+            steps:
+              - already_detached:
+                  return: "absent"
+          - condition: $${not (policy in [target.policy, "https://www.googleapis.com/compute/v1/" + target.policy, "https://compute.googleapis.com/compute/v1/" + target.policy])}
+            steps:
+              - foreign_policy:
+                  raise: "Unexpected policy on owned backend; preserve it"
+    - detach:
+        try:
+          call: http.post
+          args:
+            url: $${"https://compute.googleapis.com/compute/v1/" + resource_path + "/" + target.method}
+            auth: {type: OAuth2}
+            body: {securityPolicy: ""}
+          result: mutation
+        except:
+          as: error
+          steps:
+            - accept_missing_after_inspect:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent_after_inspect:
+                          return: "absent"
+            - detachment_failed:
+                raise: $${error}
+    - wait_for_operation:
+        call: wait_compute_operation
+        args:
+          operation_name: $${mutation.body.name}
+    - complete:
+        return: "detached"
 
 ${generation_functions}

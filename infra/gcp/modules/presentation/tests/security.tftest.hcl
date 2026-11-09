@@ -137,3 +137,24 @@ run "generation_only_still_audits_firestore_writes" {
     error_message = "A separate generation database still needs service-wide Firestore audit coverage when community is disabled."
   }
 }
+
+run "guard_has_only_the_required_cleanup_permissions" {
+  command = plan
+  override_resource {
+    target          = google_service_account.guard
+    override_during = plan
+    values          = { email = "rangle-stg-guard@rangle-example.iam.gserviceaccount.com" }
+  }
+  assert {
+    condition     = google_project_iam_custom_role.detach_service_security.permissions == toset(["compute.backendServices.get", "compute.backendServices.setSecurityPolicy"]) && google_project_iam_member.detach_service_security.member == "serviceAccount:${google_service_account.guard.email}" && google_project_iam_member.detach_service_security.condition[0].expression == "resource.name in ['projects/rangle-example/global/backendServices/rangle-stg-app', 'projects/rangle-example/global/backendServices/rangle-stg-candidate']"
+    error_message = "Grant only guard's fixed app/candidate get/detach permissions with supported backend service IAM name conditions."
+  }
+  assert {
+    condition     = google_project_iam_custom_role.cleanup_security.permissions == toset(["compute.backendBuckets.get", "compute.backendBuckets.setSecurityPolicy", "compute.securityPolicies.get", "compute.securityPolicies.delete"]) && google_project_iam_member.cleanup_security.member == "serviceAccount:${google_service_account.guard.email}" && length(google_project_iam_member.cleanup_security.condition) == 0
+    error_message = "Bucket/policy cleanup needs four explicit project-wide permissions for guard only, without unsupported IAM name-condition claims or policy create/update/use."
+  }
+  assert {
+    condition     = index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "delete_owned_edge") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "cleanup_owned_security") && index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "cleanup_owned_security") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "stop_owned_service")
+    error_message = "Attempt ingress shutdown before Armor cleanup, and continue to public Run shutdown after cleanup."
+  }
+}

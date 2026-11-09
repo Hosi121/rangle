@@ -21,7 +21,7 @@ run "generation_is_disabled_for_existing_application" {
     error_message = "An existing application must gain no Vertex API changes, trainer or generation permissions."
   }
   assert {
-    condition     = !contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-generation-config") && !one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.cancel_owned_generation if can(step.cancel_owned_generation)]).switch[0].condition
+    condition     = !contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-generation-config") && !one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.cancel_owned_generation if can(step.cancel_owned_generation)]).switch[0].condition && !one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.stop_owned_generation_manager if can(step.stop_owned_generation_manager)]).switch[0].condition
     error_message = "Default-off generation must not pass a new CLI flag or call Vertex during shutdown."
   }
 }
@@ -58,6 +58,10 @@ run "generation_uses_private_config_and_separate_trainer" {
   assert {
     condition     = can(one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.stop_owned_service if can(step.stop_owned_service)]).except.steps[0].record_run_error) && alltrue([for name in ["inspect_before_delete", "delete_owned_service", "wait_for_deletion_operation", "verify_service_absent"] : contains([for step in one([for main_step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : main_step.stop_owned_service if can(main_step.stop_owned_service)]).try.steps : keys(step)[0]], name)])
     error_message = "Every Cloud Run shutdown phase must share an exception handler so API and operation-name failures cannot bypass GPU cancellation or failure receipts."
+  }
+  assert {
+    condition     = one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.stop_owned_generation_manager if can(step.stop_owned_generation_manager)]).switch[0].condition && index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "stop_owned_generation_manager") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "stop_owned_service") && one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.stop_owned_generation_manager if can(step.stop_owned_generation_manager)]).switch[0].steps[0].delete_manager.try.args.service_path == "projects/rangle-example/locations/asia-northeast1/services/rangle-stg-generation"
+    error_message = "Stop only the fixed owned generation manager before the public Run phase, preserving later GPU cancellation."
   }
   assert {
     condition     = can(one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.cancel_owned_generation if can(step.cancel_owned_generation)]).switch[0].steps[0].cancel_jobs.except.steps[0].record_generation_error) && strcontains(google_workflows_workflow.guard.source_contents, "guard/failures/")
