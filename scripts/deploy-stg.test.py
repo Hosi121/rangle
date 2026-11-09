@@ -34,10 +34,26 @@ if name == 'curl':
     if '/health' in url:
         body = 'ok\n'
     elif '/api/' in url:
-        body = json.dumps({'clips': [{'id': 'vru', 'revision': 'v1', 'title': 'VRU', 'sport': 'basketball',
+        clip = {'id': 'vru', 'revision': 'v1', 'title': 'VRU', 'sport': 'basketball',
           'codec': 'synthetic-transport-v1' if os.environ.get('SYNTHETIC_API') else 'splat-v1',
           'manifest_url': 'https://media.replay.example.test/manifests/vru/v1.json',
-          'preview_url': 'https://media.replay.example.test/previews/vru.webm'}]})
+          'preview_url': 'https://media.replay.example.test/previews/vru.webm'}
+        if os.environ.get('GENERATED_API'):
+            clip.pop('codec')
+            clip.pop('manifest_url')
+            clip.update(id='generated-' + 'c' * 32, revision='c' * 32,
+                        scene_url='https://media.replay.example.test/generated/' + 'c' * 32 + '/scene.json')
+            if os.environ.get('BAD_GENERATED_ID'):
+                clip['id'] = 'unrelated'
+            if os.environ.get('BAD_GENERATED_REVISION'):
+                clip['revision'] = 'd' * 32
+            if os.environ.get('BAD_GENERATED_SCENE'):
+                clip['scene_url'] = 'https://media.replay.example.test/generated/' + 'd' * 32 + '/scene.json'
+            if os.environ.get('PARTIAL_TRANSPORT'):
+                clip['codec'] = 'splat-v1'
+            if os.environ.get('NULL_TRANSPORT'):
+                clip.update(codec=None, manifest_url=None)
+        body = json.dumps({'clips': [clip]})
     elif '/demo/' in url:
         body = '<html><base href="/demo/"><script src="flutter_bootstrap.js"></script></html>'
     else:
@@ -127,6 +143,19 @@ class Deployment(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.traffic(calls), [])
         self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+
+    def test_successful_generated_result_can_be_first_without_fake_transport_fields(self):
+        result, calls = self.run_case({'GENERATED_API': '1'})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100'])
+
+    def test_generated_result_identity_scene_and_transport_shape_must_agree(self):
+        for key in ('BAD_GENERATED_ID', 'BAD_GENERATED_REVISION', 'BAD_GENERATED_SCENE',
+                    'PARTIAL_TRANSPORT', 'NULL_TRANSPORT'):
+            with self.subTest(key=key):
+                result, calls = self.run_case({'GENERATED_API': '1', key: '1'})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls), [])
 
     def test_post_promotion_failure_restores_exact_previous_split(self):
         result, calls = self.run_case({'FAIL_POST': '1'})

@@ -21,6 +21,8 @@ Go＋Flutter Webをマルチステージで1つの非root imageにまとめ、di
 
 昇格時・昇格後の確認に失敗したら、以前のrevisionとtraffic比率へ戻す。正常終了・エラー時とも、その実行で作った候補タグの削除を試みる。
 
+フィード先頭は通常catalogのクリップと、掲載済みの生成結果の両方を受け付ける。生成結果はtransport codec/manifestを持たない契約のまま、ID・revision・固定scene pathとmedia originを照合する。不完全なtransport情報や別jobのsceneは昇格を止める。この確認はHTTPの接続・metadata検査で、ブラウザ描画や実機性能の検証とは別。
+
 ## 初期設定
 
 正常に動くCloud Run、公開catalog・メディア、app/mediaのDNS・HTTPSを先に用意し、GitHub repository variablesを設定する。
