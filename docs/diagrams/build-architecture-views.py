@@ -49,11 +49,12 @@ def overview():
             350,
             110,
             1200,
-            565,
+            730,
             "gcp",
             "gcp",
             "利用者VPC/Subnet: 未構成（Google管理）",
-        )
+        ),
+        group("運用・ログ監視 · IAM", 650, 635, 850, 190, "monitoring"),
     ]
     nodes = [
         node("flutter", "Flutter Web", "ブラウザUI / JS viewer", 130, 190),
@@ -129,6 +130,11 @@ def overview():
             130,
             700,
         ),
+        node("logging", "Cloud Logging", "専用sink / Tokyo / 保持30日", 790, 680),
+        node("monitoring", "Cloud Monitoring", "標準指標 + ログパネル", 1080, 680),
+        node(
+            "workflows", "Scheduler / Workflows", "guard / generation-sync", 1360, 680
+        ),
     ]
     edges = [
         edge("M172 226 H448", "HTTPS", 305, 214, both=True),
@@ -148,13 +154,40 @@ def overview():
         edge("M1360 346 V380 H1175 V430 H1080 V449", "input get", 1290, 370),
         edge("M1038 491 H832", "model / scene", 935, 479),
         edge("M1318 491 H1122", "image pull", 1220, 479, kind="n"),
-        edge("M172 736 H1360 V611", "image push", 1010, 724, kind="n dash"),
+        edge(
+            "M172 736 H280 V854 H1520 V620 H1360 V611",
+            "image push",
+            234,
+            844,
+            kind="n dash",
+        ),
         edge(
             "M172 716 H310 V380 H790 V346",
             "revision / tag / traffic",
             580,
             369,
             kind="n dash",
+        ),
+        edge("M448 250 H370 V622 H620 V716 H748", kind="n telemetry"),
+        edge(
+            "M448 515 H370 V622 H620 V716 H748",
+            "Go / ML / LB・CDNログ",
+            520,
+            650,
+            kind="n telemetry",
+        ),
+        edge("M748 264 H700 V622 H620 V716 H748", kind="n telemetry"),
+        edge("M1080 611 V622 H620 V716 H748", kind="n telemetry"),
+        edge(
+            "M1360 674 V622 H620 V716 H748", "運用ログ", 1280, 610, kind="n telemetry"
+        ),
+        edge("M832 716 H1038", "専用viewのログ", 935, 704, kind="n telemetry"),
+        edge(
+            "M832 264 H930 V655 H1080 V674",
+            "標準メトリクス",
+            1030,
+            644,
+            kind="n telemetry",
         ),
     ]
     return groups, nodes, edges
@@ -442,6 +475,7 @@ body {padding:24px;}.page {max-width:none;}.head {max-width:1600px;}.lede {max-w
 .boundary {position:absolute;right:18px;top:14px;font-size:15px;color:var(--color-neutral);white-space:nowrap;}
 .g-label {font-size:16px;}.group.gcp {border-color:var(--color-gcp);}
 .e {stroke-width:2.2;}.n {stroke-width:1.7;}.el {font-size:14px;letter-spacing:0;stroke-width:6px;}
+.telemetry {stroke-dasharray:1 5;stroke-linecap:round;}
 .canvas-title {position:absolute;left:46px;top:25px;font-family:var(--font-display);font-size:30px;font-weight:700;}
 .inside-legend {position:absolute;left:46px;bottom:14px;font-size:13px;color:var(--color-muted);}
 .inside-legend b {color:var(--color-accent);}.foot {max-width:1600px;}
@@ -471,7 +505,7 @@ def main():
         (Path(__file__).parent / "THIRD-PARTY-NOTICES.txt").read_text()
     )
     definitions = [
-        ("overview", "全体構成", "視聴・生成・配備を分ける", overview),
+        ("overview", "全体構成", "視聴・生成・配備と横断するログ監視", overview),
         ("ml-pipeline", "ML処理", "管理者生成と到着画像によるLIVE更新", ml_pipeline),
         ("delivery", "配信処理", "メタデータ制御と不変モデルのデータ経路", delivery),
         (
@@ -484,7 +518,11 @@ def main():
     drafts = []
     for slug, title, subtitle, factory in definitions:
         groups, nodes, edges = factory()
-        ci_legend = "　 破線: CI/CD" if slug == "overview" else ""
+        ci_legend = (
+            "　 破線: CI/CD　 点線: ログ・指標（詳細はログ監視図）"
+            if slug == "overview"
+            else ""
+        )
         legend = (
             "<b>青: ログ</b>　 灰: 標準メトリクス（ログ保存と別経路）"
             if slug == "observability"

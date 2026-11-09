@@ -4,12 +4,12 @@
 
 | 図 | 読み取ること | 実装の入口 |
 | --- | --- | --- |
-| [全体構成を開く](diagrams/overview.html) | Flutter Web、Go API、Google Cloud上の有限GPU生成、CDN、下段のCI/CD | [Goの接続](../cmd/rangle-server/application.go)、[LBとCDN](../infra/gcp/modules/presentation/edge.tf) |
+| [全体構成を開く](diagrams/overview.html) | Flutter Web、Go API、Google Cloud上の有限GPU生成、CDN、CI/CDと横断するログ監視・運用 | [Goの接続](../cmd/rangle-server/application.go)、[LBとCDN](../infra/gcp/modules/presentation/edge.tf)、[ログ監視](../infra/gcp/modules/presentation/observability.tf) |
 | [ML処理を開く](diagrams/ml-pipeline.html) | 管理者の受付と共通台帳、NPZ/bundle、offlineとliveの分岐、検証・公開の出口 | [CustomJob](../internal/generation/vertex.go)、[offline worker](../ml/rangle_training/train.py)、[live worker](../ml/rangle_live/cloud.py) |
 | [配信処理を開く](diagrams/delivery.html) | feed/manifest・LIVE indexと、不変資産の取得、Worker復号・WebGL描画 | [LIVE配信契約](live-streaming.md)、[JS viewer](../apps/web/viewer/src/session.js)、[Worker](../apps/web/viewer/src/temporal-worker.js) |
 | [ログ監視を開く](diagrams/observability.html) | 4種のログ収集元、専用sink・30日保持、同じviewでの検索、ログと別経路の標準メトリクス | [監視IaC](../infra/gcp/modules/presentation/observability.tf)、[運用・検証記録](observability.md) |
 
-各HTMLはアイコン・日本語フォントを内包する。全体・ML・配信図では、青実線はHTTP・モデルデータ、灰実線は制御・メタデータ、破線はCI/CD。全体図のHTTP双方向矢印は要求と応答を示す。ログ監視図では青がログ、灰が標準メトリクスを示す。PNGはこのHTMLからlight/darkの両方を生成する。[再生成・出典](diagrams/README.md)
+各HTMLはアイコン・日本語フォントを内包する。全体・ML・配信図では、青実線はHTTP・モデルデータ、灰実線は制御・メタデータ、破線はCI/CD。全体図のHTTP双方向矢印は要求と応答、点線はログ・標準メトリクスを示す。ログ監視図では青がログ、灰が標準メトリクスを示す。PNGはこのHTMLからlight/darkの両方を生成する。[再生成・出典](diagrams/README.md)
 
 図は実装・設定による接続を示し、すべての機能が無条件で有効になるという意味ではない。生成は不変configのSHA、LIVEは専用設定とfeature flagを使って有効にする。[生成基盤](generation-infrastructure.md)と[クラウドLIVEの配備条件](cloud-live.md#権限と配備)を参照。
 
@@ -37,6 +37,8 @@ LIVEの処理待ちは最新window 1件で、評価4視点の画素は学習か�
 入口制限は [#116](https://github.com/Hosi121/rangle/pull/116) のIaCを2026-11-10 JSTに適用済み。WIFによるrevision・tag・trafficの操作はGoogleの制御API経由、候補のHTTP検証はLB経由である。図の下段のCI矢印は制御APIを表す。候補headerは経路の選択に使い、Goの操作認可とは別である。
 
 ## ログ監視の経路と到達点
+
+全体図にもCloud Logging・Cloud Monitoring・Scheduler/Workflowsと収集元の接続を示す。点線は観測データの経路で、LB→Cloud RunやCDN→Storageの要求・モデル配信と分けて読む。sinkの収集条件、既存の保存先、検索viewなどの詳細はログ監視図で示す。
 
 [ログ監視図](diagrams/observability.html)は、Cloud Run、VertexのPython worker、LB/CDN、Scheduler/WorkflowsのログをCloud Loggingの専用sinkで選択し、同一projectのLogging bucket `rangle-stg-logs` にコピーする構成を示す。このバケットはCloud Storageのmedia・inputsとは別の資源で、Tokyo・保持30日。監査ログは専用sinkから除外し、既存 `_Default` / `_Required` のrouting・保持期間は変更しない。
 
