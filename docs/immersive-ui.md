@@ -50,7 +50,9 @@ Firestoreは既存named DBの `clips/{id}/cheer_shards/{00..31}` に区間数を
 
 ### LIVEと生成画面の統合
 
-`origin/stg` の `99c6b08` まで取り込んだ。LIVE index・クラウドLIVEジョブ・viewer更新・開始／停止UIに加え、LIVE公開のバックプレッシャー対策とデコード用CPU容量の更新を含む。`PreviewViewer` の競合は、LIVEのsource更新・SHA照合・再試行と、既存の再生controller・表示切替の両方を保持して解消した。
+`origin/stg` の `767a1d7`（PR #98）まで取り込んだ。LIVE index・クラウドLIVEジョブ・viewer更新・開始／停止UIに加え、LIVE公開のバックプレッシャー対策、デコード用CPU容量、動画と自由視点の再生引き継ぎの更新を含む。`PreviewViewer` と `ClipCard` の競合は、source更新・SHA照合・再試行と、再生controller・没入演出の両方を保持して解消した。
+
+動画のネイティブ時刻をcaptureし、宣言されたpreview/sceneの対応情報とフレーム間隔で変換する。sceneのrestore完了を待って開眼し、復帰時も動画のrestore完了まで自由視点を残す。対応情報がないsceneは0秒で停止し、元の動画時刻と再生意図を保持する。末尾を超える場合は最終sampleへ合わせ、小さく調整時刻を表示する。準備中の動画操作を維持する旧UIとは異なり、没入演出中は動画を静止し、切り替え開始時の時刻と再生意図を固定する。再生引き継ぎのテストはこの契約と、動画を再作成せず保持する設計に合わせて更新した。キャンセル・再試行・revision変更後の古い完了通知が復活しないことも検証する。
 
 - フィード上部のLIVE入口から一覧・視聴へ進める。小画面では件数をロゴの下へ移し、ロゴの幅を確保する。
 - LIVEと生成に共通のRANGLEヘッダーを使い、黒・暖色のパネル・オレンジの操作色を統一する。LIVEの映像はヘッダーの背後まで表示し、情報は下部へ寄せる。
@@ -64,6 +66,6 @@ Firestoreは既存named DBの `clips/{id}/cheer_shards/{00..31}` に区間数を
 
 2026-11-09、Flutter 3.47.9 / Dart 3.13.7。Flutterによる実描画と入力テストで390×844・1440×900を確認し、充填・開眼後・自由視点・即時復帰を検証した。320×640、844×390、2倍文字の既存テストでもモーダル・操作領域・シーンへの入力を確認する。描画テストの映像面はFakeViewerであり、実映像・WebGL・実端末の振動確認とは区別する。ローカルPNGは作業環境に保持し、コミットしない。
 
-Flutterテスト174件、Linuxでの `go test -race ./...` と `go vet ./...`、Linuxでのviewerテスト46件が成功した。`flutter analyze` は指摘なし、release Webビルドも成功した。Windowsでの既存Go symlinkテストはOS権限不足、既存viewerテスト3件はfile URLからWindowsパスへの変換で失敗するため、同じソースをLinuxコンテナで検証した。今回のUI変更でそれらの既存テストを書き換えていない。
+Flutterテスト186件、Linuxでの `go test -race ./...` と `go vet ./...`、Linuxでのviewerテスト50件が成功した。Goの検証後に取り込んだPR #98はWebのみを変更している。`flutter analyze` は指摘なし、release Webビルドも成功した。Windowsでの既存Go symlinkテストはOS権限不足、既存viewerテスト3件はfile URLからWindowsパスへの変換で失敗するため、同じソースをLinuxコンテナで検証した。今回のUI変更でそれらの既存テストを書き換えていない。
 
 ブラウザ自動確認は、`/demo/` の配信pathを修正した後も画面取得がタイムアウトして未完了。実ブラウザでのHTML video/iframeの重なり、GPU上の初回描画、低速回線、タッチの体感と振動はレビュー前に確認する。Firestore実サービス／emulatorでの声援transactionも未検証。合成入力のテスト成功をクラウド運用・実機性能の成功とは扱わない。

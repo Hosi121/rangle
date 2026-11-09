@@ -548,7 +548,7 @@ void main() {
       expect(find.text('01 / 03'), findsOneWidget);
       await scene.seek(const Duration(seconds: 9));
       await tester.tap(find.text('動画に戻る'));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.text('動画に戻る'), findsNothing);
       expect(video.lastSeek, const Duration(seconds: 9));
       expect(scene.paused, isTrue);

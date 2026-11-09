@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/widgets.dart';
+import 'package:flutter/scheduler.dart';
 
 import 'viewer_adapter.dart';
 
@@ -23,8 +24,24 @@ class PlaybackController extends ChangeNotifier {
     _adapter = null;
   }
 
-  void _changed() => notifyListeners();
+  void _changed() {
+    if (SchedulerBinding.instance.schedulerPhase ==
+        SchedulerPhase.persistentCallbacks) {
+      final adapter = _adapter;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (adapter != null && identical(adapter, _adapter)) notifyListeners();
+      });
+    } else {
+      notifyListeners();
+    }
+  }
+
   Future<void> seek(Duration position) async => _adapter?.seek(position);
+  Future<PlaybackState> capture() async =>
+      await _adapter?.capturePlayback() ??
+      PlaybackState(value.position, value.playIntent ?? value.playing);
+  Future<bool> restore(PlaybackState state) async =>
+      await _adapter?.restorePlayback(state) ?? false;
   Future<void> pausePlayback() async {
     if (value.playing) await _adapter?.togglePlayback();
   }

@@ -24,7 +24,8 @@ export class TemporalSession {
     this.disposed = false;
   }
 
-  load(manifest, { autoplay = false, strict = false, sha256 } = {}) {
+  load(manifest, { autoplay = false, strict = false, sha256, continuity = null } = {}) {
+    this.continuity = continuity;
     this.live = strict;
     this.userPaused = false;
     this.manifest = manifest;
@@ -79,12 +80,14 @@ export class TemporalSession {
     this.viewer.runSplatSort = () => { this.queue(); return noSort; };
     this.releaseGestures = attachPlaybackGestures(this.viewer.renderer.domElement, () => this.togglePlayback());
     this.viewer.updateForRendererSizeChanges();
-    this.pendingSeek = { frame: 0, position: 0 };
-    this.queue();
+    if (this.continuity) this.notify({ type: 'prepared', ...this.continuity });
+    else this.pendingSeek = { frame: 0, position: 0 };
+    if (this.pendingSeek) this.queue();
   }
 
   queue() {
-    if (this.disposed || !this.material || this.job || (this.paused && this.initialized)) return;
+    if (this.disposed || !this.material || this.job ||
+        (this.paused && this.initialized && !this.pendingSeek)) return;
     const desired = this.viewer.camera;
     desired.updateMatrixWorld();
     this.viewer.splatMesh.updateMatrixWorld();
@@ -116,10 +119,12 @@ export class TemporalSession {
     this.position = job.position;
     this.viewer.forceRenderNextFrame();
     const firstFrame = !this.initialized;
-    if (firstFrame) {
+    if (firstFrame || job.seek?.presentationId !== undefined) {
       // A hidden preloader still prepares one real GPU frame before ready.
       this.viewer.updateSplatMesh();
       this.viewer.render();
+    }
+    if (firstFrame) {
       this.initialized = true;
       clearTimeout(this.timeout);
       if (!this.paused) this.viewer.start();
@@ -127,10 +132,13 @@ export class TemporalSession {
     if (job.seek && this.pendingSeek === job.seek) {
       this.pendingSeek = null;
       this.clock.seek(job.position);
+      if (typeof job.seek.playing === 'boolean') this.clock.playing = job.seek.playing;
       this.progress(true);
       this.notify({ type: 'ready', frame: job.seek.frame, frameCount: this.manifest.frameCount,
         frameRate: this.manifest.frameRate, attribution: this.manifest.attribution,
-        canPlay: true, playing: this.clock.playing && !this.clock.ended && !this.paused });
+        canPlay: true, playing: job.seek.presentationId !== undefined ? this.clock.playing :
+          this.clock.playing && !this.clock.ended && !this.paused,
+        ...(job.seek.presentationId !== undefined ? { presentationId: job.seek.presentationId } : {}) });
       job.seek.resolve?.();
     } else this.progress();
     if (firstFrame) this.resolveLoad();
@@ -144,7 +152,8 @@ export class TemporalSession {
     if (!force && now - this.lastProgress < 100) return;
     this.lastProgress = now;
     this.notify({ type: 'playback', positionSeconds: this.position,
-      playing: this.clock.playing && !this.clock.ended && !this.paused });
+      playing: this.clock.playing && !this.clock.ended && !this.paused,
+      playIntent: this.clock.playing });
   }
 
   cancelReplacement() { this.replacement?.cancel(); }
@@ -240,6 +249,15 @@ export class TemporalSession {
       this.pendingSeek = { frame, position: frame / this.manifest.frameRate, resolve };
       this.queue();
     });
+  }
+
+  present(frame, playing, presentationId) {
+    if (this.disposed || !Number.isInteger(frame) || typeof playing !== 'boolean') return;
+    frame = Math.max(0, Math.min(frame, this.manifest.frameCount - 1));
+    this.pendingSeek?.resolve?.();
+    this.epoch++;
+    this.pendingSeek = { frame, position: frame / this.manifest.frameRate, playing, presentationId };
+    this.queue();
   }
 
   togglePlayback() {

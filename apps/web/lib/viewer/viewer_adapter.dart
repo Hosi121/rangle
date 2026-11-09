@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import 'playback_state.dart';
+export 'playback_state.dart';
+
 enum ViewerStatus { loading, ready, error }
 
 @immutable
@@ -17,6 +20,9 @@ class ViewerValue {
     this.muted = false,
     this.buffering = false,
     this.source,
+    this.prepared = false,
+    this.timeline,
+    this.playIntent,
   });
 
   final ViewerStatus status;
@@ -27,6 +33,9 @@ class ViewerValue {
   final bool muted;
   final bool buffering;
   final Uri? source;
+  final bool prepared;
+  final ViewerTimeline? timeline;
+  final bool? playIntent;
 }
 
 /// Shared lifecycle and time controls for ordinary video and free-view scenes.
@@ -39,6 +48,15 @@ abstract class ViewerAdapter extends ChangeNotifier {
   Future<void> pause();
   Future<void> resume() async {}
   Future<bool> updateSource(Uri source, {String? sha256}) async => false;
+  void configureContinuity(Uri preview, PreviewSceneMapping? mapping) {}
+  Future<PlaybackState> capturePlayback() async =>
+      PlaybackState(value.position, value.playIntent ?? value.playing);
+  Future<bool> restorePlayback(PlaybackState state) async {
+    await seek(state.position);
+    if (value.canPlay && value.playing != state.playing) await togglePlayback();
+    return true;
+  }
+
   Widget buildView();
 }
 
@@ -72,6 +90,11 @@ class VideoPreviewAdapter extends ViewerAdapter {
   bool _autoplayPending = false;
   Future<void>? _autoplayRecovery;
   Future<void>? _releaseFuture;
+  PlaybackState? _restoreTarget;
+  Completer<bool>? _restoration;
+  Future<void>? _restoreRunner;
+  bool _initializing = true;
+  bool _playIntent = false;
 
   @override
   ViewerValue get value => _value;
@@ -81,8 +104,14 @@ class VideoPreviewAdapter extends ViewerAdapter {
     try {
       await _controller.initialize().timeout(const Duration(seconds: 15));
       if (_disposed || _failed) return;
+      await _configurePlayback(autoplay: _restoreTarget == null);
+      if (_restoreTarget != null) await _applyRestore();
+      if (!_visible && _controller.value.isInitialized) {
+        await _controller.pause();
+      }
+      _initializing = false;
+      if (_restoration != null) unawaited(_applyRestore());
       _update();
-      await _configurePlayback(autoplay: true);
     } on Object {
       _fail();
     }
@@ -100,6 +129,7 @@ class VideoPreviewAdapter extends ViewerAdapter {
     }
     if (!autoplay || !_visible || _disposed || _failed) return;
     _autoplayPending = true;
+    _playIntent = true;
     try {
       await controller.play();
     } on Object catch (error) {
@@ -132,6 +162,7 @@ class VideoPreviewAdapter extends ViewerAdapter {
       return;
     }
     _autoplayPending = false;
+    _playIntent = false;
     final previous = _controller;
     previous.removeListener(_update);
     _controller = _manualControllerFactory();
@@ -162,12 +193,15 @@ class VideoPreviewAdapter extends ViewerAdapter {
     }
     if (media.position > Duration.zero) _autoplayPending = false;
     _value = ViewerValue(
-      status: media.isInitialized ? ViewerStatus.ready : ViewerStatus.loading,
+      status: media.isInitialized && !_initializing && _restoration == null
+          ? ViewerStatus.ready
+          : ViewerStatus.loading,
       position: media.position,
       duration: media.duration,
       playing: media.isPlaying,
       muted: media.volume == 0,
       buffering: media.isBuffering,
+      playIntent: _playIntent,
     );
     notifyListeners();
   }
@@ -175,6 +209,8 @@ class VideoPreviewAdapter extends ViewerAdapter {
   void _fail() {
     if (_disposed || _failed) return;
     _failed = true;
+    _restoration?.complete(false);
+    _restoration = null;
     _controller.removeListener(_update);
     _value = const ViewerValue(status: ViewerStatus.error);
     notifyListeners();
@@ -193,6 +229,7 @@ class VideoPreviewAdapter extends ViewerAdapter {
   @override
   Future<void> togglePlayback() => _perform(() async {
     _autoplayPending = false;
+    _playIntent = !value.playing;
     if (value.playing) {
       await _controller.pause();
     } else {
@@ -206,6 +243,90 @@ class VideoPreviewAdapter extends ViewerAdapter {
   @override
   Future<void> seek(Duration position) =>
       _perform(() => _controller.seekTo(position));
+
+  @override
+  Future<PlaybackState> capturePlayback() async {
+    try {
+      final position = await _controller.position;
+      return PlaybackState(position ?? value.position, _playIntent);
+    } on Object {
+      return super.capturePlayback();
+    }
+  }
+
+  @override
+  Future<bool> restorePlayback(PlaybackState state) {
+    if (_disposed || _failed) return Future.value(false);
+    _restoration?.complete(false);
+    final completion = _restoration = Completer<bool>();
+    _restoreTarget = state;
+    _playIntent = state.playing;
+    if (!_initializing) unawaited(_applyRestore());
+    return completion.future;
+  }
+
+  Future<void> _applyRestore() =>
+      _restoreRunner ??= _drainRestores().whenComplete(() {
+        _restoreRunner = null;
+        if (_restoration != null && !_disposed && !_failed) {
+          unawaited(_applyRestore());
+        }
+      });
+
+  Future<void> _drainRestores() async {
+    while (!_disposed && !_failed && _restoration != null) {
+      final target = _restoreTarget!, completion = _restoration!;
+      _playIntent = target.playing;
+      try {
+        final end = _controller.value.duration;
+        final position = target.position < Duration.zero
+            ? Duration.zero
+            : target.position > end
+            ? end
+            : target.position;
+        await _controller.seekTo(position);
+        if (_disposed) return;
+        if (!identical(completion, _restoration)) continue;
+        if (target.playing && _visible) {
+          final controller = _controller, recovery = _autoplayRecovery;
+          _autoplayPending = true;
+          try {
+            await controller.play();
+            if (!identical(controller, _controller) ||
+                _autoplayRecovery != recovery) {
+              await _autoplayRecovery;
+              if (identical(completion, _restoration)) {
+                _restoreTarget = PlaybackState(target.position, false);
+                _playIntent = false;
+              }
+              continue;
+            }
+          } on Object catch (error) {
+            if (!_isAutoplayPolicyError(error)) rethrow;
+            await _recoverAutoplay();
+            if (identical(completion, _restoration)) {
+              _restoreTarget = PlaybackState(target.position, false);
+              _playIntent = false;
+            }
+            continue;
+          }
+        } else {
+          await _controller.pause();
+        }
+        if (_disposed) return;
+        if (!identical(completion, _restoration)) continue;
+        if (!_visible) await _controller.pause();
+        if (_disposed) return;
+        if (!identical(completion, _restoration)) continue;
+        _restoration = null;
+        _restoreTarget = null;
+        _update();
+        completion.complete(true);
+      } on Object {
+        _fail();
+      }
+    }
+  }
 
   @override
   Future<void> toggleMute() =>
@@ -247,6 +368,8 @@ class VideoPreviewAdapter extends ViewerAdapter {
   @override
   void dispose() {
     _disposed = true;
+    _restoration?.complete(false);
+    _restoration = null;
     _controller.removeListener(_update);
     unawaited(_release());
     super.dispose();

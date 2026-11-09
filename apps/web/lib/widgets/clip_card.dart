@@ -73,8 +73,9 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
   bool _hasEntered = false;
   bool _videoRequested = true;
   Duration _entryPosition = Duration.zero, _sceneTarget = Duration.zero;
-  Duration? _returnPosition;
-  bool _returnPlaying = false;
+  bool _captureReady = false, _pendingVideo = false, _timeClamped = false;
+  PlaybackState? _videoPlayback;
+  ViewerTimeline? _sceneTimeline;
   int _generation = 0;
   int _cheerPulse = 0;
   String? _userId;
@@ -134,13 +135,28 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
     if (!widget.active && old.active) unawaited(_cheers.flush());
     if (!widget.active ||
         old.clip.id != clip.id ||
-        old.clip.sceneUrl != clip.sceneUrl) {
+        old.clip.sceneUrl != clip.sceneUrl ||
+        old.clip.previewUrl != clip.previewUrl ||
+        old.clip.revision != clip.revision) {
+      final wasLocked = _freeView || _entering;
       _resetEntry();
       _freeView = false;
       _videoRequested = true;
       _sceneRequested = false;
       _sceneReady = false;
       _sceneError = false;
+      _hasEntered = false;
+      _sceneTimeline = null;
+      _videoPlayback = null;
+      _pendingVideo = false;
+      if (widget.active && wasLocked) {
+        final generation = _generation;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted && widget.active && generation == _generation) {
+            widget.onFreeViewChanged(false);
+          }
+        });
+      }
     }
     if (old.clip.id != clip.id) {
       _cheers.dispose();
@@ -172,6 +188,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
     _entering = false;
     _armed = false;
     _alignmentRequested = false;
+    _captureReady = false;
     _charge.stop();
     _charge.value = 0;
     _reveal.stop();
@@ -179,7 +196,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
     _fire.stop();
   }
 
-  void _beginEntry({bool accessible = false}) {
+  Future<void> _beginEntry({bool accessible = false}) async {
     if (!widget.active ||
         _freeView ||
         _entering ||
@@ -189,6 +206,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
       return;
     }
     _generation++;
+    final generation = _generation;
     _entryPosition = _video.value.position;
     _wasPlaying = _video.value.playing;
     setState(() {
@@ -200,12 +218,20 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
       _alignmentRequested = false;
     });
     widget.onFreeViewChanged(true);
-    unawaited(_video.pausePlayback());
     haptics.pulse(18);
-    _fire.repeat();
+    if (!_reduced) _fire.repeat();
     _charge.forward(from: 0);
     if (accessible) _charge.value = 1;
-    if (_scene.value.status == ViewerStatus.ready) unawaited(_alignScene());
+    final captured = await _video.capture();
+    if (!mounted || generation != _generation || !_entering) return;
+    _entryPosition = captured.position;
+    _wasPlaying = captured.playing;
+    await _video.pausePlayback();
+    if (!mounted || generation != _generation || !_entering) return;
+    _captureReady = true;
+    if (_scene.value.status == ViewerStatus.ready || _sceneTimeline != null) {
+      unawaited(_alignScene());
+    }
   }
 
   void _endHold() {
@@ -219,6 +245,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
       _resetEntry();
       _sceneRequested = false;
       _sceneReady = false;
+      _sceneTimeline = null;
     });
     widget.onFreeViewChanged(false);
     if (resume && widget.active) unawaited(_video.play());
@@ -226,23 +253,37 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
 
   Future<void> _alignScene() async {
     if (!_entering ||
+        !_captureReady ||
         _alignmentRequested ||
-        _scene.value.status != ViewerStatus.ready) {
+        (_scene.value.status != ViewerStatus.ready && _sceneTimeline == null)) {
       return;
     }
     final generation = _generation;
     _alignmentRequested = true;
-    await _scene.pausePlayback();
-    _sceneTarget = Duration(
-      microseconds: math.min(
-        _entryPosition.inMicroseconds,
-        _scene.value.duration.inMicroseconds,
-      ),
-    );
-    await _scene.seek(_sceneTarget);
+    final timeline = _sceneTimeline;
+    final mapped = timeline?.mapping?.toScene(_entryPosition);
+    _timeClamped =
+        mapped != null &&
+        (mapped < Duration.zero ||
+            mapped > timeline!.atFrame(timeline.frameCount - 1));
+    _sceneTarget = timeline != null
+        ? timeline.sample(mapped ?? Duration.zero)
+        : Duration(
+            microseconds: math.min(
+              _entryPosition.inMicroseconds,
+              _scene.value.duration.inMicroseconds,
+            ),
+          );
+    final restored = await _scene.restore(PlaybackState(_sceneTarget, false));
     if (mounted && generation == _generation) {
+      if (!restored) return;
       _sceneTarget = _scene.value.position;
-      _checkAlignment();
+      if (timeline == null) {
+        _checkAlignment();
+      } else {
+        _sceneReady = true;
+        _tryReveal();
+      }
     }
   }
 
@@ -256,6 +297,8 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
   }
 
   void _checkAlignment() {
+    // Timelined viewers acknowledge restoration only after the target is drawn.
+    if (_sceneTimeline != null) return;
     if (!_entering || !_alignmentRequested || _sceneReady) return;
     final value = _scene.value;
     if (value.status == ViewerStatus.ready &&
@@ -273,7 +316,9 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
         !_armed ||
         !_sceneReady ||
         _reveal.isAnimating) {
-      return;
+      {
+        return;
+      }
     }
     if (_reduced) {
       _completeEntry();
@@ -283,7 +328,11 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
   }
 
   void _completeEntry() {
-    final play = _wasPlaying;
+    final play =
+        _wasPlaying &&
+        (_sceneTimeline == null ||
+            (_sceneTimeline!.mapping != null &&
+                _sceneTimeline!.frameCount > 1));
     setState(() {
       _entering = false;
       _freeView = true;
@@ -297,33 +346,36 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
   }
 
   Future<void> _back() async {
-    if (!_freeView) return;
-    final pos = _scene.value.position, play = _scene.value.playing;
-    _returnPosition = pos;
-    _returnPlaying = play;
+    if (!_freeView || _pendingVideo) return;
+    final generation = _generation;
+    final captured = await _scene.capture();
+    if (!mounted || !widget.active || generation != _generation || !_freeView) {
+      return;
+    }
+    final timeline = _sceneTimeline;
+    final position = timeline == null
+        ? captured.position
+        : timeline.mapping?.toPreview(captured.position) ?? _entryPosition;
+    final play =
+        timeline == null ||
+            (timeline.mapping != null && timeline.frameCount > 1)
+        ? captured.playing
+        : _wasPlaying;
     setState(() {
-      _resetEntry();
-      _freeView = false;
+      _pendingVideo = true;
       _videoRequested = true;
-    });
-    widget.onFreeViewChanged(false);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      unawaited(_restoreVideo());
+      _videoPlayback = PlaybackState(position, play);
     });
   }
 
-  Future<void> _restoreVideo() async {
-    if (!mounted ||
-        _freeView ||
-        !widget.active ||
-        _returnPosition == null ||
-        _video.value.status != ViewerStatus.ready) {
-      return;
-    }
-    final position = _returnPosition!, play = _returnPlaying;
-    _returnPosition = null;
-    await _video.seek(position);
-    if (mounted && widget.active && !_freeView && play) await _video.play();
+  void _videoRestored() {
+    if (!mounted || !widget.active || !_pendingVideo) return;
+    setState(() {
+      _resetEntry();
+      _freeView = false;
+      _pendingVideo = false;
+    });
+    widget.onFreeViewChanged(false);
   }
 
   void _onSceneStatus(ViewerStatus status) {
@@ -337,6 +389,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
       _sceneRequested = false;
       _sceneReady = false;
       _sceneError = true;
+      _sceneTimeline = null;
     });
     widget.onFreeViewChanged(false);
     if (wasPlaying) unawaited(_video.play());
@@ -404,16 +457,21 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
     fit: StackFit.expand,
     children: [
       PreviewViewer(
-        key: ValueKey('${clip.id}-video'),
+        key: ValueKey('${clip.id}-${clip.revision}-${clip.previewUrl}-video'),
         source: clip.previewUrl!,
         factory: widget.viewerFactory,
         controller: _video,
         showControls: false,
         interactive: false,
-        onReady: () {
-          unawaited(_restoreVideo());
+        playback: _videoPlayback,
+        onPlaybackRestored: _videoRestored,
+        onStatusChanged: (status) {
+          if (status == ViewerStatus.error && _pendingVideo) {
+            setState(() => _pendingVideo = false);
+            _message('動画を表示できませんでした。もう一度戻る操作を試してください。');
+          }
         },
-        visible: !_freeView && widget.active,
+        visible: (!_freeView || _pendingVideo) && widget.active,
       ),
       if (_video.value.status == ViewerStatus.ready)
         Positioned.fill(
@@ -510,7 +568,9 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
               children: [
                 if (_sceneRequested && widget.active && clip.sceneUrl != null)
                   Transform.scale(
-                    key: ValueKey('${clip.id}-scene'),
+                    key: ValueKey(
+                      '${clip.id}-${clip.revision}-${clip.sceneUrl}-scene',
+                    ),
                     scale: !_reduced && (_entering || _hasEntered)
                         ? entryZoom(1, 1)
                         : 1,
@@ -526,6 +586,12 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                             factory: widget.sceneFactory,
                             freeView: true,
                             thumbnailSource: clip.previewUrl,
+                            continuity: true,
+                            mapping: clip.playbackMapping,
+                            onPrepared: (timeline) {
+                              _sceneTimeline = timeline;
+                              if (_entering) unawaited(_alignScene());
+                            },
                             visible: _freeView || _entering,
                             controller: _scene,
                             showControls: false,
@@ -605,7 +671,14 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                               const SizedBox(width: 8),
                               Flexible(
                                 child: Text(
-                                  _freeView ? '自由視点' : clip.sport,
+                                  _freeView
+                                      ? (_sceneTimeline != null &&
+                                                _sceneTimeline!.mapping == null
+                                            ? '自由視点・時刻の対応情報なし'
+                                            : _timeClamped
+                                            ? '自由視点・${(_sceneTarget.inMicroseconds / 1000000).toStringAsFixed(2)}秒へ調整'
+                                            : '自由視点')
+                                      : clip.sport,
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(

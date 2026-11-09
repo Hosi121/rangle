@@ -97,7 +97,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('動画に戻る'), findsOneWidget);
       final sceneScale = tester.widget<Transform>(
-        find.byKey(const ValueKey('demo-01-scene')),
+        find
+            .ancestor(
+              of: find.byKey(const Key('entry-scene-content')),
+              matching: find.byType(Transform),
+            )
+            .first,
       );
       expect(sceneScale.transform.entry(0, 0), 1.75);
       await gesture.up();

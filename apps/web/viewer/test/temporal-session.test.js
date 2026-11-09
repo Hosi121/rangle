@@ -142,3 +142,42 @@ test('hiding during initial GPU preparation does not sort or draw until resumed'
   assert.ok(h.renders.length > 0);
   await h.session.dispose();
 });
+
+test('deferred first presentation draws sample14 at .56s without ever drawing sample0', async () => {
+  const h = harness(); h.session.pause(true);
+  const loading = h.session.load(manifest, { continuity: { frameCount: 20, frameRate: 25 } });
+  h.worker.emit(h.model); await flush();
+  assert.equal(h.messages.at(-1).type, 'prepared');
+  assert.equal(h.renders.length, 0);
+  assert.equal(h.commands.some(c => c.type === 'sort'), false);
+  h.session.present(14, false, 1);
+  h.respond(h.commands.at(-1)); await loading;
+  const ready = h.messages.filter(m => m.type === 'ready');
+  assert.deepEqual(ready.map(m => [m.frame, m.presentationId, m.playing]), [[14, 1, false]]);
+  assert.equal(h.session.position, .56);
+  assert.equal(h.renders.length, 1);
+  assert.equal(h.counts.starts, 0);
+  // Returning to the cached hidden mesh still draws the new target before ack.
+  h.session.present(19, true, 2); h.respond(h.commands.at(-1));
+  assert.equal(h.renders.length, 2);
+  assert.equal(h.session.position, .76);
+  assert.equal(h.messages.at(-1).playing, true, 'hidden state does not erase the requested play intent');
+  assert.equal(h.counts.builds, 1);
+  await h.session.dispose();
+});
+
+test('newer first presentations supersede stale sorts before any draw or ready acknowledgement', async () => {
+  const h = harness();
+  const loading = h.session.load(manifest, { continuity: { frameCount: 20, frameRate: 25 } });
+  h.worker.emit(h.model); await flush();
+  h.session.present(5, true, 1); const obsolete = h.commands.at(-1);
+  h.session.present(14, true, 2);
+  h.session.present(19, false, 3);
+  h.respond(obsolete);
+  assert.equal(h.renders.length, 0);
+  assert.equal(h.messages.some(m => m.type === 'ready'), false);
+  h.respond(h.commands.at(-1)); await loading;
+  assert.deepEqual(h.messages.filter(m => m.type === 'ready').map(m => [m.frame, m.presentationId]), [[19, 3]]);
+  assert.equal(h.session.clock.playing, false);
+  await h.session.dispose();
+});
