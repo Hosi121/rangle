@@ -17,6 +17,45 @@ Map<String, Object?> clip() => {
 };
 
 void main() {
+  test('only publisher-bound codec, clip, revision and exact paired URLs declare a shared clock', () async {
+    final row = {
+      ...clip(),
+      'id': 'game',
+      'revision': 'r1',
+      'codec': 'rangle-temporal-rgs1',
+      'preview_url': '/assets/game/r1/full/preview.webm',
+      'scene_url': '/assets/game/r1/full/scene.json',
+    };
+    Future<bool> mapped(Map<String, Object?> data) async {
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'clips': [data],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ),
+      );
+      addTearDown(client.close);
+      return (await ApiClipRepository(
+            endpoint: 'https://example.test/api/v1/clips',
+            client: client,
+          ).load()).single.playbackMapping !=
+          null;
+    }
+
+    expect(await mapped(row), isTrue);
+    for (final mutation in [
+      {'codec': 'unknown'},
+      {'revision': 'r2'},
+      {'id': 'other'},
+      {'preview_url': 'https://other.test/assets/game/r1/full/preview.webm'},
+      {'preview_url': '/assets/game/r1/full/preview.webm?unrelated=1'},
+      {'scene_url': '/other/scene.json'},
+    ]) {
+      expect(await mapped({...row, ...mutation}), isFalse);
+    }
+  });
   test(
     'publication invalidation revalidates one public first page and retries',
     () async {

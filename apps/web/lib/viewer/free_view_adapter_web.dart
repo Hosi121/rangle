@@ -45,6 +45,66 @@ class _FreeViewAdapter extends ViewerAdapter {
   int _frameCount = 0;
   int _requestedFrame = 0;
   Timer? _timeout;
+  bool _deferFirstFrame = false, _prepared = false;
+  Uri? _preview;
+  PreviewSceneMapping? _mapping;
+  ViewerTimeline? _timeline;
+  int _presentationId = 0;
+  PlaybackState? _restoreTarget;
+  Completer<bool>? _restoration;
+  Completer<PlaybackState>? _capture;
+  Timer? _captureTimeout;
+  int _captureId = 0;
+
+  void _finishCapture([PlaybackState? captured]) {
+    _captureTimeout?.cancel();
+    _capture?.complete(
+      captured ??
+          PlaybackState(value.position, value.playIntent ?? value.playing),
+    );
+    _capture = null;
+  }
+
+  @override
+  Future<PlaybackState> capturePlayback() {
+    if (_disposed || _failed || !_hasReadyFrame) return super.capturePlayback();
+    _finishCapture();
+    final completion = _capture = Completer<PlaybackState>();
+    _captureTimeout = Timer(const Duration(seconds: 2), _finishCapture);
+    _send('capturePlayback', {'captureId': ++_captureId});
+    return completion.future;
+  }
+
+  @override
+  void configureContinuity(Uri preview, PreviewSceneMapping? mapping) {
+    if (live) return;
+    _deferFirstFrame = true;
+    _preview = Uri.base.resolveUri(preview);
+    _mapping = mapping;
+  }
+
+  @override
+  Future<bool> restorePlayback(PlaybackState state) {
+    if (_disposed || _failed) return Future.value(false);
+    _restoration?.complete(false);
+    _restoration = Completer<bool>();
+    _restoreTarget = state;
+    _presentationId++;
+    _sendPresentation();
+    return _restoration!.future;
+  }
+
+  void _sendPresentation() {
+    if (!_prepared || _restoreTarget == null || _restoration == null) return;
+    _requestedFrame = _timeline!.frameAt(_restoreTarget!.position);
+    _timeout?.cancel();
+    _timeout = Timer(const Duration(seconds: 30), _fail);
+    _send('present', {
+      'presentationId': _presentationId,
+      'frame': _requestedFrame,
+      'playing': _restoreTarget!.playing,
+    });
+  }
 
   @override
   ViewerValue get value => _value;
@@ -104,12 +164,66 @@ class _FreeViewAdapter extends ViewerAdapter {
       }
       if (_disposed || _failed) return;
       switch (data['type']) {
+        case 'captured':
+          if (data['captureId'] != _captureId || _capture == null) return;
+          final seconds = (data['positionSeconds'] as num).toDouble();
+          if (!seconds.isFinite || seconds < 0) return;
+          _finishCapture(
+            PlaybackState(
+              Duration(microseconds: (seconds * 1000000).round()),
+              data['playing'] as bool,
+            ),
+          );
         case 'boot':
           _send('load', {
             'url': source.toString(),
+            if (_deferFirstFrame) ...{
+              'deferFirstFrame': true,
+              'previewUrl': _preview.toString(),
+              if (_mapping != null) 'mapping': _mapping!.toJson(),
+            },
             if (live) ...{'live': true, 'origins': origins, 'sha256': sha256},
           });
           if (!_visible) _send('pause');
+        case 'prepared':
+          final count = data['frameCount'] as int;
+          final rate = (data['frameRate'] as num).toDouble();
+          if (count <= 0 || !rate.isFinite || rate <= 0) return _fail();
+          final mapping = data['mapping'] as Map<String, dynamic>?;
+          PreviewSceneMapping? verified;
+          if (mapping != null) {
+            final preview = (mapping['previewStartSeconds'] as num).toDouble();
+            final scene = (mapping['sceneStartSeconds'] as num).toDouble();
+            if (!preview.isFinite ||
+                !scene.isFinite ||
+                preview < 0 ||
+                scene < 0) {
+              return _fail();
+            }
+            verified = PreviewSceneMapping(
+              previewStart: Duration(microseconds: (preview * 1000000).round()),
+              sceneStart: Duration(microseconds: (scene * 1000000).round()),
+            );
+          }
+          _frameCount = count;
+          _frameRate = rate;
+          _timeline = ViewerTimeline(
+            frameCount: count,
+            frameRate: rate,
+            mapping: verified,
+          );
+          _prepared = true;
+          _value = ViewerValue(
+            status: _value.status,
+            position: _value.position,
+            duration: _timeline!.atFrame(count - 1),
+            canPlay: count > 1,
+            playing: _value.playing,
+            prepared: true,
+            timeline: _timeline,
+          );
+          notifyListeners();
+          _sendPresentation();
         case 'loading':
           _timeout?.cancel();
           if (!live || _visible) {
@@ -122,12 +236,20 @@ class _FreeViewAdapter extends ViewerAdapter {
             playing: _value.playing,
             canPlay: _value.canPlay,
             source: _value.source,
+            playIntent: _value.playIntent,
+            prepared: _prepared,
+            timeline: _timeline,
             buffering: true,
           );
           notifyListeners();
         case 'ready':
         case 'modelReady':
           final replacing = data['type'] == 'modelReady';
+          final presentation = data['presentationId'];
+          if (presentation != null && presentation != _presentationId) return;
+          if (_deferFirstFrame && !_hasReadyFrame && presentation == null) {
+            return;
+          }
           final request = data['requestId'];
           final replacedSource = _requestedSources[request];
           if (replacing &&
@@ -164,6 +286,9 @@ class _FreeViewAdapter extends ViewerAdapter {
               microseconds: ((count - 1) * 1000000 / _frameRate).round(),
             ),
             canPlay: data['canPlay'] == true,
+            playIntent: data['playing'] as bool? ?? _value.playIntent,
+            prepared: _prepared,
+            timeline: _timeline,
             source: replacing ? replacedSource : _value.source ?? source,
             playing: data['playing'] is bool
                 ? data['playing'] as bool
@@ -171,6 +296,11 @@ class _FreeViewAdapter extends ViewerAdapter {
           );
           if (!_initialized.isCompleted) _initialized.complete();
           notifyListeners();
+          if (presentation != null) {
+            _restoration?.complete(true);
+            _restoration = null;
+            _restoreTarget = null;
+          }
           if (replacing && request == _updateId) _finishUpdate(true);
         case 'replaceError':
           if (data['requestId'] == _updateId) _finishUpdate(false);
@@ -198,9 +328,12 @@ class _FreeViewAdapter extends ViewerAdapter {
             position: position,
             duration: _value.duration,
             playing: playing,
+            playIntent: data['playIntent'] as bool? ?? playing,
             canPlay: _value.canPlay,
             source: _value.source,
             buffering: _value.buffering,
+            prepared: _prepared,
+            timeline: _timeline,
           );
           notifyListeners();
         case 'error':
@@ -214,6 +347,9 @@ class _FreeViewAdapter extends ViewerAdapter {
   void _fail() {
     if (_disposed || _failed) return;
     _failed = true;
+    _finishCapture();
+    _restoration?.complete(false);
+    _restoration = null;
     _timeout?.cancel();
     _finishUpdate(false);
     _value = const ViewerValue(status: ViewerStatus.error, canPlay: false);
@@ -239,7 +375,10 @@ class _FreeViewAdapter extends ViewerAdapter {
         playing: _value.playing,
         canPlay: _value.canPlay,
         source: _value.source,
+        playIntent: _value.playIntent,
         buffering: true,
+        prepared: _prepared,
+        timeline: _timeline,
       );
       notifyListeners();
       _timeout?.cancel();
@@ -341,6 +480,9 @@ class _FreeViewAdapter extends ViewerAdapter {
   @override
   void dispose() {
     _disposed = true;
+    _finishCapture();
+    _restoration?.complete(false);
+    _restoration = null;
     _timeout?.cancel();
     _finishUpdate(false);
     if (!_initialized.isCompleted) _initialized.complete();

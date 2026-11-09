@@ -21,6 +21,13 @@ class PreviewViewer extends StatefulWidget {
     this.onSourceError,
     this.sha256,
     this.sourceRevision = 0,
+    this.playback,
+    this.continuity = false,
+    this.mapping,
+    this.onValueChanged,
+    this.onPrepared,
+    this.onPlaybackRestored,
+    this.onPlaybackInteraction,
     super.key,
   });
 
@@ -38,6 +45,13 @@ class PreviewViewer extends StatefulWidget {
   final VoidCallback? onSourceError;
   final String? sha256;
   final int sourceRevision;
+  final PlaybackState? playback;
+  final bool continuity;
+  final PreviewSceneMapping? mapping;
+  final ValueChanged<ViewerValue>? onValueChanged;
+  final ValueChanged<ViewerTimeline>? onPrepared;
+  final VoidCallback? onPlaybackRestored;
+  final ValueChanged<ViewerValue>? onPlaybackInteraction;
 
   @override
   State<PreviewViewer> createState() => _PreviewViewerState();
@@ -54,6 +68,9 @@ class _PreviewViewerState extends State<PreviewViewer>
   Timer? _bufferingTimer;
   ViewerStatus? _lastStatus;
   Uri? _lastReportedSource;
+  bool _preparedNotified = false;
+  ViewerAdapter? _pendingValueAdapter;
+  PlaybackState? _lastGoodPlayback;
 
   @override
   void initState() {
@@ -67,15 +84,21 @@ class _PreviewViewerState extends State<PreviewViewer>
     _create();
   }
 
-  void _create() {
+  void _create([PlaybackState? retry]) {
     _clearBuffering();
     _hasReadyFrame = false;
     _readyNotified = false;
     _lastStatus = null;
     _lastReportedSource = null;
+    _preparedNotified = false;
     _adapter = widget.factory(widget.source);
+    if (widget.continuity && widget.thumbnailSource != null) {
+      _adapter.configureContinuity(widget.thumbnailSource!, widget.mapping);
+    }
     _adapter.addListener(_reportStatus);
     if (!widget.visible || !_appVisible) unawaited(_adapter.pause());
+    final playback = retry ?? widget.playback;
+    if (playback != null) unawaited(_restore(playback, retry: retry != null));
     unawaited(_adapter.initialize());
     _reportStatus();
   }
@@ -84,6 +107,28 @@ class _PreviewViewerState extends State<PreviewViewer>
     final adapter = _adapter;
     _updateBufferingFeedback();
     final status = adapter.value.status;
+    if (status == ViewerStatus.ready) {
+      _lastGoodPlayback = PlaybackState(
+        adapter.value.position,
+        adapter.value.playIntent ?? adapter.value.playing,
+      );
+    }
+    if (!identical(_pendingValueAdapter, adapter)) {
+      _pendingValueAdapter = adapter;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (identical(_pendingValueAdapter, adapter)) {
+          _pendingValueAdapter = null;
+        }
+        if (!mounted || !identical(adapter, _adapter)) return;
+        widget.onValueChanged?.call(adapter.value);
+        if (adapter.value.prepared &&
+            adapter.value.timeline != null &&
+            !_preparedNotified) {
+          _preparedNotified = true;
+          widget.onPrepared?.call(adapter.value.timeline!);
+        }
+      });
+    }
     if (status == ViewerStatus.ready) _hasReadyFrame = true;
     final source = adapter.value.source;
     if (status == ViewerStatus.ready &&
@@ -147,11 +192,32 @@ class _PreviewViewerState extends State<PreviewViewer>
   void didUpdateWidget(PreviewViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.visible != oldWidget.visible) _applyVisibility();
+    if (widget.playback != null && widget.playback != oldWidget.playback) {
+      unawaited(_restore(widget.playback!));
+    }
     if (widget.freeView &&
         (widget.source != oldWidget.source ||
             widget.sourceRevision != oldWidget.sourceRevision)) {
       unawaited(_replace(widget.source));
     }
+  }
+
+  Future<void> _restore(PlaybackState state, {bool retry = false}) async {
+    final adapter = _adapter;
+    final restored = await adapter.restorePlayback(state);
+    if (!mounted ||
+        !identical(adapter, _adapter) ||
+        (!retry && widget.playback != state) ||
+        !restored) {
+      return;
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted &&
+          identical(adapter, _adapter) &&
+          (retry || widget.playback == state)) {
+        widget.onPlaybackRestored?.call();
+      }
+    });
   }
 
   Future<void> _replace(Uri source) async {
@@ -180,7 +246,7 @@ class _PreviewViewerState extends State<PreviewViewer>
     setState(() {
       _adapter.removeListener(_reportStatus);
       _adapter.dispose();
-      _create();
+      _create(_lastGoodPlayback);
     });
   }
 
@@ -214,7 +280,15 @@ class _PreviewViewerState extends State<PreviewViewer>
     ),
   );
 
-  void _togglePlayback() => unawaited(_adapter.togglePlayback());
+  void _togglePlayback() => unawaited(_interact(_adapter.togglePlayback));
+
+  Future<void> _interact(Future<void> Function() action) async {
+    final adapter = _adapter;
+    await action();
+    if (mounted && identical(adapter, _adapter)) {
+      widget.onPlaybackInteraction?.call(adapter.value);
+    }
+  }
 
   Widget _buildViewer(BuildContext context) => ListenableBuilder(
     listenable: _adapter,
@@ -353,7 +427,8 @@ class _PreviewViewerState extends State<PreviewViewer>
                     : null,
                 intercepting: widget.visible,
                 onSeek: ready && value.duration > Duration.zero
-                    ? (position) => unawaited(_adapter.seek(position))
+                    ? (position) =>
+                          unawaited(_interact(() => _adapter.seek(position)))
                     : null,
                 onTogglePlayback: canPlay ? _togglePlayback : null,
               ),

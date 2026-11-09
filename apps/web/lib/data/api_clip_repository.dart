@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/clip.dart';
+import '../viewer/playback_state.dart';
 import 'clip_repository.dart';
 
 /// Loads one bounded public feed page. Media URLs come from the API catalog.
@@ -116,13 +117,48 @@ class ApiClipRepository
         }
 
         final id = text('id');
+        final revision = row['revision'] as String? ?? '';
+        final preview = media('preview_url'), scene = media('scene_url');
+        // Published RGS1 bundle contract: the preview and model use the same
+        // clip-relative clock. Binding includes origin, clip and revision.
+        final prefix = '/assets/$id/$revision/full/';
+        final paired =
+            row['codec'] == 'rangle-temporal-rgs1' &&
+            RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(id) &&
+            RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(revision) &&
+            preview != null &&
+            scene != null &&
+            preview.origin == scene.origin &&
+            !preview.hasQuery &&
+            !scene.hasQuery &&
+            preview.path == '${prefix}preview.webm' &&
+            scene.path == '${prefix}scene.json';
+        const previewHashName = 'vru-basketball-f53be0fb17f96e64.webm';
+        final knownPreview =
+            preview != null &&
+            (preview.path == '/previews/$previewHashName' ||
+                preview.path == '/assets/assets/samples/basketball.webm');
+        final knownLegacy =
+            knownPreview &&
+            scene != null &&
+            preview.origin == scene.origin &&
+            !preview.hasQuery &&
+            !scene.hasQuery &&
+            (scene.path ==
+                    '/assets/basketball/baseline6000-reference270/full/scene.json' ||
+                (RegExp(r'^generated-[a-f0-9]{32}$').hasMatch(id) &&
+                    scene.path == '/generated/${id.substring(10)}/scene.json'));
         return Clip(
           id: id,
           title: text('title'),
           sport: text('sport'),
           description: text('description', emptyAllowed: true),
-          previewUrl: media('preview_url'),
-          sceneUrl: media('scene_url'),
+          previewUrl: preview,
+          sceneUrl: scene,
+          revision: revision,
+          playbackMapping: paired || knownLegacy
+              ? const PreviewSceneMapping()
+              : null,
           tags: tags(row['tags']),
         );
       }
