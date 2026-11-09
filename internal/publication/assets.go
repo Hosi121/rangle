@@ -37,6 +37,11 @@ type scene struct {
 	Temporal struct {
 		URL string `json:"url"`
 	} `json:"temporal"`
+	Timeline *struct {
+		PreviewURL          string   `json:"previewUrl"`
+		PreviewStartSeconds *float64 `json:"previewStartSeconds"`
+		SceneStartSeconds   *float64 `json:"sceneStartSeconds"`
+	} `json:"timeline,omitempty"`
 }
 
 func finite(n float64) bool      { return !math.IsNaN(n) && !math.IsInf(n, 0) }
@@ -49,10 +54,22 @@ func validateSceneData(sceneData []byte, e entry, a Approval) error {
 		return fmt.Errorf("scene schema: %w", err)
 	}
 	var optional struct {
-		Camera map[string]json.RawMessage `json:"camera"`
+		Camera   map[string]json.RawMessage `json:"camera"`
+		Timeline json.RawMessage            `json:"timeline"`
 	}
 	if err := json.Unmarshal(sceneData, &optional); err != nil {
 		return err
+	}
+	if bytes.Equal(bytes.TrimSpace(optional.Timeline), []byte("null")) {
+		return fmt.Errorf("null scene timeline")
+	}
+	if s.Timeline != nil {
+		t := s.Timeline
+		if t.PreviewURL == "" || t.PreviewStartSeconds == nil || t.SceneStartSeconds == nil ||
+			!finite(*t.PreviewStartSeconds) || *t.PreviewStartSeconds < 0 ||
+			!finite(*t.SceneStartSeconds) || *t.SceneStartSeconds < 0 {
+			return fmt.Errorf("invalid scene timeline anchors")
+		}
 	}
 	for _, name := range []string{"intrinsics", "referenceImageHeight"} {
 		if value, exists := optional.Camera[name]; exists && bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
@@ -163,8 +180,8 @@ func temporalModel(data []byte, frames int, fps float64) ([]byte, error) {
 	magic := string(data[:8])
 	count := int64(little32(data[8:12]))
 	rawSize := int64(header) + count*stride
-	if (magic != "RANGL4D1" && magic != "RANGL4Z1") || count < 1 || rawSize > maxModel || little32(data[12:16]) != stride ||
-		int(little32(data[16:20])) != frames || math.Abs(float32At(data[20:24])-fps) > 1e-5 ||
+	if (magic != "RANGL4D1" && magic != "RANGL4Z1") || count < 1 || count > 500000 || rawSize > maxModel || little32(data[12:16]) != stride ||
+		int(little32(data[16:20])) != frames || float32At(data[20:24]) != float64(float32(fps)) ||
 		!finite(float32At(data[20:24])) || !finite(float32At(data[24:28])) ||
 		math.Abs(float32At(data[24:28])-float64(frames-1)/fps) > 1e-5 || little32(data[28:32]) != 0 {
 		return nil, fmt.Errorf("invalid RGS1 header/timeline")

@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rangle:contracts:v1:scene",
+  "type": "object",
+  "required": [
+    "version",
+    "frameRate",
+    "frameCount",
+    "camera",
+    "temporal",
+    "attribution"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "frameRate": {
+      "type": "number"
+    },
+    "frameCount": {
+      "type": "integer"
+    },
+    "camera": {
+      "type": "object",
+      "required": [
+        "position",
+        "lookAt",
+        "up",
+        "fovYDegrees"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "position": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        },
+        "lookAt": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        },
+        "up": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {
+            "type": "number"
+          }
+        },
+        "fovYDegrees": {
+          "type": "number"
+        },
+        "referenceImageHeight": {
+          "type": "integer"
+        },
+        "intrinsics": {
+          "type": "object",
+          "required": [
+            "width",
+            "height",
+            "fx",
+            "fy",
+            "cx",
+            "cy"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "width": {
+              "type": "integer"
+            },
+            "height": {
+              "type": "integer"
+            },
+            "fx": {
+              "type": "number"
+            },
+            "fy": {
+              "type": "number"
+            },
+            "cx": {
+              "type": "number"
+            },
+            "cy": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "temporal": {
+      "type": "object",
+      "required": [
+        "url"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "url": {
+          "type": "string"
+        }
+      }
+    },
+    "attribution": {
+      "type": "object",
+      "required": [
+        "label",
+        "source",
+        "license"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "license": {
+          "type": "string"
+        }
+      }
+    },
+    "timeline": {
+      "type": "object",
+      "required": [
+        "previewUrl",
+        "previewStartSeconds",
+        "sceneStartSeconds"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "previewUrl": {
+          "type": "string"
+        },
+        "previewStartSeconds": {
+          "type": "number"
+        },
+        "sceneStartSeconds": {
+          "type": "number"
+        }
+      }
+    }
+  }
+}

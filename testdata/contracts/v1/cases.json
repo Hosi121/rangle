@@ -1,0 +1,401 @@
+{
+  "version": 1,
+  "context": {
+    "origin": "https://media.example.test",
+    "scene_url": "https://media.example.test/live/fixture/000001-006f0853e909079f/scene.json",
+    "title": "Fixture",
+    "source": "https://source.example.test/rig",
+    "license": "Fixture only"
+  },
+  "cases": [
+    {
+      "id": "R01",
+      "profile": "rgs",
+      "file": "rgs/R01.rgs",
+      "accept": true,
+      "normalized": {
+        "fps": 25.0,
+        "end": 0.08,
+        "raw_sha256": "006f0853e909079f6bbbfda15627e7f3acbab4467b0cc0e871c68539b5967d83"
+      },
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R02",
+      "profile": "rgs",
+      "file": "rgs/R02.rgs",
+      "accept": true,
+      "normalized": {
+        "fps": 25.0,
+        "end": 0.08,
+        "raw_sha256": "006f0853e909079f6bbbfda15627e7f3acbab4467b0cc0e871c68539b5967d83"
+      },
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R03",
+      "profile": "rgs",
+      "file": "rgs/R03.rgs",
+      "accept": true,
+      "normalized": {
+        "fps": 29.970029830932617,
+        "end": 0.06673333364305709,
+        "raw_sha256": "b9a8d4d3ba00096a84203809932dd67937c58a81a81a10cdc426d9f61913d843"
+      },
+      "context": {
+        "frameCount": 3,
+        "frameRate": 29.97002997002997
+      }
+    },
+    {
+      "id": "R04",
+      "profile": "rgs",
+      "file": "rgs/R04.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R05",
+      "profile": "rgs",
+      "file": "rgs/R05.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R06",
+      "profile": "rgs",
+      "file": "rgs/R06.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R07",
+      "profile": "rgs",
+      "file": "rgs/R07.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R08",
+      "profile": "rgs",
+      "file": "rgs/R08.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R09",
+      "profile": "rgs",
+      "file": "rgs/R09.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R10",
+      "profile": "rgs",
+      "file": "rgs/R10.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R11",
+      "profile": "rgs",
+      "file": "rgs/R11.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R12",
+      "profile": "rgs",
+      "file": "rgs/R12.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R13",
+      "profile": "rgs",
+      "file": "rgs/R13.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "R14",
+      "profile": "rgs",
+      "file": "rgs/R14.rgs",
+      "accept": false,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      }
+    },
+    {
+      "id": "S01",
+      "profile": "scene",
+      "file": "scene/S01.json",
+      "accept": true,
+      "model": "R01"
+    },
+    {
+      "id": "S02",
+      "profile": "scene",
+      "file": "scene/S02.json",
+      "accept": true,
+      "model": "R01"
+    },
+    {
+      "id": "S03",
+      "profile": "scene",
+      "file": "scene/S03.json",
+      "accept": true,
+      "model": "R03"
+    },
+    {
+      "id": "S04",
+      "profile": "scene",
+      "file": "scene/S04.json",
+      "accept": true,
+      "model": "R01"
+    },
+    {
+      "id": "S05",
+      "profile": "scene",
+      "file": "scene/S05.json",
+      "accept": false,
+      "model": "R01"
+    },
+    {
+      "id": "S06",
+      "profile": "scene",
+      "file": "scene/S06.json",
+      "accept": false,
+      "model": "R01"
+    },
+    {
+      "id": "S07",
+      "profile": "scene",
+      "file": "scene/S07.json",
+      "accept": false,
+      "model": "R01"
+    },
+    {
+      "id": "S08",
+      "profile": "scene",
+      "file": "scene/S08.json",
+      "accept": false,
+      "model": "R01"
+    },
+    {
+      "id": "S09",
+      "profile": "scene",
+      "file": "scene/S09.json",
+      "accept": false,
+      "model": "R01"
+    },
+    {
+      "id": "S10",
+      "profile": "scene",
+      "file": "scene/S10.json",
+      "accept": false,
+      "model": "R01"
+    },
+    {
+      "id": "S11",
+      "profile": "scene",
+      "file": "scene/S11.json",
+      "accept": false,
+      "model": "R01"
+    },
+    {
+      "id": "S12",
+      "profile": "scene",
+      "file": "scene/S12.json",
+      "accept": false,
+      "model": "R01"
+    },
+    {
+      "id": "L01",
+      "profile": "live",
+      "file": "live/L01.json",
+      "accept": true
+    },
+    {
+      "id": "L02",
+      "profile": "live",
+      "file": "live/L02.json",
+      "accept": true
+    },
+    {
+      "id": "L03",
+      "profile": "live",
+      "file": "live/L03.json",
+      "accept": true
+    },
+    {
+      "id": "L04",
+      "profile": "live",
+      "file": "live/L04.json",
+      "accept": false
+    },
+    {
+      "id": "L05",
+      "profile": "live",
+      "file": "live/L05.json",
+      "accept": false,
+      "producer_object": false
+    },
+    {
+      "id": "L06",
+      "profile": "live",
+      "file": "live/L06.json",
+      "accept": false
+    },
+    {
+      "id": "L07",
+      "profile": "live",
+      "file": "live/L07.json",
+      "accept": false
+    },
+    {
+      "id": "L08",
+      "profile": "live",
+      "file": "live/L08.json",
+      "accept": false
+    },
+    {
+      "id": "L09",
+      "profile": "live",
+      "file": "live/L09.json",
+      "accept": false
+    },
+    {
+      "id": "L10",
+      "profile": "live",
+      "file": "live/L10.json",
+      "accept": false
+    },
+    {
+      "id": "L11",
+      "profile": "live",
+      "file": "live/L11.json",
+      "accept": false,
+      "origin": "https://media.example.test/path"
+    },
+    {
+      "id": "L12",
+      "profile": "live",
+      "recipe": {
+        "kind": "oversize-json",
+        "bytes": 524289
+      },
+      "accept": false,
+      "producer_object": false
+    },
+    {
+      "id": "M01",
+      "profile": "manifest",
+      "file": "manifest/M01.json",
+      "accept": true
+    },
+    {
+      "id": "M02",
+      "profile": "manifest",
+      "file": "manifest/M02.json",
+      "accept": false
+    },
+    {
+      "id": "M03",
+      "profile": "manifest",
+      "file": "manifest/M03.json",
+      "accept": false
+    },
+    {
+      "id": "M04",
+      "profile": "manifest",
+      "file": "manifest/M04.json",
+      "accept": false
+    },
+    {
+      "id": "M05",
+      "profile": "manifest",
+      "file": "manifest/M05.json",
+      "accept": false
+    },
+    {
+      "id": "M06",
+      "profile": "manifest",
+      "file": "manifest/M06.json",
+      "accept": false
+    },
+    {
+      "id": "B01",
+      "profile": "bundle",
+      "file": "bundle/B01.json",
+      "accept": true,
+      "model": "R01",
+      "scene": "S01"
+    },
+    {
+      "id": "B02",
+      "profile": "bundle",
+      "file": "bundle/B02.json",
+      "accept": false,
+      "model": "R01",
+      "scene": "S01"
+    },
+    {
+      "id": "C01",
+      "profile": "clock",
+      "file": "clock/C01.json",
+      "accept": true
+    },
+    {
+      "id": "C02",
+      "profile": "clock",
+      "file": "clock/C02.json",
+      "accept": true
+    },
+    {
+      "id": "S13",
+      "profile": "scene",
+      "file": "scene/S13.json",
+      "model": "fps-mismatch",
+      "accept": false,
+      "reason": "wire fps must equal float32(scene frameRate), not epsilon-near"
+    }
+  ]
+}

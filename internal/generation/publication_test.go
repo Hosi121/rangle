@@ -100,6 +100,9 @@ func fixturePublication(t *testing.T, mode string) (*Service, Job, *outputFixtur
 		for index, value := range []uint32{1, 56, 3, math.Float32bits(1), math.Float32bits(2), 0} {
 			binary.LittleEndian.PutUint32(fixture.model[8+index*4:], value)
 		}
+		for _, offset := range []int{12, 16, 20, 48} {
+			binary.LittleEndian.PutUint32(fixture.model[32+offset:], math.Float32bits(1))
+		}
 	}
 	fixture.metrics["model_bytes"] = len(fixture.model)
 	fixture.metrics["model_sha256"] = proof(fixture.model).SHA256
