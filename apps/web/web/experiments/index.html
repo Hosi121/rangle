@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="robots" content="noindex, nofollow">
+  <title>生成モデル · rangle</title>
+  <style>
+    *{box-sizing:border-box}html,body{height:100%;margin:0;background:#101211;color:#f4f5f3;font:15px system-ui,sans-serif}
+    body{display:grid;grid-template-rows:auto minmax(0,1fr) auto;max-width:1200px;margin:auto}
+    header,footer{padding:14px 18px}header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;border-bottom:1px solid #30352f}
+    a{color:#c4eab3;text-decoration:none}h1{font-size:17px;margin:0;flex:1}button,select,input{font:inherit;border:1px solid #4a5547;border-radius:8px;padding:9px 12px;background:#20261f;color:inherit}
+    button,a,select{touch-action:manipulation}button:disabled,select:disabled{opacity:.5}button{cursor:pointer}a:focus-visible,button:focus-visible,select:focus-visible,input:focus-visible{outline:2px solid #c4eab3;outline-offset:3px}
+    #stage{position:relative;min-height:0}#viewport{position:absolute;inset:0;overflow:hidden}canvas{touch-action:none}
+    #login{position:absolute;z-index:2;top:50%;left:50%;transform:translate(-50%,-50%);width:min(320px,calc(100% - 32px));padding:22px;background:#181e17;border:1px solid #4a5547;border-radius:12px}
+    #login label{display:block;margin:12px 0 5px}#login input,#login button{width:100%}#login button{margin-top:18px;background:#c4eab3;color:#162012}#login[hidden]{display:none}
+    footer{padding-bottom:max(14px,env(safe-area-inset-bottom));border-top:1px solid #30352f}#status{margin:0 0 6px}small{color:#aab2a6;font-size:12px}
+    @media(max-width:500px){header{gap:10px;padding:10px 12px}h1{font-size:15px}select{max-width:190px}footer{padding-left:12px;padding-right:12px}}
+  </style>
+</head>
+<body>
+  <header><a href="/demo/" aria-label="管理画面へ戻る">← 戻る</a><h1>生成モデル</h1><label for="snapshot">時刻</label><select id="snapshot" disabled aria-label="表示する時刻"></select><button id="reset" disabled>視点を戻す</button></header>
+  <main id="stage"><div id="viewport" aria-label="自由視点モデル"></div>
+    <form id="login" hidden><label for="username">ユーザー名</label><input id="username" name="username" value="admin" autocomplete="username" required><label for="password">パスワード</label><input id="password" name="password" type="password" autocomplete="current-password" required><button type="submit">ログイン</button></form>
+  </main>
+  <footer><p id="status" role="status" aria-live="polite">モデルを準備しています</p><small>試用版 · 各時刻の静止モデルです。Web用変換による描画差があります。</small></footer>
+  <script type="module" src="../viewer/private-preview.js"></script>
+</body>
+</html>
