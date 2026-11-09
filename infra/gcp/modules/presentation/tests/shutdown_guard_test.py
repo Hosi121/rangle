@@ -20,6 +20,9 @@ SERVICE = "projects/rangle-example/locations/asia-northeast1/services/rangle-stg
 MANAGER = SERVICE + "-generation"
 OPERATION = "projects/rangle-example/locations/asia-northeast1/operations/delete-1"
 COMPUTE = "https://compute.googleapis.com/compute/v1/"
+FIRESTORE = "https://firestore.googleapis.com/v1/"
+DATABASES = ["projects/rangle-example/databases/rangle-stg",
+             "projects/rangle-example/databases/rangle-stg-generation"]
 GLOBAL = "projects/rangle-example/global/"
 BACKENDS = {
     GLOBAL + "backendServices/rangle-stg-app": ("setSecurityPolicy", "securityPolicy", "app"),
@@ -29,7 +32,7 @@ BACKENDS = {
 }
 
 
-def render():
+def render(backup_databases=None):
     variables = dict(
         deadline="2026-11-14T15:00:00Z", subscription="projects/rangle-example/subscriptions/budget",
         budget_display_name="presentation", budget_currency="JPY", stop_amount=15000,
@@ -40,7 +43,8 @@ def render():
         generation_manager_enabled=True, generation_manager_service=MANAGER,
     )
     generation = f'templatefile({json.dumps(str(MODULE / "generation-shutdown.yaml.tftpl"))}, {{project_id="rangle-example", project_number="123456789012", region="asia-northeast1"}})'
-    expression = f'jsonencode(yamldecode(templatefile({json.dumps(str(MODULE / "shutdown.yaml.tftpl"))}, merge({json.dumps(variables)}, {{generation_functions={generation}}}))))'
+    backup = f'templatefile({json.dumps(str(MODULE / "backup-shutdown.yaml.tftpl"))}, {{database_paths={json.dumps(DATABASES if backup_databases is None else backup_databases)}}})'
+    expression = f'jsonencode(yamldecode(templatefile({json.dumps(str(MODULE / "shutdown.yaml.tftpl"))}, merge({json.dumps(variables)}, {{generation_functions={generation}, backup_functions={backup}}}))))'
     with tempfile.TemporaryDirectory() as directory:
         result = subprocess.run(
             [os.environ.get("TERRAFORM_BIN", "terraform"), "console"], input=expression + "\n",
@@ -88,6 +92,7 @@ class ShutdownPath:
         self.remaining_steps = 5000
         self.builtins = dict(
             null=None, true=True, false=False, len=len,
+            get_type=lambda value: "list" if isinstance(value, list) else "map" if isinstance(value, dict) else "other",
             map=SimpleNamespace(get=lambda value, key: value.get(key)),
             list=SimpleNamespace(concat=lambda values, item: values + [item]),
             text=SimpleNamespace(match_regex=lambda value, pattern: re.search(pattern, value) is not None),
@@ -186,10 +191,14 @@ class GuardFailureTests(unittest.TestCase):
                  failure=True, start_phase="stop_owned_service", manager_error=None,
                  manager_present=False, manager_operation=OPERATION, compute_errors=None,
                  foreign_policy=False, compute_absent=False, compute_operation="cleanup-1",
-                 active_ingress=False):
+                 active_ingress=False, backup_schedules=None, backup_errors=None,
+                 backup_stuck=False, backup_pagination=False, backup_verify_error=None):
         events, receipts = [], []
         service_reads, manager_reads = 0, 0
         compute_errors = compute_errors or {}
+        backup_errors = backup_errors or {}
+        backup_schedules = {database: list((backup_schedules or {}).get(database, [])) for database in DATABASES}
+        backup_lists = dict.fromkeys(DATABASES, 0)
 
         def http(method, arguments):
             nonlocal service_reads, manager_reads
@@ -247,6 +256,32 @@ class GuardFailureTests(unittest.TestCase):
                         return {"body": {}}
                     if method == "http.delete":
                         return {"body": {"name": compute_operation}}
+            if url.startswith(FIRESTORE):
+                resource = url.removeprefix(FIRESTORE)
+                self.assertEqual(arguments["timeout"], 10)
+                database = next((path for path in DATABASES if resource.startswith(path + "/backupSchedules")), None)
+                self.assertIsNotNone(database, "Foreign backup database reached HTTP")
+                if (method, resource) in backup_errors:
+                    if method == "http.delete" and backup_errors[method, resource] == 404:
+                        backup_schedules[database] = [schedule for schedule in backup_schedules[database] if schedule["name"] != resource]
+                    raise Failure({"code": backup_errors[method, resource]})
+                if method == "http.get":
+                    self.assertEqual(resource, database + "/backupSchedules")
+                    backup_lists[database] += 1
+                    if backup_verify_error and backup_lists[database] > 1:
+                        raise Failure({"code": backup_verify_error})
+                    body = {"backupSchedules": backup_schedules[database]}
+                    if backup_pagination:
+                        body["nextPageToken"] = "unexpected-page"
+                    return {"body": body}
+                if method == "http.delete":
+                    schedule = next(item for item in backup_schedules[database] if item["name"] == resource)
+                    self.assertEqual(schedule["dailyRecurrence"], {})
+                    self.assertEqual(schedule["retention"], "604800s")
+                    self.assertNotIn("weeklyRecurrence", schedule)
+                    if not backup_stuck:
+                        backup_schedules[database] = [item for item in backup_schedules[database] if item["name"] != resource]
+                    return {"body": {}}
             if method == "http.post" and "storage.googleapis.com/" in url:
                 receipts.append((arguments["query"]["name"], json.loads(arguments["body"])))
                 return {}
@@ -379,6 +414,85 @@ class GuardFailureTests(unittest.TestCase):
         events, _ = self.exercise(start_phase="cleanup_owned_security", compute_operation="projects/foreign/global/operations/evil")
         self.assertFalse(any("operations/evil" in url for _, url in events))
         self.assertTrue(any(method == "http.delete" and url.endswith(SERVICE) for method, url in events))
+
+    def test_backup_cleanup_stops_only_owned_daily_schedules_after_core_stops(self):
+        schedules = {database: [dict(name=database + "/backupSchedules/daily-1", dailyRecurrence={}, retention="604800s"),
+                                dict(name=database + "/backupSchedules/weekly-1", weeklyRecurrence={"day": "MONDAY"}, retention="604800s")]
+                     for database in DATABASES}
+        events, _ = self.exercise(backup_schedules=schedules, failure=False)
+        deleted = [url for method, url in events if method == "http.delete" and url.startswith(FIRESTORE)]
+        self.assertEqual(deleted, [FIRESTORE + database + "/backupSchedules/daily-1" for database in DATABASES])
+        cancel = next(i for i, (method, _) in enumerate(events) if method == "cancel")
+        first_list = next(i for i, (_, url) in enumerate(events) if url.startswith(FIRESTORE))
+        self.assertLess(cancel, first_list)
+        self.assertTrue(any(":acknowledge" in url for _, url in events))
+
+    def test_backup_list_and_delete_failures_preserve_retry_and_continue_other_database(self):
+        schedules = {database: [dict(name=database + "/backupSchedules/daily-1", dailyRecurrence={}, retention="604800s")]
+                     for database in DATABASES}
+        for method, resource in [("http.get", DATABASES[0] + "/backupSchedules"),
+                                 ("http.delete", DATABASES[0] + "/backupSchedules/daily-1")]:
+            with self.subTest(method=method):
+                events, _ = self.exercise(backup_schedules=schedules, backup_errors={(method, resource): 503})
+                self.assertTrue(any(event == ("http.delete", FIRESTORE + DATABASES[1] + "/backupSchedules/daily-1") for event in events))
+                self.assertTrue(any(event == ("http.delete", "https://run.googleapis.com/v2/" + SERVICE) for event in events))
+
+    def test_backup_missing_database_or_schedule_is_idempotent(self):
+        schedules = {DATABASES[1]: [dict(name=DATABASES[1] + "/backupSchedules/daily-1", dailyRecurrence={}, retention="604800s")]}
+        self.exercise(backup_schedules=schedules, failure=False, backup_errors={
+            ("http.get", DATABASES[0] + "/backupSchedules"): 404,
+            ("http.delete", DATABASES[1] + "/backupSchedules/daily-1"): 404,
+        })
+
+    def test_foreign_schedule_name_is_preserved_and_blocks_acknowledgment(self):
+        for name in ["projects/foreign/databases/rangle-stg/backupSchedules/daily-1",
+                     DATABASES[1] + "/backupSchedules/daily-1",
+                     DATABASES[0] + "/backupSchedules/daily-1/extra"]:
+            with self.subTest(name=name):
+                schedules = {DATABASES[0]: [dict(name=name, dailyRecurrence={}, retention="604800s")]}
+                events, _ = self.exercise(backup_schedules=schedules)
+                self.assertFalse(any(method == "http.delete" and url.startswith(FIRESTORE) for method, url in events))
+
+    def test_different_retention_and_weekly_schedules_are_preserved(self):
+        schedules = {DATABASES[0]: [dict(name=DATABASES[0] + "/backupSchedules/other-daily", dailyRecurrence={}, retention="1209600s"),
+                                    dict(name=DATABASES[0] + "/backupSchedules/weekly-1", weeklyRecurrence={"day": "MONDAY"}, retention="604800s")]}
+        events, _ = self.exercise(backup_schedules=schedules, failure=False)
+        self.assertFalse(any(method == "http.delete" and url.startswith(FIRESTORE) for method, url in events))
+
+    def test_backup_unconfirmed_deletion_and_listing_bounds_block_acknowledgment(self):
+        daily = dict(name=DATABASES[0] + "/backupSchedules/daily-1", dailyRecurrence={}, retention="604800s")
+        self.exercise(backup_schedules={DATABASES[0]: [daily]}, backup_stuck=True)
+        for schedules, pagination in [({DATABASES[0]: [daily] * 3}, False), ({}, True)]:
+            with self.subTest(pagination=pagination):
+                events, _ = self.exercise(backup_schedules=schedules, backup_pagination=pagination)
+                self.assertFalse(any(method == "http.delete" and url.startswith(FIRESTORE) for method, url in events))
+
+    def test_backup_verification_http_failure_blocks_acknowledgment_after_deletion(self):
+        daily = dict(name=DATABASES[0] + "/backupSchedules/daily-1", dailyRecurrence={}, retention="604800s")
+        events, _ = self.exercise(backup_schedules={DATABASES[0]: [daily]}, backup_verify_error=503)
+        self.assertTrue(any(method == "http.delete" and url.startswith(FIRESTORE) for method, url in events))
+
+    def test_backup_helpers_reject_foreign_database_or_expired_window_without_http(self):
+        def unexpected(*args):
+            self.fail(f"Invalid target/window caused HTTP: {args}")
+        for database, cutoff in [("projects/foreign/databases/other", 60), (DATABASES[0], 0)]:
+            path = ShutdownPath(self.workflow, unexpected, unexpected)
+            path.state.update(database_path=database, cutoff=cutoff)
+            with self.assertRaises(Failure):
+                path.steps(self.workflow["list_owned_backup_schedules"]["steps"])
+        path = ShutdownPath(self.workflow, unexpected, unexpected)
+        path.state.update(database_path=DATABASES[0], cutoff=0,
+                          schedule=objects(dict(name=DATABASES[0] + "/backupSchedules/daily-1", dailyRecurrence={}, retention="604800s")))
+        with self.assertRaises(Failure):
+            path.steps(self.workflow["delete_owned_backup_schedule"]["steps"])
+
+    def test_disabled_foundation_performs_no_backup_api_calls(self):
+        def unexpected(*args):
+            self.fail(f"Disabled database caused a call: {args}")
+        workflow = render(backup_databases=[])
+        path = ShutdownPath(workflow, unexpected, unexpected)
+        with self.assertRaises(Returned):
+            path.steps(workflow["cleanup_owned_backup_schedules"]["steps"])
 
     def test_helpers_reject_foreign_targets_without_http(self):
         def unexpected(*args):

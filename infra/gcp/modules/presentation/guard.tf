@@ -106,13 +106,16 @@ resource "google_workflows_workflow" "guard" {
     generation_manager_service = "projects/${var.project_id}/locations/${var.region}/services/${local.prefix}-generation"
     generation_sync_enabled    = local.generation_sync_enabled
     generation_sync_job        = local.generation_sync_job
+    backup_functions = templatefile("${path.module}/backup-shutdown.yaml.tftpl", {
+      database_paths = local.backup_database_paths
+    })
     generation_functions = templatefile("${path.module}/generation-shutdown.yaml.tftpl", {
       project_id     = var.project_id
       project_number = var.project_number
       region         = var.region
     })
   })
-  depends_on = [google_project_service.required, google_service_account_iam_member.disable_deployer, google_project_iam_member.pause_guard, google_pubsub_subscription_iam_member.guard, google_storage_bucket_iam_member.guard_receipt, google_project_iam_member.run_operations, google_project_iam_member.inspect_run, google_project_iam_member.edge_reader, google_project_iam_member.stop_forwarding_rules, google_project_iam_member.release_address, google_project_iam_member.generation_guard, google_project_iam_member.detach_service_security, google_project_iam_member.cleanup_security]
+  depends_on = [google_project_service.required, google_service_account_iam_member.disable_deployer, google_project_iam_member.pause_guard, google_pubsub_subscription_iam_member.guard, google_storage_bucket_iam_member.guard_receipt, google_project_iam_member.run_operations, google_project_iam_member.inspect_run, google_project_iam_member.edge_reader, google_project_iam_member.stop_forwarding_rules, google_project_iam_member.release_address, google_project_iam_member.generation_guard, google_project_iam_member.detach_service_security, google_project_iam_member.cleanup_security, google_project_iam_member.stop_backup_schedules]
 }
 resource "google_project_iam_custom_role" "invoke_guard" {
   project     = var.project_id

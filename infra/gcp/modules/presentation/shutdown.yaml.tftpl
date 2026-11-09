@@ -218,6 +218,15 @@ main:
                                 - record_sync_pause_error:
                                     assign:
                                       - errors: $${list.concat(errors, error)}
+    - stop_future_backup_schedules:
+        try:
+          call: cleanup_owned_backup_schedules
+        except:
+          as: error
+          steps:
+            - record_backup_schedule_error:
+                assign:
+                  - errors: $${list.concat(errors, error)}
     - check_shutdown:
         switch:
           - condition: $${len(errors) > 0}
@@ -745,3 +754,5 @@ detach_owned_security_policy:
         return: "detached"
 
 ${generation_functions}
+
+${backup_functions}
