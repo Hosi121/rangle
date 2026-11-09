@@ -65,10 +65,7 @@ type Segment struct {
 	MeanPackedSSIM  float64   `json:"mean_packed_ssim"`
 }
 
-var (
-	idPattern  = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
-	utcPattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|\+00:00)$`)
-)
+var utcPattern = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?(Z|\+00:00)$`)
 
 // ParseIndex accepts exactly one strict JSON document. All schema fields are
 // required, including zero-valued measurements and empty arrays; null and
@@ -115,7 +112,7 @@ func (index Index) Validate(assetOrigin string) error {
 	}
 	ids := map[string]bool{}
 	for _, session := range index.Sessions {
-		if !idPattern.MatchString(session.ID) || ids[session.ID] {
+		if !validID(session.ID) || ids[session.ID] {
 			return fmt.Errorf("invalid or duplicate live session ID")
 		}
 		ids[session.ID] = true
@@ -186,6 +183,22 @@ func sourceURL(value string) bool {
 	}
 	u, err := url.Parse(value)
 	return err == nil && u.Scheme == "https" && u.Hostname() != "" && u.User == nil && u.Opaque == "" && u.Fragment == "" && u.RawQuery == "" && !u.ForceQuery
+}
+
+// validID implements the schema's [A-Za-z0-9_-]{1,64} identifier grammar.
+// Both metadata validation and the hot HTTP route use the same bounded check.
+func validID(value string) bool {
+	if len(value) == 0 || len(value) > 64 {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func text(value string, limit int) bool {
