@@ -71,15 +71,17 @@ PYTHONPATH=ml python3 -m unittest discover -s ml/tests -v
 
 The separate `ml/tests/full_ml` suite requires the complete Torch/gsplat runtime and verifies gradients through all temporal parameters, gsplat topology and optimizer alignment, and export opacity equations including ties-to-even rounding. It must be run explicitly as part of ML validation; missing dependencies fail this suite rather than skipping its tests. The directory is outside default contract discovery so a NumPy-only CI job does not pretend to validate training dependencies.
 
-Run both profiles with the existing local trainer image, without GPU access or networking:
+Build the trainer from the repository root, then run both test profiles without GPU access or networking:
 
 ```sh
+docker build --platform=linux/amd64 --target trainer -f ml/Dockerfile \
+  -t rangle-trainer:local .
 docker run --rm --network=none --entrypoint python \
   -v "$PWD:/workspace:ro" -w /workspace -e PYTHONPATH=ml \
-  rangle-trainer-ops:local -m unittest discover -s ml/tests -v
+  rangle-trainer:local -m unittest discover -s ml/tests -v
 docker run --rm --network=none --entrypoint python \
   -v "$PWD:/workspace:ro" -w /workspace -e PYTHONPATH=ml:ml/tests \
-  rangle-trainer-ops:local -m unittest discover -s ml/tests/full_ml -v
+  rangle-trainer:local -m unittest discover -s ml/tests/full_ml -v
 ruff check ml/rangle_training ml/tests
 ```
 
@@ -88,3 +90,25 @@ CPU validation does not establish GPU rendering performance or reconstruction qu
 ```sh
 PYTHONPATH=ml:ml/tests python3 -m unittest test_temporal.TemporalPackingTests -v
 ```
+
+## Verified GCP run — 2026-11-09
+
+The deployed creation API completed one dynamic job on a Tokyo Spot T4. The input was VRU Basketball gz, with 20 synchronized times from 0.00 to 0.76 seconds at 25 fps, 480×270 pixels, 30 training cameras, and 4 held-out cameras. The source bundle SHA256 is recorded in the public metrics. Its first time matches the previously validated static input pixel-for-pixel.
+
+The worker source was [e1228df](https://github.com/Hosi121/rangle/tree/e1228dff0014b9e2b92176f2993b7fdcf491c8fa/ml), deployed as trainer image digest `sha256:ab7f56fb8cf970226a553e6664df5f5fc92100ad63ca6246a1b3d80ef985c161`.
+
+| Measurement | Result |
+| --- | --- |
+| Joint training | 12,000 iterations; 159.86 seconds |
+| Evaluation | 80 held-out images; 5.88 seconds |
+| Vertex creation to success | 8 minutes 3 seconds, including preparation and publication |
+| Stored primitives | 259,797 |
+| Float PSNR / SSIM | 27.626 dB / 0.91157 |
+| Export PSNR / SSIM | 27.618 dB / 0.91133 |
+| Export compared against reversed-time targets | 22.177 dB |
+| RGS1 bytes / compressed bytes | 14,548,664 / 12,106,161 |
+| Torch peak allocated GPU memory | 420,947,456 bytes |
+
+[Open the generated scene](https://app.rangleplay.stream/demo/?clip=generated-be37a1b9e8eea50af0e6a440f0fa4778) or inspect its [metrics](https://media.rangleplay.stream/generated/be37a1b9e8eea50af0e6a440f0fa4778/metrics.json). The first, middle, and last held-out images show the players moving. Python and the existing JavaScript decoder produced the same raw SHA256 from the actual downloaded model, and the viewer's manifest and primitive preparation accepted it. The object has no HTTP content encoding; compression is internal to RGS1.
+
+This validates one calibrated, short sports sequence and its stored-model contract. Hands-on GUI testing is separate. The RGB linear-motion baseline still has visible softness and artifacts around moving players, and approximately 12.1 MB remains substantial for this short interval. No comparison against a different dataset, a single-time model, or a paper's reported quality is claimed. The evaluation geometry/calibration caveat above still applies. Public presentation endpoints are scheduled to stop after November 14; the implementation and measurements remain in this document.
