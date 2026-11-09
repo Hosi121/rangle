@@ -2,6 +2,8 @@
 
 目的は、発表用stgでAPI・モデル生成・公開配信・運用処理の失敗を一つの画面から調べること。Cloud LoggingとCloud Monitoringを使い、追加の常駐collector・データベース・外部監視サービスは作らない。通知/SLO、ブラウザからのイベント送信、MLの学習変更は対象外。
 
+[ログ監視の構成図を開く](diagrams/observability.html)。ログの収集・30日保持・検索と、標準メトリクスの経路を示す。[全体・ML・配信を含む構成](cloud-architecture.md)からも参照できる。
+
 ## 保存と集約
 
 `infra/gcp/environments/presentation` → `modules/presentation/observability.tf` が正本。対象projectは `comin-up`、地域は `asia-northeast1`。

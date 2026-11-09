@@ -1,14 +1,15 @@
 # rangle のクラウド構成
 
-発表用stgを、全体・ML・配信の3図で示す。code・IaCは `origin/stg`（`10bd7cd`）に基づき、既存の検証記録と2026-11-09のDNS・Cloud Runネットワーク設定の確認を反映する。全資源の最新状態を網羅的に再照会した図ではない。正本は `infra/gcp/environments/presentation` → [presentation module](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。汎用stgのplatform moduleとは別の構成である。
+発表用stgを、全体・ML・配信・ログ監視の4図で示す。code・IaCは `origin/stg`（`ed4e632`）に基づき、既存の検証記録と2026-11-10 JSTのLB入口制限・ログ基盤の適用結果を反映する。全資源の最新状態を網羅的に再照会した図ではない。正本は `infra/gcp/environments/presentation` → [presentation module](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。汎用stgのplatform moduleとは別の構成である。
 
 | 図 | 読み取ること | 実装の入口 |
 | --- | --- | --- |
 | [全体構成を開く](diagrams/overview.html) | Flutter Web、Go API、Google Cloud上の有限GPU生成、CDN、下段のCI/CD | [Goの接続](../cmd/rangle-server/application.go)、[LBとCDN](../infra/gcp/modules/presentation/edge.tf) |
 | [ML処理を開く](diagrams/ml-pipeline.html) | 管理者の受付と共通台帳、NPZ/bundle、offlineとliveの分岐、検証・公開の出口 | [CustomJob](../internal/generation/vertex.go)、[offline worker](../ml/rangle_training/train.py)、[live worker](../ml/rangle_live/cloud.py) |
 | [配信処理を開く](diagrams/delivery.html) | feed/manifest・LIVE indexと、不変資産の取得、Worker復号・WebGL描画 | [LIVE配信契約](live-streaming.md)、[JS viewer](../apps/web/viewer/src/session.js)、[Worker](../apps/web/viewer/src/temporal-worker.js) |
+| [ログ監視を開く](diagrams/observability.html) | 4種のログ収集元、専用sink・30日保持、同じviewでの検索、ログと別経路の標準メトリクス | [監視IaC](../infra/gcp/modules/presentation/observability.tf)、[運用・検証記録](observability.md) |
 
-各HTMLはアイコン・日本語フォントを内包する。青実線はHTTP・モデルデータ、灰実線は制御・メタデータ、破線はCI/CD。全体図のHTTP双方向矢印は要求と応答を示す。PNGはこのHTMLからlight/darkの両方を生成する。[再生成・出典](diagrams/README.md)
+各HTMLはアイコン・日本語フォントを内包する。全体・ML・配信図では、青実線はHTTP・モデルデータ、灰実線は制御・メタデータ、破線はCI/CD。全体図のHTTP双方向矢印は要求と応答を示す。ログ監視図では青がログ、灰が標準メトリクスを示す。PNGはこのHTMLからlight/darkの両方を生成する。[再生成・出典](diagrams/README.md)
 
 図は実装・設定による接続を示し、すべての機能が無条件で有効になるという意味ではない。生成は不変configのSHA、LIVEは専用設定とfeature flagを使って有効にする。[生成基盤](generation-infrastructure.md)と[クラウドLIVEの配備条件](cloud-live.md#権限と配備)を参照。
 
@@ -26,18 +27,26 @@ LIVEの処理待ちは最新window 1件で、評価4視点の画素は学習か�
 | 対象 | 到達経路と制御 |
 | --- | --- |
 | LBの公開VIP | `34.96.101.8/32`。**単一hostの公開IP**をCIDR表記したもので、VPC subnetのCIDRではない。app / mediaのDNS A recordは2026-11-09 16:56 UTCにこのIPを確認 |
-| Cloud Run / UI・API | LB経由に加え、既定`run.app`とcandidate-tag URLへ直接到達できる。`ingress=ALL`、Cloud Runのinvoker IAMチェック無効（操作認可はGo）、default URI有効。LBだけを唯一の入口としない。CIも直接URLをsmokeする |
+| Cloud Run / UI・API | `internal-and-cloud-load-balancing` ingress。外部HTTPの入口はLBに統一し、既定`run.app`とcandidate-tag URLへの外部直通は404を確認。Cloud Runのinvoker IAMチェック無効（操作認可はGo）、default URI自体は有効。CIのsmokeもappのLB URLと候補headerを使う |
 | GCS inputs / catalog | PAP enforcedとIAMで保護。入力・設定・目録を匿名公開しない。Go runtimeやtrainerには用途別の権限を与える |
 | GCS media / Cloud CDN | bucket自体はPAP enforced / IAM保護。cache-fill identityが読み、**許諾済み素材だけをCDNの公開HTTPSで配信**する。入力bucketをCDN originへ流用しない |
 | Firestore / Vertex / Artifact Registry | Goの実行台帳・アカウント、job制御、image取得はIAMで制御。ネットワーク上のprivate subnetによる隔離を示したものではない |
 
 公開HTTPS入口があることと、すべてのデータを匿名で取得できることは別である。公開feed・mediaの閲覧に対し、生成・交流の操作はGoの認証、CSRF保護、管理者・所有者判定を使う。[受付の実装](../internal/generation/handler.go)・[アプリの接続](../cmd/rangle-server/application.go)・[IAM](generation-infrastructure.md)を参照。今回の図更新はネットワーク制限の追加やsecurity設定の変更を含まない。
 
-直通経路の制限とCIの検証経路を両立する改善は [#113](https://github.com/Hosi121/rangle/issues/113) で別に扱う。
+入口制限は [#116](https://github.com/Hosi121/rangle/pull/116) のIaCを2026-11-10 JSTに適用済み。WIFによるrevision・tag・trafficの操作はGoogleの制御API経由、候補のHTTP検証はLB経由である。図の下段のCI矢印は制御APIを表す。候補headerは経路の選択に使い、Goの操作認可とは別である。
+
+## ログ監視の経路と到達点
+
+[ログ監視図](diagrams/observability.html)は、Cloud Run、VertexのPython worker、LB/CDN、Scheduler/WorkflowsのログをCloud Loggingの専用sinkで選択し、同一projectのLogging bucket `rangle-stg-logs` にコピーする構成を示す。このバケットはCloud Storageのmedia・inputsとは別の資源で、Tokyo・保持30日。監査ログは専用sinkから除外し、既存 `_Default` / `_Required` のrouting・保持期間は変更しない。
+
+Cloud Monitoringの5つのログパネルとLogs Explorerは、専用バケットの同じ `_AllLogs` viewを読む。要求数/秒とrevision別p95の2つのグラフはCloud Runの標準メトリクスを使い、ログバケットや独自のログベース指標を経由しない。p95はUI・health・APIを含むサービス側の要求時間で、ブラウザ描画時間ではない。説明を含めダッシュボードは8 widgetsで、既存IAMにより閲覧する。
+
+ログ基盤は適用済みで、専用viewへのCloud Run・CDN・生成同期Schedulerの到達と、標準メトリクスの実データを確認した。MLは既存実ログの `jsonPayload.service` を収集条件に使うが、適用後の新しいGPU jobは実行していない。Goの `severity/message` 対応はソースまででimage配備待ち。app/candidateのLB要求ログは既存の10% samplingを保ち、通知・SLO・ブラウザ計測は追加していない。詳しい検索条件・制約・適用記録は[ログ監視](observability.md)を参照する。
 
 ## 旧配備図（2026-11-08）
 
-以下は初期の配信・配備図として保持する。ML生成とLIVEの更新経路を含まないため、現在の全体説明には上の3図を使う。
+以下は初期の配信・配備図として保持する。ML生成とLIVEの更新・ログ監視を含まないため、現在の全体説明には上の4図を使う。
 
 ![rangle: Cloudflare DNSからGoogle HTTPS LBへ接続し、Cloud RunのUI/APIとCloud CDN・private GCSのmediaへ分岐する構成。下段はWIFによる配備と予算・期限停止。](diagrams/cloud-architecture.svg)
 
@@ -50,7 +59,7 @@ LIVEの処理待ちは最新window 1件で、評価4視点の画素は学習か�
 - **カタログ**：Cloud Run の runtime SA が専用 private GCS catalog を read-only FUSE mount し、`/mnt/catalog/snapshots/<sha256>.json` を読む。入力・重み用の inputs と Terraform state は公開 media と別の private bucket に保持する。
 - **DNS**：Cloudflare の app / media A record は Google LB の global IPv4 を返す **DNS only** 設定。ブラウザの HTTP 通信は Google の LB へ直接接続する。[Cloudflare proxy status](https://developers.cloudflare.com/dns/proxy-status/)
 
-Cloud Run は `asia-northeast1`、1 vCPU / 512 MiB、request billing、min 0 / max 1、concurrency 40。発表用の小さい設定で、10万人同時視聴の容量実証は行っていない。コード上は `internal-and-cloud-load-balancing` ingressとし、外部からの既定 `run.app` / candidate-tag URLの直通を拒否する。CIはappのLB URLと候補headerを使って未昇格revisionを検証する。実環境への切替・再疎通は[配備手順](stg-deployment.md#lb入口制限への切替)に従い、実施前は適用済みと扱わない。
+Cloud Run は `asia-northeast1`、1 vCPU / 512 MiB、request billing、min 0 / max 1、concurrency 40。発表用の小さい設定で、10万人同時視聴の容量実証は行っていない。`internal-and-cloud-load-balancing` ingressは実環境にも適用し、LBからのHTTP 200と既定 `run.app` / candidate-tag URLへの外部直通404を確認した。CIはappのLB URLと候補headerを使って未昇格revisionを検証する。切替手順は[配備手順](stg-deployment.md#lb入口制限への切替)を参照する。
 
 ## 配備と停止
 
@@ -81,7 +90,7 @@ python3 docs/diagrams/cloud-architecture.py
 python3 docs/diagrams/cloud-architecture.py --png
 ```
 
-Google の [公式アイコン](https://cloud.google.com/icons) と [製品アイコンガイド（2026年5月版）](https://services.google.com/fh/files/misc/google-cloud-product-icons.pdf) を使用。アイコン・商標は Google LLC に帰属する。新しい3図の再生成は[別手順](diagrams/README.md)を使う。
+Google の [公式アイコン](https://cloud.google.com/icons) と [製品アイコンガイド（2026年5月版）](https://services.google.com/fh/files/misc/google-cloud-product-icons.pdf) を使用。アイコン・商標は Google LLC に帰属する。新しい4図の再生成は[別手順](diagrams/README.md)を使う。
 
 ## GCP向けスキルの確認
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Rebuild the three HTML diagrams using the pinned stack-diagram tool.
+"""Rebuild the four HTML diagrams using the pinned stack-diagram tool.
 
 The HTML files are the portable source for PNG rendering. This small layout
 recipe is only needed when changing their content; see README.md.
@@ -72,7 +72,7 @@ def overview():
             "Tokyo / UI・API",
             790,
             190,
-            ("公開HTTPS / run.app", "public"),
+            ("外部入口はLB / Go認可", "public"),
         ),
         node(
             "firestore",
@@ -131,7 +131,6 @@ def overview():
         ),
     ]
     edges = [
-        edge("M130 184 V88 H790 V184", "run.app 直接", 560, 78, both=True),
         edge("M172 226 H448", "HTTPS", 305, 214, both=True),
         edge("M532 226 H748", "app", 640, 214, both=True),
         edge("M832 226 H1038", "transaction", 937, 214, kind="n", both=True),
@@ -152,7 +151,7 @@ def overview():
         edge("M172 736 H1360 V611", "image push", 1010, 724, kind="n dash"),
         edge(
             "M172 716 H310 V380 H790 V346",
-            "candidate → smoke → traffic",
+            "revision / tag / traffic",
             580,
             369,
             kind="n dash",
@@ -362,12 +361,80 @@ def delivery():
     return groups, nodes, edges
 
 
+def observability():
+    groups = [
+        group("収集元 · presentation", 45, 125, 300, 690, "gcp", "gcp"),
+        group("Cloud Logging · 同一project", 465, 285, 585, 465, "logging", "gcp"),
+        group("検索・可視化 · 既存IAM", 1110, 125, 445, 690, "monitoring", "gcp"),
+        """<div class="diagram-note" style="left:490px;top:585px;width:535px">
+          <p>専用sinkでアプリ・ML service・LB・運用を選択</p>
+          <p>監査ログを除外 · _Default / _Required の保存は維持</p>
+          <p>開始後のログをコピー · 過去の履歴は元の保存先へ</p>
+        </div>""",
+        """<div class="diagram-note" style="left:465px;top:770px;width:1090px">
+          <p>2026-11-10: bucket / sink / dashboard 適用済み。Go severity対応はimage配備待ち。</p>
+          <p>監視範囲: サーバー・生成・配信・運用。通知・SLO・ブラウザ計測は対象外。</p>
+        </div>""",
+    ]
+    nodes = [
+        node("run", "Cloud Run · Go", "UI / API / request logs", 170, 185),
+        node("vertex", "Vertex AI · Python", "trainer / LIVE service", 170, 340),
+        node(
+            "lb",
+            "LB / Cloud CDN",
+            "専用forwarding rule",
+            170,
+            495,
+            ("app側の要求ログ: 10%", "iam"),
+        ),
+        node("workflows", "Scheduler / Workflows", "guard / generation-sync", 170, 650),
+        node("logging", "Log Router / 専用sink", "rangle-stg-logs", 630, 365),
+        node(
+            "logging",
+            "Logging bucket",
+            "rangle-stg-logs",
+            920,
+            365,
+            ("Tokyo / 保持30日", "iam"),
+        ),
+        node(
+            "monitoring",
+            "Cloud Monitoring",
+            "標準指標2図 + ログ5パネル",
+            1330,
+            365,
+            ("説明を含め8 widgets", "iam"),
+        ),
+        node("logging", "Logs Explorer", "job_id / session_idで検索", 1330, 650),
+    ]
+    edges = [
+        edge("M212 221 H395 V401 H588", "構造化・要求ログ", 302, 209),
+        edge("M212 376 H395 V401 H588", "JSON service属性", 302, 364),
+        edge("M212 531 H395 V401 H588", "HTTP / cache情報", 302, 519),
+        edge("M212 686 H395 V401 H588", "実行・失敗ログ", 302, 674),
+        edge("M672 401 H878", "選択コピー", 775, 389),
+        edge("M962 401 H1288", "view: _AllLogs", 1125, 389),
+        edge("M920 521 V558 H1330 V644", "同じviewを検索", 1125, 546),
+        edge(
+            "M170 179 V169 H325 V99 H1330 V359",
+            "標準メトリクス: request数/秒・revision別p95（UI・healthを含む）",
+            800,
+            87,
+            kind="n",
+        ),
+    ]
+    return groups, nodes, edges
+
+
 EXTRA_CSS = """
 @font-face {font-family:'Diagram JP';src:url(data:font/woff2;base64,CJK_FONT) format('woff2');font-weight:100 900;font-display:block}
 :root {--font-display:'Geist','Diagram JP',sans-serif;--font-body:'Diagram JP',sans-serif;--font-mono:'JetBrains Mono','Diagram JP',monospace;--color-gcp:#4285f4;--color-white:#fff;--radius-card:8px;}
 body {padding:24px;}.page {max-width:none;}.head {max-width:1600px;}.lede {max-width:600px;}
 .canvas {width:1600px;height:900px;}svg.edges {width:1600px;height:900px;}
 .node {width:220px;}.tile {width:72px;height:72px;}.tile img {width:43px;height:43px;}
+/* Avoid SVG compositing artifacts in Chromium's dark PNG output. */
+.tile,.tile img {color-scheme:light;}
+.node .name span,.node .role span {backdrop-filter:none;-webkit-backdrop-filter:none;}
 .node .name {font-size:17px;line-height:23px;margin-top:9px;white-space:nowrap;}
 .node .role {font-family:var(--font-body);font-size:14px;line-height:20px;letter-spacing:0;margin-top:3px;}
 .node .badge {display:inline-block;margin-top:4px;padding:0 6px;border:1px solid var(--color-neutral);border-radius:4px;font-size:12px;line-height:18px;color:var(--color-neutral);background:var(--color-paper);}
@@ -378,6 +445,10 @@ body {padding:24px;}.page {max-width:none;}.head {max-width:1600px;}.lede {max-w
 .canvas-title {position:absolute;left:46px;top:25px;font-family:var(--font-display);font-size:30px;font-weight:700;}
 .inside-legend {position:absolute;left:46px;bottom:14px;font-size:13px;color:var(--color-muted);}
 .inside-legend b {color:var(--color-accent);}.foot {max-width:1600px;}
+.diagram-note {position:absolute;font-size:14px;line-height:26px;color:var(--color-neutral);}
+.views {display:flex;gap:20px;flex-wrap:wrap;margin-bottom:16px;font-size:14px;}
+.views a {color:var(--color-neutral);text-underline-offset:3px;}
+.views a[aria-current] {color:var(--color-accent);font-weight:700;}
 """
 
 
@@ -403,20 +474,37 @@ def main():
         ("overview", "全体構成", "視聴・生成・配備を分ける", overview),
         ("ml-pipeline", "ML処理", "管理者生成と到着画像によるLIVE更新", ml_pipeline),
         ("delivery", "配信処理", "メタデータ制御と不変モデルのデータ経路", delivery),
+        (
+            "observability",
+            "ログ監視",
+            "ログの30日保持・検索と標準メトリクスの可視化",
+            observability,
+        ),
     ]
     drafts = []
     for slug, title, subtitle, factory in definitions:
         groups, nodes, edges = factory()
         ci_legend = "　 破線: CI/CD" if slug == "overview" else ""
+        legend = (
+            "<b>青: ログ</b>　 灰: 標準メトリクス（ログ保存と別経路）"
+            if slug == "observability"
+            else f"<b>青: データ</b>　 灰: 制御{ci_legend}"
+        )
+        navigation = "".join(
+            f'<a href="{other_slug}.html"'
+            f"{' aria-current="page"' if other_slug == slug else ''}>{other_title}</a>"
+            for other_slug, other_title, _, _ in definitions
+        )
         canvas = f"""<div class="canvas-title">rangle / {title}</div>
         {"".join(groups)}<svg class="edges" viewBox="0 0 {WIDTH} {HEIGHT}" aria-hidden="true"><defs>
         <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="context-stroke"/></marker>
         </defs>{"".join(edges)}</svg>{"".join(nodes)}
-        <div class="inside-legend"><b>青: データ</b>　 灰: 制御{ci_legend}</div>"""
+        <div class="inside-legend">{legend}</div>"""
         document = f'''<!DOCTYPE html><html lang="ja"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>rangle / {title}</title>
         <style>{css}{EXTRA_CSS}</style></head><body><main class="page"><header class="head"><div><div class="kicker">rangle · architecture views · 2026-11-10</div><h1>{title}</h1></div><p class="lede">発表用presentation構成の実装を図示。クラウドの現在状態を照会した図ではなく、repo内のIaC・code・検証記録に基づきます。</p></header>
+        <nav class="views" aria-label="アーキテクチャ図">{navigation}</nav>
         <div class="scroller"><div class="canvas" role="img" aria-label="{html.escape(title + "。" + subtitle)}">{canvas}</div></div>
-        <footer class="foot"><span>rangle · 3図の入口と条件: <a href="../cloud-architecture.md">クラウド構成</a></span><span>icons: Google Cloud product icons / Go authors / svgl / devicon / Lucide · logos are their owners’ trademarks<br>fonts: Geist / JetBrains Mono / subset Noto Sans CJK JP (SIL OFL 1.1) · made with <a href="https://github.com/caru-ini/stack-diagram">stack-diagram</a></span></footer>
+        <footer class="foot"><span>rangle · 4図の入口と条件: <a href="../cloud-architecture.md">クラウド構成</a></span><span>icons: Google Cloud product icons / Go authors / svgl / devicon / Lucide · logos are their owners’ trademarks<br>fonts: Geist / JetBrains Mono / subset Noto Sans CJK JP (SIL OFL 1.1) · made with <a href="https://github.com/caru-ini/stack-diagram">stack-diagram</a></span></footer>
         <details><summary>Third-party notices</summary><pre style="white-space:pre-wrap;max-width:1600px">{notices}</pre></details></main></body></html>'''
         drafts.append((slug, document))
     args.work_dir.mkdir(parents=True, exist_ok=True)

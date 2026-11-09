@@ -152,5 +152,26 @@
     "file": "javascript.svg",
     "bytes": 1068,
     "sha256": "35328c60cffee71518294d614325fad52f903b48b5b63ac5f59fe1997249942c"
+  },
+  "logging": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Observability/SVG/Observability-512-color.svg",
+    "file": "logging.svg",
+    "bytes": 1071,
+    "sha256": "f22fe17c2e91d65d3109e499bb3b5d8d60216f678bf9fa41c541de7d8254216a"
+  },
+  "monitoring": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Observability/SVG/Observability-512-color.svg",
+    "file": "monitoring.svg",
+    "bytes": 1071,
+    "sha256": "f22fe17c2e91d65d3109e499bb3b5d8d60216f678bf9fa41c541de7d8254216a"
+  },
+  "workflows": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Integration Services/SVG/IntegrationServices-512-color.svg",
+    "file": "workflows.svg",
+    "bytes": 1157,
+    "sha256": "f4a14bb1f46b6b8ec2dd8bd69d8e37e9fac8f161801b781cf6e1f41772fc2101"
   }
 }

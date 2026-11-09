@@ -21,7 +21,7 @@
 
 ## 構成・再生
 
-- [クラウド構成](cloud-architecture.md)：[全体](diagrams/overview.html)・[ML処理](diagrams/ml-pipeline.html)・[配信処理](diagrams/delivery.html)の3図。Go/UI、Vertex AI、CDN・Storageとクライアント描画を分けて読む。逐次生成の実測は[クラウドLIVE](cloud-live.md)。
+- [クラウド構成](cloud-architecture.md)：[全体](diagrams/overview.html)・[ML処理](diagrams/ml-pipeline.html)・[配信処理](diagrams/delivery.html)・[ログ監視](diagrams/observability.html)の4図。Go/UI、Vertex AI、CDN・Storage、クライアント描画とログ収集・可視化を読む。逐次生成の実測は[クラウドLIVE](cloud-live.md)。
 - [自由視点の連続再生](temporal-playback.md)：RGS1形式、時間評価、GPU描画、資源管理と測定条件。[クライアント処理](client-processing.md)は取得・復号・Workerの分担を扱う。
 - [LIVE配信](live-streaming.md)：index・モデル更新・クライアントの再接続契約。学習と起動待ちを含む実測は[クラウドLIVE](cloud-live.md#2026-11-09の実gpu検証)。
 

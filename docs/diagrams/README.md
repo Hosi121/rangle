@@ -1,6 +1,6 @@
 # アーキテクチャ図の再生成
 
-[全体](overview.html)・[ML処理](ml-pipeline.html)・[配信処理](delivery.html)は、発表用presentation構成を分けた3図。各HTMLが閲覧・PNG出力の正本で、ネットワークなしで開ける。PNGは別の描画コードから作らず、同じHTMLを静的renderする。旧`cloud-architecture.svg/png/py`は2026-11-08の初期配備図として残す。
+[全体](overview.html)・[ML処理](ml-pipeline.html)・[配信処理](delivery.html)・[ログ監視](observability.html)は、発表用presentation構成を分けた4図。各HTMLが閲覧・PNG出力の正本で、ネットワークなしで開ける。PNGは別の描画コードから作らず、同じHTMLを静的renderする。旧`cloud-architecture.svg/png/py`は2026-11-08の初期配備図として残す。
 
 内容と配置を変更するときだけ`build-architecture-views.py`からHTMLを再生成する。この小さいrecipeは、指定した[stack-diagram](https://github.com/caru-ini/stack-diagram)のtemplate / geometryを基に座標を定義し、同repoの`build.py`でアイコン・フォントを埋め込む。HTMLだけを直接変更した場合は、recipeにも対応する変更を入れてから再生成する。生成後にlight/darkを目視する。
 
@@ -16,15 +16,26 @@ uv venv "$diagram_work/venv" --python 3.14
 uv pip install --python "$diagram_work/venv/bin/python" 'playwright==1.64.1' 'fonttools[woff]==4.61.1'
 "$diagram_work/venv/bin/python" -m playwright install chromium
 mkdir -p .local/qa/architecture-views
-for diagram in overview ml-pipeline delivery; do
+for diagram in overview ml-pipeline delivery observability; do
+  # Set the theme before loading: toggling a loaded page can drop SVGs in Chromium.
+  python3 - "docs/diagrams/$diagram.html" "$diagram_work/$diagram-dark.html" <<'PY'
+from pathlib import Path
+import sys
+source = Path(sys.argv[1]).read_text()
+Path(sys.argv[2]).write_text(source.replace('<html lang="ja">', '<html lang="ja" data-theme="dark">', 1))
+PY
   "$diagram_work/venv/bin/python" \
     "$diagram_work/stack-diagram/skills/stack-diagram/scripts/render_png.py" \
     "docs/diagrams/$diagram.html" ".local/qa/architecture-views/$diagram.png" \
-    --selector .canvas --scale 2
+    --selector .canvas --scale 2 --single
+  "$diagram_work/venv/bin/python" \
+    "$diagram_work/stack-diagram/skills/stack-diagram/scripts/render_png.py" \
+    "$diagram_work/$diagram-dark.html" ".local/qa/architecture-views/$diagram-dark.png" \
+    --selector .canvas --scale 2 --single
 done
 ```
 
-1枚1600×900 CSS pixels、PNGは3200×1800。`*-dark.png`も同時に作る。PNG・一時環境・loose icon・font binaryはcommitしない。今回は既存のChromium cacheを利用し、アプリの操作やGUIテストは行っていない。
+1枚1600×900 CSS pixels、PNGは3200×1800。`*-dark.png`も作る。PNG・一時環境・loose icon・font binaryはcommitしない。今回は既存のChromium cacheを利用し、アプリの操作やGUIテストは行っていない。
 
 ## 内容・配置からHTMLを作り直す
 
@@ -36,6 +47,7 @@ python3 "$diagram_work/stack-diagram/skills/stack-diagram/scripts/fetch_icons.py
   'gcp:google-cloud' 'run:gcp/cloud-run' 'lb:gcp/load-balancing' \
   'cdn:gcp/cloud-cdn' 'gcs:gcp/cloud-storage' 'firestore:gcp/firestore' \
   'vertex:gcp/vertex-ai' 'registry:gcp/artifact-registry' \
+  'logging:gcp/cloud-logging' 'monitoring:gcp/cloud-monitoring' 'workflows:gcp/workflows' \
   flutter 'go=https://go.dev/images/go-logo-blue.svg' \
   python pytorch javascript cloudflare githubactions \
   'admin:lucide/user-cog' 'source:lucide/clapperboard' \
@@ -49,4 +61,6 @@ python3 "$diagram_work/stack-diagram/skills/stack-diagram/scripts/fetch_icons.py
 
 JPフォントはNoto Sans CJK Regularのcollection 0（`Noto Sans CJK JP`）を使う。使用字形だけをWOFF2へsubset化してHTMLに内包し、Geist・JetBrains Monoもtool付属版を埋め込む。別fontへ変える場合は字形とlicenseを確認する。[第三者notice](THIRD-PARTY-NOTICES.txt)はHTMLの折り畳み欄にも埋め込んでいる。Google製品アイコンは[公式package](https://cloud.google.com/icons)、Goは[公式ブランド素材](https://go.dev/blog/go-brand)の青版、Flutter/Python等はfetch scriptのbrand source、抽象処理は[Lucide](https://lucide.dev/)を使用。ロゴの色・形は変更しない。
 
-最終確認では、全6PNGの文字・線・group padding・dark時のロゴを読む。HTMLに未解決token、外部script/CSS/画像依存、私的環境情報がないことも確認する。公開galleryへの送信は行わない。
+最終確認では、全8PNGの文字・線・group padding・dark時のロゴを読む。HTMLに未解決token、外部script/CSS/画像依存、私的環境情報がないことも確認する。公開galleryへの送信は行わない。
+
+PNG出力はlight/darkを別documentとして読み込む。白地のbrand tileは `color-scheme: light` に固定し、文字背景の半透明veilは維持してbackdrop blurを無効にしている。Chromiumのdark出力で一部のSVGが欠ける現象を避けるため。dark用の一時HTMLも同じ正本からattributeを変えただけのもので、描画コードは共通である。
