@@ -1,9 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:rangle_web/data/api_clip_repository.dart';
+import 'package:rangle_web/data/clip_repository.dart';
 
 Map<String, Object?> clip() => {
   'id': 'basketball',
@@ -15,6 +17,125 @@ Map<String, Object?> clip() => {
 };
 
 void main() {
+  test(
+    'opaque next cursors and shared metadata stay on canonical public URLs',
+    () async {
+      final urls = <Uri>[];
+      final client = MockClient((request) async {
+        urls.add(request.url);
+        return http.Response(
+          jsonEncode(
+            request.url.path.endsWith('/shared')
+                ? {...clip(), 'id': 'shared'}
+                : {
+                    'clips': [clip(), clip()],
+                    'next_cursor': 'opaque_-cursor',
+                  },
+          ),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        );
+      });
+      addTearDown(client.close);
+      final repo = ApiClipRepository(
+        endpoint: 'https://rangle.test/api/v1/clips?cursor=old&q=old',
+        client: client,
+      );
+      final first = await repo.loadPage(clipId: 'shared');
+      expect(first.nextCursor, 'opaque_-cursor');
+      expect(first.clips.map((clip) => clip.id), ['shared', 'basketball']);
+      final next = await repo.loadPage(
+        cursor: first.nextCursor,
+        clipId: 'shared',
+      );
+      expect(next.clips.length, 1);
+      expect(urls.map((url) => url.toString()), [
+        'https://rangle.test/api/v1/clips?limit=20',
+        'https://rangle.test/api/v1/clips/shared',
+        'https://rangle.test/api/v1/clips?limit=20&cursor=opaque_-cursor',
+      ]);
+    },
+  );
+
+  test('400 is a stale cursor only on a continuation request', () async {
+    final client = MockClient((_) async => http.Response('{}', 400));
+    addTearDown(client.close);
+    final repo = ApiClipRepository(
+      endpoint: 'https://rangle.test/api/v1/clips',
+      client: client,
+    );
+    await expectLater(
+      repo.loadPage(cursor: 'old'),
+      throwsA(isA<StaleClipCursor>()),
+    );
+    await expectLater(repo.loadPage(), throwsA(isA<http.ClientException>()));
+  });
+
+  test(
+    'invalid next cursors and oversized pages fail before publication',
+    () async {
+      for (final cursor in <Object>['', 4, 'a' * 129]) {
+        final client = MockClient(
+          (_) async => http.Response(
+            jsonEncode({'clips': <Object>[], 'next_cursor': cursor}),
+            200,
+            headers: {'content-type': 'application/json; charset=utf-8'},
+          ),
+        );
+        await expectLater(
+          ApiClipRepository(
+            endpoint: 'https://rangle.test/api/v1/clips',
+            client: client,
+          ).loadPage(),
+          throwsFormatException,
+        );
+        client.close();
+      }
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({'clips': List.generate(21, (_) => clip())}),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ),
+      );
+      addTearDown(client.close);
+      await expectLater(
+        ApiClipRepository(
+          endpoint: 'https://rangle.test/api/v1/clips',
+          client: client,
+        ).loadPage(),
+        throwsFormatException,
+      );
+    },
+  );
+
+  test(
+    'cancellation reaches the HTTP request without closing an injected client',
+    () async {
+      final entered = Completer<void>();
+      final abort = Completer<void>();
+      final client = MockClient.streaming((request, _) async {
+        expect(request, isA<http.AbortableRequest>());
+        entered.complete();
+        await (request as http.AbortableRequest).abortTrigger;
+        throw http.RequestAbortedException(request.url);
+      });
+      addTearDown(client.close);
+      final repo = ApiClipRepository(
+        endpoint: 'https://rangle.test/api/v1/clips',
+        client: client,
+      );
+      final request = repo.loadPage(abortTrigger: abort.future);
+      final rejected = expectLater(
+        request,
+        throwsA(isA<http.RequestAbortedException>()),
+      );
+      await entered.future;
+      abort.complete();
+      await rejected;
+    },
+  );
+
   test(
     'search parameters and tags reach the complete server catalog',
     () async {
@@ -157,9 +278,6 @@ void main() {
         'clips': [
           {...clip(), 'scene_url': 'javascript:alert(1)'},
         ],
-      },
-      {
-        'clips': [clip(), clip()],
       },
     ]) {
       final client = MockClient(

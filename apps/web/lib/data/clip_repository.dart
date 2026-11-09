@@ -4,6 +4,30 @@ abstract interface class ClipRepository {
   Future<List<Clip>> load({String query = '', String tag = '', String? clipId});
 }
 
+/// One public catalog page. A null cursor alone denotes the server's end.
+class ClipPage {
+  const ClipPage(this.clips, {this.nextCursor});
+  final List<Clip> clips;
+  final String? nextCursor;
+}
+
+/// Optional paging contract; existing repositories can keep implementing load.
+abstract interface class PagedClipRepository implements ClipRepository {
+  Future<ClipPage> loadPage({
+    String query = '',
+    String tag = '',
+    String? clipId,
+    String? cursor,
+    int limit = 20,
+    Future<void>? abortTrigger,
+  });
+}
+
+/// A cursor rejected after a catalog/origin change must restart at page one.
+class StaleClipCursor implements Exception {
+  const StaleClipCursor();
+}
+
 /// The first entry uses the bundled research sample unless a video URL overrides it.
 class DemoClipRepository implements ClipRepository {
   const DemoClipRepository({this.previewUrl = '', this.sceneUrl = ''});
