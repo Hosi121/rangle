@@ -1,5 +1,6 @@
 locals {
-  generation_enabled = local.app_enabled && (var.application == null ? false : var.application.generation_config_sha256 != null)
+  generation_enabled      = local.app_enabled && (var.application == null ? false : var.application.generation_config_sha256 != null)
+  generation_live_enabled = local.generation_enabled && (var.application == null ? false : var.application.generation_live_enabled)
 }
 resource "google_project_service" "generation" {
   count              = local.generation_enabled ? 1 : 0

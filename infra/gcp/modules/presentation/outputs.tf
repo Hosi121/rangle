@@ -28,6 +28,13 @@ output "deployment" {
       session_ttl = "sessions.expires_at"
     } : null
     generation = local.generation_enabled ? {
+      live = local.generation_live_enabled ? {
+        trainer_service_account = google_service_account.live_trainer[0].email
+        input_prefix            = "gs://${google_storage_bucket.private["inputs"].name}/datasets/live/"
+        output_prefix           = "gs://${google_storage_bucket.private["media"].name}/live/"
+        session_index_prefix    = "gs://${google_storage_bucket.private["media"].name}/live-index/"
+        catalog_index           = "gs://${google_storage_bucket.private["catalog"].name}/live/index.json"
+      } : null
       sync = local.generation_sync_enabled ? {
         scheduler = local.generation_sync_job
         audience  = local.generation_sync_uri
