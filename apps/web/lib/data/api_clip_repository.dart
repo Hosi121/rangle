@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -6,7 +7,7 @@ import '../models/clip.dart';
 import 'clip_repository.dart';
 
 /// Loads one bounded public feed page. Media URLs come from the API catalog.
-class ApiClipRepository implements ClipRepository {
+class ApiClipRepository implements PagedClipRepository {
   ApiClipRepository({required this.endpoint, this.client});
 
   final String endpoint;
@@ -17,26 +18,60 @@ class ApiClipRepository implements ClipRepository {
     String query = '',
     String tag = '',
     String? clipId,
+  }) async =>
+      (await loadPage(query: query, tag: tag, clipId: clipId, limit: 50)).clips;
+
+  @override
+  Future<ClipPage> loadPage({
+    String query = '',
+    String tag = '',
+    String? clipId,
+    String? cursor,
+    int limit = 20,
+    Future<void>? abortTrigger,
   }) async {
+    if (limit < 1 || limit > 50) {
+      throw const FormatException('Invalid feed page size.');
+    }
+    if (cursor != null && (cursor.isEmpty || cursor.length > 128)) {
+      throw const FormatException('Invalid feed cursor.');
+    }
     final parsed = Uri.tryParse(endpoint);
     if (parsed == null) throw const FormatException('Invalid feed URL.');
     final source = Uri.base.resolveUri(parsed);
     _requireHttp(source);
     final httpClient = client ?? http.Client();
+    final abort = Completer<void>();
+    if (abortTrigger != null) {
+      unawaited(
+        abortTrigger.then((_) {
+          if (!abort.isCompleted) abort.complete();
+        }),
+      );
+    }
+    Future<http.Response> get(Uri uri) async {
+      final request = http.AbortableRequest(
+        'GET',
+        uri,
+        abortTrigger: abort.future,
+      )..headers['Accept'] = 'application/json';
+      return http.Response.fromStream(await httpClient.send(request));
+    }
+
     try {
-      final response = await httpClient
-          .get(
-            source.replace(
-              queryParameters: {
-                ...source.queryParameters,
-                'limit': '50',
-                if (query.isNotEmpty) 'q': query,
-                if (tag.isNotEmpty) 'tag': tag,
-              },
-            ),
-            headers: {'Accept': 'application/json'},
-          )
-          .timeout(const Duration(seconds: 10));
+      final response = await get(
+        source.replace(
+          queryParameters: {
+            'limit': '$limit',
+            if (query.isNotEmpty) 'q': query,
+            if (tag.isNotEmpty) 'tag': tag,
+            'cursor': ?cursor,
+          },
+        ),
+      ).timeout(const Duration(seconds: 10));
+      if (response.statusCode == 400 && cursor != null) {
+        throw const StaleClipCursor();
+      }
       if (response.statusCode != 200) {
         throw http.ClientException('Clip feed request failed.', source);
       }
@@ -45,7 +80,7 @@ class ApiClipRepository implements ClipRepository {
         throw const FormatException('Invalid clip feed.');
       }
       final rows = document['clips'] as List;
-      if (rows.length > 50) {
+      if (rows.length > limit) {
         throw const FormatException('Feed page exceeds its limit.');
       }
       final ids = <String>{};
@@ -73,7 +108,6 @@ class ApiClipRepository implements ClipRepository {
         }
 
         final id = text('id');
-        if (!ids.add(id)) throw const FormatException('Duplicate clip ID.');
         return Clip(
           id: id,
           title: text('title'),
@@ -85,18 +119,25 @@ class ApiClipRepository implements ClipRepository {
         );
       }
 
-      final clips = rows.map(parse).toList();
-      if (clipId != null) {
+      final nextCursor = document['next_cursor'];
+      if (nextCursor != null &&
+          (nextCursor is! String ||
+              nextCursor.isEmpty ||
+              nextCursor.length > 128)) {
+        throw const FormatException('Invalid next cursor.');
+      }
+      final clips = rows.map(parse).where((clip) => ids.add(clip.id)).toList();
+      if (clipId != null && cursor == null) {
         if (!RegExp(r'^[a-zA-Z0-9_-]{1,64}$').hasMatch(clipId)) {
           throw const FormatException('Invalid shared clip ID.');
         }
-        final detail = source.replace(
+        final detail = Uri(
+          scheme: source.scheme,
+          host: source.host,
+          port: source.hasPort ? source.port : null,
           pathSegments: [...source.pathSegments, clipId],
-          query: '',
         );
-        final response = await httpClient
-            .get(detail, headers: {'Accept': 'application/json'})
-            .timeout(const Duration(seconds: 10));
+        final response = await get(detail).timeout(const Duration(seconds: 10));
         if (response.statusCode != 200) {
           throw http.ClientException('Shared clip not found.', detail);
         }
@@ -108,8 +149,9 @@ class ApiClipRepository implements ClipRepository {
         clips.removeWhere((clip) => clip.id == clipId);
         clips.insert(0, shared);
       }
-      return clips;
+      return ClipPage(clips, nextCursor: nextCursor as String?);
     } finally {
+      if (!abort.isCompleted) abort.complete();
       if (client == null) httpClient.close();
     }
   }

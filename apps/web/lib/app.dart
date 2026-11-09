@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import 'data/clip_repository.dart';
+import 'data/clip_paging_controller.dart';
 import 'community/community_api.dart';
 import 'community/account_controller.dart';
 import 'community/account_dialog.dart';
@@ -47,7 +48,8 @@ class ClipFeedScreen extends StatefulWidget {
 }
 
 class _ClipFeedScreenState extends State<ClipFeedScreen> {
-  late Future<List<Clip>> _clips;
+  late ClipPagingController _paging;
+  String? _clipId;
   AccountController? _account;
   String _query = '', _tag = '';
   bool _generationOpen = false;
@@ -55,7 +57,9 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   @override
   void initState() {
     super.initState();
-    _clips = widget.repository.load(clipId: widget.initialClipId);
+    _clipId = widget.initialClipId;
+    _paging = ClipPagingController(widget.repository);
+    unawaited(_paging.reset(clipId: _clipId));
     if (widget.community != null) {
       _account = AccountController(widget.community!);
       unawaited(_account!.initialize());
@@ -86,15 +90,32 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
       _generationOpen = false;
       if (result != null) {
         _query = _tag = '';
-        _clips = widget.repository.load(clipId: result.queryParameters['clip']);
+        _clipId = result.queryParameters['clip'];
+        unawaited(_paging.reset(clipId: _clipId));
       }
     });
   }
 
   @override
   void dispose() {
+    _paging.dispose();
     _account?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didUpdateWidget(ClipFeedScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.repository != widget.repository) {
+      _paging.dispose();
+      _paging = ClipPagingController(widget.repository);
+      _clipId = widget.initialClipId;
+      _reload();
+    } else if (oldWidget.initialClipId != widget.initialClipId) {
+      _clipId = widget.initialClipId;
+      _query = _tag = '';
+      _reload();
+    }
   }
 
   Future<void> _search(Iterable<String> tags) async {
@@ -128,14 +149,13 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   }
 
   void _reload() {
-    final clips = widget.repository.load(
-      query: _query,
-      tag: _tag,
-      clipId: _query.isEmpty && _tag.isEmpty ? widget.initialClipId : null,
+    unawaited(
+      _paging.reset(
+        query: _query,
+        tag: _tag,
+        clipId: _query.isEmpty && _tag.isEmpty ? _clipId : null,
+      ),
     );
-    setState(() {
-      _clips = clips;
-    });
   }
 
   @override
@@ -144,30 +164,41 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
       : Scaffold(
           backgroundColor: Colors.black,
           body: SafeArea(
-            child: FutureBuilder<List<Clip>>(
-              future: _clips,
-              builder: (context, snapshot) {
-                if (snapshot.connectionState != ConnectionState.done) {
+            child: ListenableBuilder(
+              listenable: _paging,
+              builder: (context, _) {
+                if (_paging.clips.isEmpty && _paging.loading) {
                   return const ViewerMessage(
                     icon: Icons.view_agenda_outlined,
                     title: 'ハイライトを読み込んでいます',
                     description: 'しばらくお待ちください。',
                   );
                 }
-                if (snapshot.hasError) {
+                if (_paging.clips.isEmpty && _paging.error != null) {
                   return ViewerMessage(
                     icon: Icons.cloud_off_outlined,
                     title: 'ハイライトを読み込めませんでした',
                     description: '接続状況をご確認のうえ、もう一度お試しください。',
                     action: FilledButton.icon(
-                      onPressed: _reload,
+                      onPressed: () => _paging.loadNext(retry: true),
                       icon: const Icon(Icons.refresh),
                       label: const Text('再読み込み'),
                     ),
                   );
                 }
-                final clips = snapshot.data ?? const <Clip>[];
+                final clips = _paging.clips;
                 if (clips.isEmpty) {
+                  if (_paging.hasMore) {
+                    return ViewerMessage(
+                      icon: Icons.view_agenda_outlined,
+                      title: '続きのハイライトを確認できます',
+                      description: '次のページを読み込んでください。',
+                      action: OutlinedButton(
+                        onPressed: () => _paging.loadNext(),
+                        child: const Text('続きを読み込む'),
+                      ),
+                    );
+                  }
                   if (_query.isNotEmpty || _tag.isNotEmpty) {
                     return ViewerMessage(
                       icon: Icons.search_off,
@@ -191,7 +222,8 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                   );
                 }
                 return _HighlightFeed(
-                  key: ObjectKey(_clips),
+                  key: ValueKey((_paging, _paging.generation)),
+                  paging: _paging,
                   clips: clips,
                   viewerFactory: widget.viewerFactory,
                   sceneFactory: widget.sceneFactory,
@@ -205,10 +237,10 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                   onGenerate: _openGeneration,
                   initialFreeView:
                       RegExp(r'^generated-[a-f0-9]{32}$')
-                          .hasMatch(widget.initialClipId ?? '') &&
+                          .hasMatch(_clipId ?? '') &&
                       _query.isEmpty &&
                       _tag.isEmpty &&
-                      clips.first.id == widget.initialClipId &&
+                      clips.first.id == _clipId &&
                       clips.first.sceneUrl != null,
                 );
               },
@@ -225,6 +257,7 @@ class _MoveClipIntent extends Intent {
 class _HighlightFeed extends StatefulWidget {
   const _HighlightFeed({
     required this.clips,
+    required this.paging,
     required this.viewerFactory,
     required this.sceneFactory,
     required this.account,
@@ -238,6 +271,7 @@ class _HighlightFeed extends StatefulWidget {
     super.key,
   });
   final List<Clip> clips;
+  final ClipPagingController paging;
   final ViewerFactory viewerFactory;
   final ViewerFactory sceneFactory;
   final AccountController? account;
@@ -252,18 +286,24 @@ class _HighlightFeed extends StatefulWidget {
 }
 
 class _HighlightFeedState extends State<_HighlightFeed> {
-  final PageController _pages = PageController();
-  int _selected = 0;
+  late final PageController _pages;
+  late int _selected;
   bool _freeView = false;
 
   @override
   void initState() {
     super.initState();
-    _freeView = widget.initialFreeView;
+    _selected = widget.paging.selectedIndex;
+    _pages = PageController(initialPage: _selected);
+    _freeView = widget.initialFreeView && _selected == 0;
   }
 
   void _select(int index) {
-    if (index < 0 || index >= widget.clips.length || index == _selected) return;
+    if (index >= widget.paging.endIndex) {
+      unawaited(widget.paging.loadNext());
+      return;
+    }
+    if (index < widget.paging.firstIndex || index == _selected) return;
     _pages.jumpToPage(index);
   }
 
@@ -313,31 +353,79 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                       scrollDirection: Axis.vertical,
                       physics: _freeView
                           ? const NeverScrollableScrollPhysics()
-                          : null,
-                      itemCount: widget.clips.length,
-                      onPageChanged: (index) => setState(() {
-                        _selected = index;
-                        _freeView = false;
-                      }),
-                      itemBuilder: (context, index) => ExcludeSemantics(
-                        excluding: index != _selected,
-                        child: ClipCard(
-                          clip: widget.clips[index],
-                          active: index == _selected,
-                          viewerFactory: widget.viewerFactory,
-                          sceneFactory: widget.sceneFactory,
-                          account: widget.account,
-                          shareAction: widget.shareAction,
-                          onTag: widget.onTag,
-                          onFreeViewChanged: (value) =>
-                              setState(() => _freeView = value),
-                          onNext: index < widget.clips.length - 1
-                              ? () => _select(index + 1)
-                              : null,
-                          initialFreeView: widget.initialFreeView && index == 0,
+                          : _FeedWindowPhysics(widget.paging),
+                      itemCount: widget.paging.endIndex,
+                      onPageChanged: (index) {
+                        setState(() {
+                          _selected = index;
+                          _freeView = false;
+                        });
+                        widget.paging.select(index);
+                      },
+                      itemBuilder: (context, index) {
+                        final offset = index - widget.paging.firstIndex;
+                        if (offset < 0) return const SizedBox.expand();
+                        final clip = widget.clips[offset];
+                        return ExcludeSemantics(
+                          key: ValueKey(clip.id),
+                          excluding: index != _selected,
+                          child: ClipCard(
+                            clip: clip,
+                            active: index == _selected,
+                            viewerFactory: widget.viewerFactory,
+                            sceneFactory: widget.sceneFactory,
+                            account: widget.account,
+                            shareAction: widget.shareAction,
+                            onTag: widget.onTag,
+                            onFreeViewChanged: (value) =>
+                                setState(() => _freeView = value),
+                            onNext:
+                                index < widget.paging.endIndex - 1 ||
+                                    widget.paging.hasMore
+                                ? () => _select(index + 1)
+                                : null,
+                            initialFreeView:
+                                widget.initialFreeView && index == 0,
+                          ),
+                        );
+                      },
+                    ),
+                    if (_selected >= widget.paging.endIndex - 2 &&
+                        (widget.paging.loading ||
+                            widget.paging.error != null ||
+                            widget.paging.hasMore))
+                      Positioned(
+                        bottom: 12,
+                        left: 16,
+                        right: 72,
+                        child: PointerInterceptor(
+                          intercepting: _freeView,
+                          child: Align(
+                            alignment: Alignment.bottomLeft,
+                            child: widget.paging.loading
+                                ? const Text(
+                                    '続きを読み込んでいます',
+                                    key: Key('feed-page-loading'),
+                                  )
+                                : TextButton.icon(
+                                    key: const Key('feed-page-action'),
+                                    onPressed: () => widget.paging.loadNext(
+                                      retry: widget.paging.error != null,
+                                    ),
+                                    icon: Icon(
+                                      widget.paging.error != null
+                                          ? Icons.refresh
+                                          : Icons.arrow_downward,
+                                    ),
+                                    label: Text(
+                                      widget.paging.error != null
+                                          ? '続きを再試行'
+                                          : '続きを読み込む',
+                                    ),
+                                  ),
+                          ),
                         ),
                       ),
-                    ),
                     Positioned(
                       top: 12,
                       left: 16,
@@ -361,10 +449,11 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           ),
                           Semantics(
                             liveRegion: true,
-                            label: '${widget.clips.length}件中${_selected + 1}件目',
+                            label:
+                                '取得済み${widget.paging.endIndex}件中${_selected + 1}件目${widget.paging.hasMore ? '、続きがあります' : ''}',
                             child: ExcludeSemantics(
                               child: Text(
-                                '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.clips.length.toString().padLeft(2, '0')}',
+                                '${(_selected + 1).toString().padLeft(2, '0')} / ${widget.paging.endIndex.toString().padLeft(2, '0')}${widget.paging.hasMore ? '+' : ''}',
                                 style: Theme.of(context).textTheme.labelMedium
                                     ?.copyWith(
                                       fontFeatures: const [
@@ -377,7 +466,7 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           PointerInterceptor(
                             intercepting: _freeView,
                             child: Tooltip(
-                              message: '3DGSを生成',
+                              message: 'GSを生成',
                               child:
                                   MediaQuery.textScalerOf(context).scale(1) >
                                       1.4
@@ -471,7 +560,7 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                           children: [
                             IconButton.filledTonal(
                               tooltip: '前のハイライト',
-                              onPressed: _selected > 0
+                              onPressed: _selected > widget.paging.firstIndex
                                   ? () => _select(_selected - 1)
                                   : null,
                               icon: const Icon(Icons.keyboard_arrow_up),
@@ -479,7 +568,9 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                             const SizedBox(height: 8),
                             IconButton.filledTonal(
                               tooltip: '次のハイライト',
-                              onPressed: _selected < widget.clips.length - 1
+                              onPressed:
+                                  _selected < widget.paging.endIndex - 1 ||
+                                      widget.paging.hasMore
                                   ? () => _select(_selected + 1)
                                   : null,
                               icon: const Icon(Icons.keyboard_arrow_down),
@@ -497,4 +588,24 @@ class _HighlightFeedState extends State<_HighlightFeed> {
       ),
     ),
   );
+}
+
+/// Clamp backward gestures at the retained window without renumbering pages.
+class _FeedWindowPhysics extends ScrollPhysics {
+  const _FeedWindowPhysics(this.paging, {super.parent});
+  final ClipPagingController paging;
+
+  @override
+  _FeedWindowPhysics applyTo(ScrollPhysics? ancestor) =>
+      _FeedWindowPhysics(paging, parent: buildParent(ancestor));
+
+  @override
+  double applyBoundaryConditions(ScrollMetrics position, double value) {
+    final floor = paging.firstIndex * position.viewportDimension;
+    if (value < position.pixels && position.pixels <= floor) {
+      return value - position.pixels;
+    }
+    if (value < floor && position.pixels > floor) return value - floor;
+    return super.applyBoundaryConditions(position, value);
+  }
 }
