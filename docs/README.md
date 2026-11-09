@@ -28,6 +28,7 @@
 ## API・配信
 
 - [APIと版付き資産](api-delivery.md)：catalog、manifest、URL、Range・ETag・cache。[フィード継続取得](feed-pagination.md)と[過負荷時の動作](api-overload.md)は個別の契約。
+- [LIVE配信の測定](live-delivery-measurements.md)：APIの変更前後、実HTTP、CDNの少数取得。測れた範囲と未検証の規模を分ける。
 - [アカウントと交流API](accounts.md)：認証、いいね、コメント。[交流データの保存先](community-storage.md)に永続化と分離の条件を記載。
 - [生成API](generation.md)：preset、状態確認、中止、予算。[生成結果の掲載](generated-publication.md)と[掲載UI](generation-publication-ui.md)は成功後の公開操作を扱う。
 - [資産公開preflight](asset-publication.md)：許諾台帳・許可リスト・bytes検証・公開順。[不変catalog](catalog-snapshots.md)は選択・切替・復帰の手順。
