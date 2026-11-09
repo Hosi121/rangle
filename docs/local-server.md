@@ -1,10 +1,8 @@
 # ローカルsceneのGo配信
 
-[資料一覧](README.md) · [Webの開発とビルド](../apps/web/README.md) · [APIと版付き資産](api-delivery.md)
+[資料一覧](README.md) · [Web build](../apps/web/README.md) · [APIと版付き資産](api-delivery.md) · [Docker](docker.md)
 
-Goの検証版は `go.mod` と同じ1.27.3です。`-scene-dir` は `frames` に相対 `.splat` を列挙する従来型scene用です。時間モデルのRGS1（`temporal` / `model.rgs`）は[APIと版付き資産の手順](api-delivery.md)でcatalogから配信します。コンテナでの起動は[Dockerの手順](docker.md)を参照してください。
-
-既存の [Flutter Webビルド](../apps/web/README.md) と、利用が許可されたローカルsceneを指定して配信できます。パスは手元のディレクトリへ置き換えてください。実データや学習重みはGitへ追加しません。
+Go検証版は `go.mod` と同じ1.27.3。`-scene-dir` は `frames` に相対 `.splat` を列挙するscene用で、RGS1 (`temporal/model.rgs`) は[catalogから配信](api-delivery.md)する。利用許可済みsceneとFlutter buildを指定し、実データ/重みはGitへ加えない。
 
 ```bash
 go run ./cmd/rangle-server \
@@ -13,17 +11,25 @@ go run ./cmd/rangle-server \
   -scene-id basketball
 ```
 
-`http://127.0.0.1:4174/` が製品入口、`http://127.0.0.1:4174/demo/` がデモUI、`/samples/basketball/scene.json` がsceneです。`/demo` はクエリを保持して `/demo/` へリダイレクトします。内蔵デモを使う場合は `RANGLE_DEMO=true` を明示し、sceneのURLを `RANGLE_SCENE_URL` に指定してビルドします。既定は同一originの配信APIを使います。sceneを使わない場合は `-scene-dir` と `-scene-id` の両方を省きます。`/health` は起動確認用です。終了はCtrl+Cで、処理中のHTTP要求を最大5秒待って停止します。
+| path/操作 | 内容 |
+| --- | --- |
+| `http://127.0.0.1:4174/` | 製品入口 |
+| `/demo/` | Web UI。`/demo` はqueryを保ちredirect |
+| `/samples/basketball/scene.json` | 指定scene |
+| `/health` | 起動確認 |
+| Ctrl+C | 処理中要求を最大5秒待ち停止 |
 
-UI rootは `index.html` と製品入口の `landing.html` を必須とします。通常のFlutterビルドが両方を含むため、追加のpost-build処理は不要です。Flutterの静的ファイルは `/demo/` 配下に限定し、旧 `/main.dart.js`・`/viewer/*`・UI用 `/assets/*` 等のroot側aliasは公開しません。カタログで宣言されたローカル動画（webm/mp4/m4v/ogv）がUI root内にある場合だけ、既存のroot側URLを維持します。`/api/v1/*`・`/manifests/*`・版付き `/assets/{clip}/{revision}/*` は従来どおりです。
+内蔵デモは `RANGLE_DEMO=true` と `RANGLE_SCENE_URL` を指定してbuildする。既定はsame-origin API。scene不要なら `-scene-dir/-scene-id` を両方省く。
 
-隠しファイル、`*.local.md`、`*.private.md`、ディレクトリ一覧を公開しません。`/samples/` はUI内の同名ディレクトリから独立し、指定sceneのmanifestとそこに列挙された相対 `.splat` だけを配信します。root外へ参照を解決させず、大きなframeは全量をRAMへコピーせずストリーミングします。
+UI rootは `index.html/landing.html` 必須で、通常Flutter buildに含まれる。静的UIは `/demo/` のみ。旧rootの `/main.dart.js`・`/viewer/*`・UI `/assets/*` は公開しない。catalog宣言のlocal動画（webm/mp4/m4v/ogv）がUI rootにある場合だけroot URLを維持する。API/manifest/版付きasset URLは維持する。
 
-公開対象は起動時に固定します。UIの再ビルド、ファイルの置換、manifestの変更はサーバーを再起動して反映します。ローカルの可変ファイルなので `immutable` は付けず、`no-cache` と `Last-Modified` で再検証します。HEAD・Range・条件付きGETに対応し、エラーは `no-store` です。例のframe名は自身のmanifestに合わせてください。
+隠しfile・`*.local.md`・`*.private.md`・一覧は非公開。`/samples/` はUI directoryから独立し、scene manifestと列挙された相対splatだけをroot内から配信する。大きいframeは全量RAMコピーせずstreamする。
+
+公開対象は起動時固定。再build・置換・manifest変更は再起動で反映する。可変local fileのためimmutableを付けず `no-cache/Last-Modified` で再検証する。HEAD/Range/条件付きGET、エラーno-store。frame名は自身のmanifestに合わせる。
 
 ```bash
 curl -I http://127.0.0.1:4174/samples/basketball/scene.json
 curl -i -H 'Range: bytes=0-15' http://127.0.0.1:4174/samples/basketball/frames/000.splat
 ```
 
-`rangle-server` は、`PORT` 環境変数がなければ従来どおり `127.0.0.1:4174` で待ち受けます。`PORT` がある場合は `0.0.0.0:PORT` で待ち受け、明示した `-listen` 引数があればそちらを優先します。外部から接続を受け付ける場合は、配信対象と実行環境側の認証・アクセス範囲を確認してください。実回線の性能や大規模配信を検証するものではなく、本番の大容量資産はCDN・object storageから直接配信する方針を維持します。Dockerでの起動方法は [Dockerでのビルドと起動](docker.md) を参照してください。
+待受は既定 `127.0.0.1:4174`、`PORT` があれば `0.0.0.0:PORT`、明示 `-listen` 優先。外部公開時は対象と環境側認証/アクセス範囲を確認する。これは実回線/大規模性能検証ではなく、本番の大容量資産はCDN/object storageから直接配信する。
