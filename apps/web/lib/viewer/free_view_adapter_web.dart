@@ -5,6 +5,7 @@ import 'dart:js_interop';
 import 'package:flutter/widgets.dart';
 import 'package:web/web.dart' as web;
 
+import 'live_source_updates.dart';
 import 'viewer_adapter.dart';
 
 ViewerAdapter createAdapter(Uri source) => _FreeViewAdapter(source);
@@ -26,11 +27,16 @@ class _FreeViewAdapter extends ViewerAdapter {
   final bool live;
   final List<String> origins;
   final String? sha256;
-  int _updateId = 0;
-  int _displayedUpdate = 0;
-  final _requestedSources = <int, Uri>{};
-  Completer<bool>? _update;
-  Timer? _updateTimeout;
+  late final _updates = LiveSourceUpdates(
+    initialSource: source,
+    initialSha256: sha256,
+    start: (request) => _send('replace', {
+      'requestId': request.id,
+      'url': request.source.toString(),
+      'sha256': request.sha256,
+    }),
+    cancel: () => _send('cancelReplace'),
+  );
   web.HTMLIFrameElement? _frame;
   late final JSFunction _listener = _onMessage.toJS;
   final _initialized = Completer<void>();
@@ -251,14 +257,10 @@ class _FreeViewAdapter extends ViewerAdapter {
             return;
           }
           final request = data['requestId'];
-          final replacedSource = _requestedSources[request];
-          if (replacing &&
-              (request is! int ||
-                  request <= _displayedUpdate ||
-                  replacedSource == null ||
-                  data['url'] != replacedSource.toString())) {
+          if (replacing && !_updates.matches(request, data['url'])) {
             return;
           }
+          final replacedSource = replacing ? _updates.active!.source : null;
           _frameRate = (data['frameRate'] as num).toDouble();
           final count = data['frameCount'] as int;
           final index = data['frame'] as int;
@@ -273,7 +275,6 @@ class _FreeViewAdapter extends ViewerAdapter {
           if (!replacing && index != _requestedFrame) return;
           if (replacing) {
             _requestedFrame = index;
-            _displayedUpdate = request as int;
           }
           _timeout?.cancel();
           _hasReadyFrame = true;
@@ -301,9 +302,13 @@ class _FreeViewAdapter extends ViewerAdapter {
             _restoration = null;
             _restoreTarget = null;
           }
-          if (replacing && request == _updateId) _finishUpdate(true);
+          if (replacing) {
+            _updates.finish(request, data['url'], true);
+          } else if (live) {
+            _updates.initialized();
+          }
         case 'replaceError':
-          if (data['requestId'] == _updateId) _finishUpdate(false);
+          _updates.finish(data['requestId'], data['url'], false);
         case 'playback':
           final seconds = data['positionSeconds'];
           final playing = data['playing'];
@@ -351,7 +356,7 @@ class _FreeViewAdapter extends ViewerAdapter {
     _restoration?.complete(false);
     _restoration = null;
     _timeout?.cancel();
-    _finishUpdate(false);
+    _updates.close();
     _value = const ViewerValue(status: ViewerStatus.error, canPlay: false);
     if (!_initialized.isCompleted) _initialized.complete();
     notifyListeners();
@@ -390,6 +395,7 @@ class _FreeViewAdapter extends ViewerAdapter {
   @override
   Future<void> pause() async {
     _visible = false;
+    if (live) _updates.visible(false);
     if (live && !_hasReadyFrame) _timeout?.cancel();
     _applyVisibility();
     _send('pause');
@@ -399,6 +405,7 @@ class _FreeViewAdapter extends ViewerAdapter {
   Future<void> resume() async {
     if (_disposed || _failed) return;
     _visible = true;
+    if (live) _updates.visible(true);
     if (live && !_hasReadyFrame) {
       _timeout = Timer(const Duration(seconds: 30), _fail);
     }
@@ -418,37 +425,11 @@ class _FreeViewAdapter extends ViewerAdapter {
     }
   }
 
-  void _finishUpdate(bool ready) {
-    _updateTimeout?.cancel();
-    _update?.complete(ready);
-    _update = null;
-  }
-
   @override
-  Future<bool> updateSource(Uri next, {String? sha256}) async {
-    if (!live || _disposed || _failed) return false;
-    _finishUpdate(false);
-    final request = ++_updateId;
-    _requestedSources[request] = next;
-    while (_requestedSources.length > 64) {
-      _requestedSources.remove(_requestedSources.keys.first);
-    }
-    final completion = _update = Completer<bool>();
-    await _initialized.future;
-    if (_disposed || _failed || request != _updateId) return completion.future;
-    _updateTimeout = Timer(const Duration(seconds: 45), () {
-      if (request == _updateId) {
-        _send('cancelReplace');
-        _finishUpdate(false);
-      }
-    });
-    _send('replace', {
-      'requestId': request,
-      'url': next.toString(),
-      'sha256': sha256,
-    });
-    return completion.future;
-  }
+  Future<bool> updateSource(Uri next, {String? sha256}) =>
+      !live || _disposed || _failed
+      ? Future.value(false)
+      : _updates.update(next, sha256);
 
   late final Widget _view = HtmlElementView.fromTagName(
     key: ObjectKey(this),
@@ -484,7 +465,7 @@ class _FreeViewAdapter extends ViewerAdapter {
     _restoration?.complete(false);
     _restoration = null;
     _timeout?.cancel();
-    _finishUpdate(false);
+    _updates.close();
     if (!_initialized.isCompleted) _initialized.complete();
     unawaited(_release());
     super.dispose();

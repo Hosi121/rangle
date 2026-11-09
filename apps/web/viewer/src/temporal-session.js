@@ -155,12 +155,44 @@ export class TemporalSession {
       playIntent: this.clock.playing });
   }
 
-  cancelReplacement() { this.replacement?.cancel(); }
+  cancelReplacement() {
+    const active = this.activeReplacement;
+    this.activeReplacement = null;
+    this.pendingReplacement?.resolve(false);
+    this.pendingReplacement = null;
+    this.replacement?.cancel();
+    active?.resolve(false);
+  }
 
   /** At most one candidate worker/mesh, alongside the current interactive model. */
   replace(manifest, { sha256 } = {}) {
-    this.cancelReplacement();
     if (this.disposed || !this.initialized || this.paused) return Promise.resolve(false);
+    for (const request of [this.activeReplacement, this.pendingReplacement]) {
+      if (request?.manifest.temporal.url === manifest.temporal.url && request.sha256 === sha256) return request.promise;
+    }
+    let resolve;
+    const request = { manifest, sha256, promise: new Promise(done => { resolve = done; }), resolve: value => resolve(value) };
+    this.pendingReplacement?.resolve(false);
+    this.pendingReplacement = request;
+    this.drainReplacement();
+    return request.promise;
+  }
+
+  drainReplacement() {
+    if (this.activeReplacement || !this.pendingReplacement || this.disposed || this.paused) return;
+    const request = this.activeReplacement = this.pendingReplacement;
+    this.pendingReplacement = null;
+    const finish = ready => {
+      request.resolve(ready);
+      if (this.activeReplacement !== request) return;
+      this.activeReplacement = null;
+      this.drainReplacement();
+    };
+    try { void this.replaceActive(request.manifest, request.sha256).then(finish, () => finish(false)); }
+    catch { finish(false); }
+  }
+
+  replaceActive(manifest, sha256) {
     const worker = this.createWorker();
     let candidate, camera, sortId, finished = false;
     return new Promise(resolve => {
@@ -274,6 +306,7 @@ export class TemporalSession {
   pause(value) {
     if (this.disposed || value === this.paused) return;
     this.paused = value;
+    if (value && this.live) this.cancelReplacement();
     this.clock?.suspend(value);
     if (!value) { this.resumeInstall?.(); this.resumeInstall = null; }
     if (this.live && !this.initialized && this.worker) {

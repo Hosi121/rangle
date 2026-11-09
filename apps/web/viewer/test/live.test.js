@@ -37,6 +37,7 @@ function harness() {
   return { session, viewer, workers, candidates, messages, oldMesh, camera, target };
 }
 const model = { type: 'model', frameCount: 20, frameRate: 25 };
+const flush = () => new Promise(resolve => setImmediate(resolve));
 function sorted(worker) {
   const job = worker.messages.at(-1);
   worker.emit({ type: 'sorted', id: job.id, indexes: new Uint32Array([0]), active: 1 });
@@ -79,19 +80,141 @@ test('replacement failure preserves the interactive previous mesh and manual pau
   await h.session.dispose();
 });
 
-test('newest replacement cancels only the candidate; failure and late completion cannot evict the current model', async () => {
+test('explicit cancellation releases only the candidate and late completion cannot evict the current model', async () => {
   const h = harness();
   const first = h.session.replace(manifest()); h.workers[0].emit(model);
-  const second = h.session.replace(manifest());
+  h.session.cancelReplacement();
   assert.equal(await first, false);
   assert.equal(h.workers[0].terminated, 1);
   assert.equal(h.candidates[0].disposed, true);
   sorted(h.workers[0]);
+  const second = h.session.replace(manifest());
   h.workers[1].emit({ type: 'error' });
   assert.equal(await second, false);
   assert.equal(h.viewer.splatMesh, h.oldMesh);
   assert.equal(h.oldMesh.disposed, 0);
   await h.session.dispose();
+});
+
+test('candidate preparation completes a draw before only the latest metadata creates another worker', async () => {
+  const h = harness();
+  const revision = n => ({ ...manifest(), temporal: { url: `${origin}/${n}/model.rgs` } });
+  const active = h.session.replace(revision(2));
+  h.workers[0].emit(model);
+  const duplicate = h.session.replace(revision(2));
+  const obsolete = h.session.replace(revision(3));
+  const latest = h.session.replace(revision(4));
+  assert.equal(duplicate, active);
+  assert.equal(await obsolete, false);
+  assert.equal(h.workers.length, 1);
+  assert.equal(h.workers[0].terminated, 0);
+  assert.equal(h.candidates[0].disposed, false);
+  sorted(h.workers[0]);
+  assert.equal(await active, true);
+  assert.equal(h.viewer.splatMesh, h.candidates[0].mesh);
+  assert.equal(h.workers.length, 2);
+  assert.equal(h.workers[1].messages[0].url, revision(4).temporal.url);
+  h.workers[1].emit(model); sorted(h.workers[1]);
+  assert.equal(await latest, true);
+  await h.session.dispose();
+});
+
+test('hidden live candidate cancellation settles active and waiting work without a late draw', async () => {
+  const h = harness(); h.session.live = true;
+  const active = h.session.replace({ ...manifest(), temporal: { url: `${origin}/2/model.rgs` } });
+  h.workers[0].emit(model);
+  const waiting = h.session.replace({ ...manifest(), temporal: { url: `${origin}/3/model.rgs` } });
+  h.session.pause(true);
+  assert.equal(await active, false);
+  assert.equal(await waiting, false);
+  sorted(h.workers[0]);
+  h.session.pause(false);
+  assert.equal(h.viewer.splatMesh, h.oldMesh);
+  assert.equal(h.workers.length, 1);
+  assert.equal(h.candidates[0].disposed, true);
+  await h.session.dispose();
+});
+
+test('candidate timeout advances once, rejects late sorts and keeps the current mesh after failure', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const h = harness();
+  const active = h.session.replace({ ...manifest(), temporal: { url: `${origin}/2/model.rgs` } });
+  h.workers[0].emit(model);
+  const latest = h.session.replace({ ...manifest(), temporal: { url: `${origin}/3/model.rgs` } });
+  t.mock.timers.tick(30000);
+  assert.equal(await active, false);
+  assert.equal(h.workers[0].terminated, 1);
+  assert.equal(h.candidates[0].disposed, true);
+  assert.equal(h.workers.length, 2);
+  sorted(h.workers[0]);
+  h.workers[1].emit({ type: 'error' });
+  assert.equal(await latest, false);
+  t.mock.timers.tick(90000);
+  assert.equal(h.workers.length, 2, 'failure does not retry a revision automatically');
+  assert.equal(h.viewer.splatMesh, h.oldMesh);
+  assert.equal(h.oldMesh.disposed, 0);
+  await h.session.dispose();
+});
+
+test('slow live replacement draws the active revision before fetching only the latest waiting revision', async () => {
+  const requests = [], draws = [], pending = [];
+  const session = new SceneSession({ createViewer() {}, frameLoader: { dispose() {} }, notify() {},
+    fetchManifest: async (url, { signal }) => {
+      requests.push({ url, signal });
+      return new Response(JSON.stringify(manifest()));
+    } });
+  session.liveOptions = { live: true, origins: [origin] };
+  session.liveSession = 'game'; session.initialLoad = Promise.resolve();
+  session.temporal = {
+    replace(manifest) { return new Promise(resolve => pending.push(() => { draws.push(manifest.temporal.url); resolve(true); })); },
+    cancelReplacement() {}, dispose() {},
+  };
+  try {
+    const active = session.replace(scene(2), 'a'.repeat(64));
+    await flush();
+    const obsolete = session.replace(scene(3), 'a'.repeat(64));
+    const latest = session.replace(scene(4), 'a'.repeat(64));
+    await flush();
+    assert.deepEqual(requests.map(request => request.url), [scene(2)], 'waiting revisions retain metadata only');
+    assert.equal(requests[0].signal.aborted, false, 'new metadata cannot abort the active download');
+    assert.equal(await obsolete, false);
+    pending.shift()();
+    assert.equal(await active, true);
+    await flush();
+    assert.deepEqual(draws, [new URL('model.rgs', scene(2)).href]);
+    assert.deepEqual(requests.map(request => request.url), [scene(2), scene(4)]);
+    pending.shift()();
+    assert.equal(await latest, true);
+    assert.equal(session.source, scene(4));
+  } finally { await session.dispose(); }
+});
+
+test('hiding or disposing a scene settles both slots and blocks stale manifest preparation', async () => {
+  for (const operation of ['pause', 'dispose']) {
+    const requests = [], draws = [];
+    let releaseManifest;
+    const session = new SceneSession({ createViewer() {}, frameLoader: { dispose() {} }, notify() {},
+      fetchManifest: (url, { signal }) => {
+        requests.push({ url, signal });
+        return new Promise(resolve => { releaseManifest = () => resolve(new Response(JSON.stringify(manifest()))); });
+      } });
+    session.liveOptions = { live: true, origins: [origin] };
+    session.liveSession = 'game'; session.initialLoad = Promise.resolve();
+    session.temporal = { replace() { draws.push('unexpected'); }, cancelReplacement() {}, pause() {}, dispose() {} };
+    const active = session.replace(scene(2), 'a'.repeat(64));
+    assert.equal(session.replace(scene(2), 'a'.repeat(64)), active, 'same source shares its active download');
+    await flush();
+    const waiting = session.replace(scene(3), 'a'.repeat(64));
+    if (operation === 'pause') session.pause(true);
+    else await session.dispose();
+    assert.equal(await active, false);
+    assert.equal(await waiting, false);
+    assert.equal(requests[0].signal.aborted, true);
+    releaseManifest(); await flush();
+    assert.equal(requests.length, 1);
+    assert.deepEqual(draws, []);
+    await session.dispose();
+  }
 });
 
 test('live paths require configured origin, exact session scope and immutable revision', () => {
