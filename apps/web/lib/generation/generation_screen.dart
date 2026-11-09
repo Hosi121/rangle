@@ -396,6 +396,7 @@ class _GenerationScreenState extends State<GenerationScreen>
       initialId: _liveId,
       waitForSession: job?.active == true,
       onSessionChanged: (id) => setState(() => _liveId = id),
+      backLabel: widget.liveViewer ? 'フィードに戻る' : '生成に戻る',
       onBack: widget.liveViewer
           ? () => Navigator.pop(context)
           : () {

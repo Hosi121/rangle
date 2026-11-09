@@ -695,11 +695,11 @@ void main() {
   }
 
   testWidgets(
-    'feed entry releases media while generation is open and reuses the session',
+    'feed LIVE entry releases media while open and reuses the existing account session',
     (tester) async {
       final fixture = GenerationFixture();
       final viewers = <FakeViewer>[];
-      final scene = FakeViewer(surfaceKey: 'generation-entry-scene');
+      final scene = FakeViewer(surfaceKey: 'live-entry-scene');
       await tester.pumpWidget(
         RangleApp(
           repository: const DemoClipRepository(
@@ -723,26 +723,26 @@ void main() {
       await tester.pumpAndSettle();
       expect(
         find.ancestor(
-          of: find.byTooltip('GSを生成'),
+          of: find.byTooltip('LIVEを開く'),
           matching: find.byWidgetPredicate(
             (widget) => widget is PointerInterceptor && widget.intercepting,
           ),
         ),
         findsOneWidget,
       );
-      await tester.tap(find.byTooltip('GSを生成'));
+      await tester.tap(find.byTooltip('LIVEを開く'));
       await tester.pumpAndSettle();
       expect(viewers.first.disposed, isTrue);
       expect(scene.disposed, isTrue);
       expect(find.byType(GenerationScreen), findsOneWidget);
-      expect(find.text('生成を開始'), findsOneWidget);
+      expect(find.byType(LiveScreen), findsOneWidget);
       expect(
         fixture.requests.where(
           (request) => request.url.path.endsWith('/auth/me'),
         ),
         hasLength(1),
       );
-      await tester.tap(find.byType(BackButton));
+      await tester.tap(find.text('フィードに戻る'));
       await tester.pumpAndSettle();
       expect(viewers, hasLength(2));
       expect(find.byType(GenerationScreen), findsNothing);

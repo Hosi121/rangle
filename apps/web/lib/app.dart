@@ -274,7 +274,6 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                   onTag: _filterTag,
                   onClearSearch: _clearSearch,
                   filterLabel: _tag.isEmpty ? _query : '#$_tag',
-                  onGenerate: _openGeneration,
                   onLive: _openLive,
                   initialFreeView:
                       RegExp(r'^generated-[a-f0-9]{32}$')
@@ -304,7 +303,6 @@ class _HighlightFeed extends StatefulWidget {
     required this.account,
     required this.shareAction,
     required this.onSearch,
-    required this.onGenerate,
     required this.onLive,
     required this.onTag,
     required this.onClearSearch,
@@ -318,7 +316,7 @@ class _HighlightFeed extends StatefulWidget {
   final ViewerFactory sceneFactory;
   final AccountController? account;
   final ClipShareAction shareAction;
-  final VoidCallback onSearch, onClearSearch, onGenerate, onLive;
+  final VoidCallback onSearch, onClearSearch, onLive;
   final ValueChanged<String> onTag;
   final String filterLabel;
   final bool initialFreeView;
@@ -567,26 +565,6 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                               tooltip: 'LIVEを開く',
                               onPressed: widget.onLive,
                               icon: const Icon(Icons.live_tv),
-                            ),
-                          ),
-                          PointerInterceptor(
-                            intercepting: _freeView,
-                            child: Tooltip(
-                              message: 'GSを生成',
-                              child:
-                                  MediaQuery.textScalerOf(context).scale(1) >
-                                      1.4
-                                  ? IconButton(
-                                      onPressed: widget.onGenerate,
-                                      icon: const Icon(Icons.add_box_outlined),
-                                    )
-                                  : TextButton(
-                                      style: TextButton.styleFrom(
-                                        minimumSize: const Size(48, 48),
-                                      ),
-                                      onPressed: widget.onGenerate,
-                                      child: const Text('生成'),
-                                    ),
                             ),
                           ),
                           PointerInterceptor(

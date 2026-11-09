@@ -20,6 +20,7 @@ class LiveScreen extends StatefulWidget {
     this.jobStatus,
     this.waitForSession = false,
     this.onBack,
+    this.backLabel = '戻る',
     this.onSessionChanged,
     super.key,
   });
@@ -29,6 +30,7 @@ class LiveScreen extends StatefulWidget {
   final Widget? jobStatus;
   final bool waitForSession;
   final VoidCallback? onBack;
+  final String backLabel;
   final ValueChanged<String?>? onSessionChanged;
   @override
   State<LiveScreen> createState() => _LiveScreenState();
@@ -136,45 +138,41 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: Colors.black,
+    // Keep navigation outside the HTML viewer's bounds so it stays reachable
+    // while the viewer is loading, failed, or handling pointer gestures.
+    appBar: PreferredSize(
+      preferredSize: const Size.fromHeight(64),
+      child: PointerInterceptor(
+        child: RangleHeader(
+          title: 'LIVE',
+          onBack: widget.onBack,
+          backLabel: widget.backLabel,
+          actions: [
+            if (_controller?.selectedId != null)
+              IconButton(
+                tooltip: 'LIVE一覧',
+                onPressed: () => _select(null),
+                icon: const Icon(Icons.list),
+              ),
+          ],
+        ),
+      ),
+    ),
     body: SafeArea(
+      top: false,
       child: Column(
         children: [
           Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                _controller == null
-                    ? const ViewerMessage(
-                        icon: Icons.cloud_off,
-                        title: 'LIVEに接続できません',
-                        description: '接続先または配信URLを確認してください。',
-                      )
-                    : ListenableBuilder(
-                        listenable: _controller!,
-                        builder: (context, _) => _content(),
-                      ),
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: 64,
-                  child: PointerInterceptor(
-                    child: RangleHeader(
-                      title: 'LIVE',
-                      onBack: widget.onBack,
-                      actions: [
-                        if (_controller?.selectedId != null)
-                          IconButton(
-                            tooltip: 'LIVE一覧',
-                            onPressed: () => _select(null),
-                            icon: const Icon(Icons.list),
-                          ),
-                      ],
-                    ),
+            child: _controller == null
+                ? const ViewerMessage(
+                    icon: Icons.cloud_off,
+                    title: 'LIVEに接続できません',
+                    description: '接続先または配信URLを確認してください。',
+                  )
+                : ListenableBuilder(
+                    listenable: _controller!,
+                    builder: (context, _) => _content(),
                   ),
-                ),
-              ],
-            ),
           ),
           if (widget.jobStatus != null)
             Material(color: const Color(0xFF191614), child: widget.jobStatus!),
@@ -202,7 +200,7 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
         );
       }
       return ListView(
-        padding: const EdgeInsets.fromLTRB(16, 84, 16, 24),
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 24),
         children: [
           Text(
             '自由視点LIVE',
@@ -315,29 +313,26 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
             onSourceError: _sourceFailed,
           )
         else
-          Padding(
-            padding: const EdgeInsets.only(top: 64),
-            child: Column(
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(8),
-                  child: Text(
-                    session.title,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
+          Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(8),
+                child: Text(
+                  session.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                Expanded(
-                  child: ViewerMessage(
-                    icon: Icons.live_tv,
-                    title: session.terminal
-                        ? _state(session.state)
-                        : '最初の映像を準備しています',
-                    description: '映像の準備ができるまで、この画面でお待ちいただけます。',
-                  ),
+              ),
+              Expanded(
+                child: ViewerMessage(
+                  icon: Icons.live_tv,
+                  title: session.terminal
+                      ? _state(session.state)
+                      : '最初の映像を準備しています',
+                  description: '映像の準備ができるまで、この画面でお待ちいただけます。',
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         if (latest != null)
           Positioned(
