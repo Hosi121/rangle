@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -17,8 +18,8 @@ type admission struct {
 	Active string `firestore:"active"`
 }
 
-func NewFirestoreStore(ctx context.Context, project, database string) (*FirestoreStore, error) {
-	c, err := firestore.NewClientWithDatabase(ctx, project, database)
+func NewFirestoreStore(ctx context.Context, project, database string, opts ...option.ClientOption) (*FirestoreStore, error) {
+	c, err := firestore.NewClientWithDatabase(ctx, project, database, opts...)
 	if err != nil {
 		return nil, err
 	}

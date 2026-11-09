@@ -28,7 +28,7 @@ func NewVertex(ctx context.Context, cfg Config, opts ...option.ClientOption) (*V
 }
 
 func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, error) {
-	if !preset.validProfile() {
+	if !preset.validProfile() || preset.EvaluateCompression && preset.ModeName() != "dynamic" {
 		return "", &Rejected{Err: ErrInvalid}
 	}
 	args := []string{
@@ -40,6 +40,9 @@ func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, er
 	switch preset.ModeName() {
 	case "dynamic":
 		args = append(args, "--mode", "dynamic", "--steps", "12000")
+		if preset.EvaluateCompression {
+			args = append(args, "--evaluate-compression")
+		}
 		if preset.QualityProfile != "" && preset.QualityProfile != "baseline" {
 			args = append(args, "--quality-profile", preset.QualityProfile)
 		}
