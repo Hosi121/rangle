@@ -306,7 +306,9 @@ class IncrementalModel:
 
     def write_diagnostics(self, root, window):
         """Save three packed held-out RGB renders locally, after publication timing."""
-        import cv2
+        import io
+
+        from PIL import Image
 
         from .output import immutable_file
 
@@ -317,13 +319,10 @@ class IncrementalModel:
             for frame in (0, len(window.frames) // 2, len(window.frames) - 1):
                 predicted = self.render(frame, view, self.last_stored)[0][0].clamp(0, 1)
                 rgb = (predicted * 255).round().to(self.torch.uint8).cpu().numpy()
-                ok, image = cv2.imencode(
-                    ".webp", rgb[..., ::-1], [cv2.IMWRITE_WEBP_QUALITY, 90]
-                )
-                if not ok:
-                    raise RuntimeError("Cannot encode local live diagnostic")
+                image = io.BytesIO()
+                Image.fromarray(rgb).save(image, format="WEBP", quality=90)
                 immutable_file(
                     root
                     / f"heldout-{view:02d}-frame-{window.frames[frame].number:06d}.webp",
-                    image.tobytes(),
+                    image.getvalue(),
                 )

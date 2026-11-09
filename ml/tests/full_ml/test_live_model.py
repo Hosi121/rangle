@@ -5,9 +5,9 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-import cv2
 import numpy as np
 import torch
+from PIL import Image
 from rangle_live.model import IncrementalModel, advance_local_window
 from rangle_live.window import Frame, Window
 from rangle_training.temporal import initialize_parameters, temporal_values
@@ -38,10 +38,10 @@ class PersistentStateTests(unittest.TestCase):
                 {p.name for p in root.iterdir()},
                 {f"heldout-03-frame-{n:06d}.webp" for n in (230, 240, 249)},
             )
-            bgr = cv2.imread(str(root / "heldout-03-frame-000249.webp"))
-            self.assertEqual(bgr.shape, (64, 96, 3))
+            rgb = np.array(Image.open(root / "heldout-03-frame-000249.webp"))
+            self.assertEqual(rgb.shape, (64, 96, 3))
             self.assertGreater(
-                float(bgr[..., 2].mean()), float(bgr[..., 0].mean()) + 200
+                float(rgb[..., 0].mean()), float(rgb[..., 2].mean()) + 200
             )
 
     def test_window_prediction_preserves_geometry_and_adam_with_local_gate_reset(self):
