@@ -108,6 +108,12 @@ JS viewerは`@mkkellogg/gaussian-splats-3d@0.4.7`と`three@0.160.0`（ともにM
 
 時刻切替は1つずつ処理し、切替中の追加seekは最後の要求へ集約します。orbitのカメラ状態は時刻間で保持します。準備に失敗した場合は通常動画と再試行操作を残します。失敗後の遅い応答で表示が復活しないようにしています。
 
+動画と3Dの切替では、clipがフォーカス中の時刻と再生意図を保持します。切替時に動画のnative currentTime、3Dの最後に描画した時刻を採取し、周期通知の遅れを避けます。通常動画は3Dの準備中も操作でき、対応フレームの描画後に切り替わります。通常再生のprogress通知でhandoffを無限にやり直さず、明示的なseek・再生停止操作が最新要求を置換します。戻る動画は保存した時刻へのseekと再生・停止の復元後に表示します。動画は切替時に解放し、3Dのキャッシュもactiveな1clipに限定します。clip ID、revision、資産URLの変更や離脱で状態を破棄します。
+
+公開された`rangle-temporal-rgs1`の同一origin・clip ID・revisionに属する`/assets/{id}/{revision}/full/{preview.webm,scene.json}`は、producerの同じ入力区間・clip相対時刻0を共有する契約です。確認済みの旧basketball／生成結果には既知のpreview資産との限定対応を使います。それ以外はscene側の任意の`timeline: { "previewUrl": "preview.webm", "previewStartSeconds": 0, "sceneStartSeconds": 0 }`を、解決後のpreview URLとの完全一致で確認します。対応情報がない場合は同期を推測せず、画面に明記します。
+
+時刻は秒単位のorigin差から変換し、最も近いsource sampleへ丸めます。動画の長さに対する割合では変換しません。20sample・25fpsでは0.56秒はframe14、動画末尾0.80秒は最後の3D sample0.76秒へclampし、調整を表示します。静的sceneの対応範囲は1時刻です。iframeの`load(deferFirstFrame)`→`prepared`→`present(presentationId, frame, playing)`→実描画後の`ready(presentationId)`を使い、古い要求では切替を確定しません。非表示による一時停止とユーザーの再生意図を分け、LIVEのhot replacementと通常のVODループは維持します。
+
 フレーム列の取得・parse・分割・packingはWeb Workerで行い、準備したbufferをtransferします。時間モデルでは同じWorkerが初回の取得・parseと、再生中の深度ソートを担当します。入力は1資産32MiBまでです。GPU転送と初回mesh構築はメインスレッドに残ります。[資源管理・SDKの変更・測定の範囲](../../docs/client-processing.md)を参照してください。
 
 viewerは同じoriginのiframe内でbody直下に生成します。Flutterとの小さなmessage APIはorigin・source・channelを確認します。これは上流viewerのDOM所有権に合わせ、離脱時に非同期disposeとiframe破棄を行うためです。非表示時は描画ループも止めます。SharedArrayBufferとGPU sortは有効にしていません。

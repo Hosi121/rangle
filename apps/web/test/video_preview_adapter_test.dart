@@ -21,6 +21,10 @@ class ControlledVideoController extends VideoPlayerController {
   Object? playFailure;
   String? playStreamFailure;
   bool muteFailure = false;
+  Duration? nativePosition;
+
+  @override
+  Future<Duration?> get position async => nativePosition ?? value.position;
 
   @override
   Future<void> setVolume(double volume) async {
@@ -33,6 +37,12 @@ class ControlledVideoController extends VideoPlayerController {
   Future<void> setLooping(bool looping) async {
     commands.add('loop:$looping');
     value = value.copyWith(isLooping: looping);
+  }
+
+  @override
+  Future<void> seekTo(Duration position) async {
+    commands.add('seek:${position.inMicroseconds}');
+    value = value.copyWith(position: position);
   }
 
   @override
@@ -75,6 +85,150 @@ class ControlledVideoController extends VideoPlayerController {
 }
 
 void main() {
+  testWidgets(
+    'handoff captures native currentTime rather than the older periodic controller position',
+    (tester) async {
+      final controller = ControlledVideoController();
+      final adapter = VideoPreviewAdapter.withController(controller);
+      final initialized = adapter.initialize();
+      controller.becomeReady();
+      await tester.pump();
+      await initialized;
+      await adapter.togglePlayback();
+      controller.value = controller.value.copyWith(
+        position: const Duration(milliseconds: 500),
+      );
+      controller.nativePosition = const Duration(milliseconds: 560);
+      final captured = await adapter.capturePlayback();
+      expect(captured.position, const Duration(milliseconds: 560));
+      expect(captured.playing, isFalse);
+      adapter.dispose();
+      controller.released.complete();
+      await tester.pump();
+    },
+  );
+  for (final playing in [false, true]) {
+    testWidgets(
+      'native restoration seeks before first ready and preserves playing=$playing',
+      (tester) async {
+        final controller = ControlledVideoController();
+        final adapter = VideoPreviewAdapter.withController(controller);
+        final readyPositions = <Duration>[];
+        adapter.addListener(() {
+          if (adapter.value.status == ViewerStatus.ready) {
+            readyPositions.add(adapter.value.position);
+          }
+        });
+        final restored = adapter.restorePlayback(
+          PlaybackState(const Duration(milliseconds: 560), playing),
+        );
+        final initialized = adapter.initialize();
+        controller.becomeReady();
+        await tester.pump();
+        await initialized;
+        expect(await restored, isTrue);
+        expect(readyPositions, isNotEmpty);
+        expect(
+          readyPositions.every((p) => p == const Duration(milliseconds: 560)),
+          isTrue,
+        );
+        expect(
+          controller.commands.indexOf('seek:560000'),
+          greaterThanOrEqualTo(0),
+        );
+        expect(adapter.value.playing, playing);
+        if (playing) {
+          expect(
+            controller.commands.indexOf('play'),
+            greaterThan(controller.commands.indexOf('seek:560000')),
+          );
+        } else {
+          expect(controller.commands, isNot(contains('play')));
+        }
+        adapter.dispose();
+        controller.released.complete();
+        await tester.pump();
+      },
+    );
+  }
+
+  testWidgets(
+    'blocked restoration retains its source time on the manual fallback player',
+    (tester) async {
+      final controller = ControlledVideoController()
+        ..playFailure = PlatformException(code: 'NotAllowedError');
+      final manual = ControlledVideoController();
+      final adapter = VideoPreviewAdapter.withController(
+        controller,
+        retryController: () => manual,
+      );
+      final restored = adapter.restorePlayback(
+        const PlaybackState(Duration(milliseconds: 760), true),
+      );
+      final initialized = adapter.initialize();
+      controller.becomeReady();
+      await tester.pump();
+      manual.becomeReady();
+      await tester.pump();
+      await initialized;
+      expect(await restored, isTrue);
+      expect(adapter.value.status, ViewerStatus.ready);
+      expect(adapter.value.position, const Duration(milliseconds: 760));
+      expect(adapter.value.playing, isFalse);
+      expect(manual.commands, contains('seek:760000'));
+      adapter.dispose();
+      controller.released.complete();
+      manual.released.complete();
+      await tester.pump();
+    },
+  );
+  testWidgets(
+    'the latest pre-initialization restoration wins without autoplaying the stale request',
+    (tester) async {
+      final controller = ControlledVideoController();
+      final adapter = VideoPreviewAdapter.withController(controller);
+      final obsolete = adapter.restorePlayback(
+        const PlaybackState(Duration(milliseconds: 560), true),
+      );
+      final latest = adapter.restorePlayback(
+        const PlaybackState(Duration(milliseconds: 200), false),
+      );
+      expect(await obsolete, isFalse);
+      final initialized = adapter.initialize();
+      controller.becomeReady();
+      await tester.pump();
+      await initialized;
+      expect(await latest, isTrue);
+      expect(controller.commands, isNot(contains('seek:560000')));
+      expect(controller.commands, isNot(contains('play')));
+      expect(adapter.value.position, const Duration(milliseconds: 200));
+      expect(adapter.value.playIntent, isFalse);
+      adapter.dispose();
+      controller.released.complete();
+      await tester.pump();
+    },
+  );
+
+  testWidgets('a real media failure during restoration remains an error', (
+    tester,
+  ) async {
+    final controller = ControlledVideoController()
+      ..playFailure = PlatformException(code: 'MEDIA_ERR_NETWORK');
+    final adapter = VideoPreviewAdapter.withController(controller);
+    final restored = adapter.restorePlayback(
+      const PlaybackState(Duration(milliseconds: 560), true),
+    );
+    final initialized = adapter.initialize();
+    controller.becomeReady();
+    await tester.pump();
+    await initialized;
+    expect(await restored, isFalse);
+    expect(adapter.value.status, ViewerStatus.error);
+    adapter.dispose();
+    controller.released.complete();
+    await tester.pump();
+  });
+
   testWidgets(
     'native loop position wraps retain one initialized player and suppress short waiting pulses',
     (tester) async {

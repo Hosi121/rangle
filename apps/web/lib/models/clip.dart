@@ -1,3 +1,5 @@
+import '../viewer/playback_state.dart';
+
 /// Feed metadata is separate from media rendering and the transport manifest.
 class Clip {
   const Clip({
@@ -8,6 +10,8 @@ class Clip {
     this.previewUrl,
     this.sceneUrl,
     this.tags = const [],
+    this.revision = '',
+    this.playbackMapping,
   });
 
   final String id;
@@ -15,6 +19,8 @@ class Clip {
   final String sport;
   final String description;
   final List<String> tags;
+  final String revision;
+  final PreviewSceneMapping? playbackMapping;
 
   /// Ordinary, browser-playable video. Never a Gaussian transport payload.
   final Uri? previewUrl;

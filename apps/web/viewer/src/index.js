@@ -35,7 +35,9 @@ window.addEventListener('message', async (event) => {
       },
     });
     await session.load(message.url, { live: message.live === true,
-      origins: Array.isArray(message.origins) ? message.origins : [], sha256: message.sha256 });
+      origins: Array.isArray(message.origins) ? message.origins : [], sha256: message.sha256,
+      deferFirstFrame: message.deferFirstFrame === true, previewUrl: message.previewUrl,
+      mapping: message.mapping });
   } else if (message.type === 'cancelReplace') {
     session?.cancelReplacement();
   } else if (message.type === 'replace' && Number.isSafeInteger(message.requestId)) {
@@ -45,6 +47,10 @@ window.addEventListener('message', async (event) => {
       requestId: message.requestId, url: message.url, ...(ready ? active.readyMessage() : {}) });
   } else if (message.type === 'seek') {
     await session?.seek(message.frame);
+  } else if (message.type === 'present' && Number.isSafeInteger(message.presentationId)) {
+    session?.present(message.frame, message.playing, message.presentationId);
+  } else if (message.type === 'capturePlayback' && Number.isSafeInteger(message.captureId) && session) {
+    send({ type: 'captured', captureId: message.captureId, ...session.capturePlayback() });
   } else if (message.type === 'togglePlayback') {
     session?.togglePlayback();
   } else if (message.type === 'pause') {

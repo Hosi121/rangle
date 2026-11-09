@@ -1,6 +1,7 @@
 import { validIntrinsics } from './camera-intrinsics.js';
 import { TemporalSession } from './temporal-session.js';
 import { liveSceneUrl } from './live-model.js';
+import { handoffTimeline } from './playback-handoff.js';
 
 export const CHANNEL = 'rangle-scene-v1';
 
@@ -109,15 +110,19 @@ export class SceneSession {
       this.manifest = await this.manifestFrom(source, this.abort.signal);
       clearTimeout(timeout);
       if (this.disposed) return;
+      const continuity = this.liveOptions.deferFirstFrame ?
+        handoffTimeline(this.manifest, { ...this.liveOptions, source }) : null;
       if (this.manifest.temporal) {
         this.temporal = new TemporalSession({ createViewer: this.createViewer, notify: this.notify });
         this.temporal.pause(this.paused);
         await this.temporal.load(this.manifest, { autoplay: this.liveOptions.live,
-          strict: this.liveOptions.live, sha256: this.liveOptions.sha256 });
+          strict: this.liveOptions.live, sha256: this.liveOptions.sha256,
+          continuity });
         return;
       }
       this.viewer = this.createViewer(this.manifest.camera);
-      await this.seek(0);
+      if (continuity) this.notify({ type: 'prepared', ...continuity });
+      else await this.seek(0);
     } catch (error) {
       if (!this.disposed) {
         this.notify({ type: 'error' });
@@ -159,11 +164,20 @@ export class SceneSession {
       canPlay: true, playing: this.temporal.clock.playing && !this.temporal.clock.ended && !this.paused };
   }
 
-  seek(frame) {
+  present(frame, playing, presentationId) {
+    if (this.temporal) return this.temporal.present(frame, playing, presentationId);
+    return this.seek(frame, { presentationId });
+  }
+
+  seek(frame, presentation = null) {
     if (this.temporal) return this.temporal.seek(frame);
     if (this.disposed || !this.viewer || !Number.isInteger(frame)) return Promise.resolve();
     const target = Math.max(0, Math.min(this.manifest.frames.length - 1, frame));
-    if (!this.processing && this.loadedFrame === target) return Promise.resolve();
+    this.presentation = presentation;
+    if (!this.processing && this.loadedFrame === target) {
+      if (presentation) this.drawReady(target);
+      return Promise.resolve();
+    }
     if (this.processing && this.loadingFrame === target && this.pending === null) return this.processing;
     this.pending = target;
     if (this.processing) {
@@ -207,8 +221,7 @@ export class SceneSession {
         this.restoreCamera(camera);
         if (this.pending !== null) continue;
         if (!this.paused) this.viewer.start();
-        this.notify({ type: 'ready', frame, frameCount: this.manifest.frames.length,
-          frameRate: this.manifest.frameRate, attribution: this.manifest.attribution });
+        this.drawReady(frame);
       }
     } catch (error) {
       if (!this.disposed) {
@@ -216,6 +229,15 @@ export class SceneSession {
         await this.dispose();
       }
     }
+  }
+
+  drawReady(frame) {
+    // A hidden handoff must acknowledge the actual target draw, not a stale canvas.
+    this.viewer.updateSplatMesh?.();
+    this.viewer.render?.();
+    this.notify({ type: 'ready', frame, frameCount: this.manifest.frames.length,
+      frameRate: this.manifest.frameRate, attribution: this.manifest.attribution,
+      canPlay: false, playing: false, ...this.presentation });
   }
 
   captureCamera() {
@@ -259,4 +281,9 @@ export class SceneSession {
   }
 
   togglePlayback() { this.temporal?.togglePlayback(); }
+
+  capturePlayback() {
+    return { positionSeconds: this.temporal ? this.temporal.position : (this.loadedFrame ?? 0) / this.manifest.frameRate,
+      playing: this.temporal ? this.temporal.clock.playing : false };
+  }
 }
