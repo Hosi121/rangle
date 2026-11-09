@@ -46,18 +46,25 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         final generation = GenerationFixture()..mode = 'live';
         final viewers = <live_fixture.UpdatingViewer>[];
+        final now = DateTime.now().toUtc();
         final client = MockClient((request) async {
           final id = request.url.path == '/api/v1/live'
               ? 'game'
               : request.url.path.split('/').last;
           final data = live_fixture.liveSession(sequence: id == 'game' ? 1 : 0)
-            ..['id'] = id;
+            ..['id'] = id
+            ..['started_at'] = now
+                .subtract(const Duration(seconds: 30))
+                .toIso8601String()
+            ..['updated_at'] = now.toIso8601String();
           if (id == 'game') {
             final segment =
                 (data['segments'] as List).first as Map<String, Object?>;
-            segment['captured_at'] = DateTime.now()
-                .toUtc()
+            segment['captured_at'] = now
                 .subtract(const Duration(seconds: 12))
+                .toIso8601String();
+            segment['available_at'] = now
+                .subtract(const Duration(seconds: 1))
                 .toIso8601String();
           }
           return http.Response(
