@@ -4,7 +4,7 @@
 
 ## APIと認可
 
-`PUT /api/v1/generation/jobs/{id}/publication` は既存sessionとcross-origin protectionを使い、所有者だけが `{"published":true}` / `{"published":false}` を指定できる。JSONは256bytesまで、余分なfield・不足field・null・queryを拒否する。存在しないjobと非所有者は404、未完了jobは409、成果物の検証失敗は409 `artifacts_not_ready`。成功応答は既存GETと同じ `{job, viewer_url, scene_url}`。create/get/listの `job` に常にbooleanの `published` を含める。
+`PUT /api/v1/generation/jobs/{id}/publication` は既存sessionとcross-origin protectionを使い、所有者だけが `{"published":true}` / `{"published":false}` を指定できる。JSONは256bytesまで、余分なfield・不足field・null・queryを拒否する。存在しないjobと非所有者は404、未完了jobは409、成果物の検証失敗は409 `publication_unavailable`（保存先の障害は同codeの503）。成功応答は既存GETと同じ `{job, viewer_url, scene_url}`。create/get/listの `job` に常にbooleanの `published` を含める。
 
 同じ状態のPUTは冪等で、掲載済みへの再PUTではmodelを再取得しない。未掲載への取り下げも成功する。取り下げは失われた成果物を再取得しないため、media障害時にも掲載を外せる。未完了jobは取り下げ要求も拒否する。掲載操作はGPU起動・生成attempt・active slotを変更しない。
 

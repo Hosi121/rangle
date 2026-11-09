@@ -289,6 +289,17 @@ func (h *Handler) publication(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 	job, err := h.service.SetPublication(ctx, owner, r.PathValue("job"), *input.Published)
 	if err != nil {
+		if errors.Is(err, ErrArtifacts) {
+			h.write(w, r, 409, map[string]string{"error": "publication_unavailable"})
+			return
+		}
+		if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrInvalid) && !errors.Is(err, ErrConflict) && !errors.Is(err, ErrBusy) && !errors.Is(err, ErrBudget) && !errors.Is(err, ErrExpired) {
+			if h.service.Logger != nil {
+				h.service.Logger.ErrorContext(ctx, "generation publication failed", "job_id", r.PathValue("job"), "error", err)
+			}
+			h.write(w, r, 503, map[string]string{"error": "publication_unavailable"})
+			return
+		}
 		h.fail(w, r, err)
 		return
 	}

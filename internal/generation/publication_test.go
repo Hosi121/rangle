@@ -307,3 +307,16 @@ func TestPublicationRejectsStaticIDCollisionAndUnreviewedSnapshot(t *testing.T) 
 		t.Fatal("unreviewed preset started media verification")
 	}
 }
+
+func TestPublicationHTTPUsesSpecificUnavailableCode(t *testing.T) {
+	service, job, fixture := fixturePublication(t, "dynamic")
+	fixture.fail = "metrics.json"
+	handler, err := NewHandler(service, func(*http.Request) (string, error) { return job.Owner, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := call(t, handler, "PUT", "/api/v1/generation/jobs/"+job.ID+"/publication", `{"published":true}`, job.Owner, "")
+	if response.StatusCode != 409 || string(decode(t, response)["error"]) != `"publication_unavailable"` {
+		t.Fatal("publication error contract changed")
+	}
+}
