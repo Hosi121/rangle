@@ -1,10 +1,22 @@
 """Validate the checksummed, calibrated NumPy input contract without pickle."""
 
+import math
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+STATIC_KEYS = {
+    "images",
+    "viewmats",
+    "Ks",
+    "xyz",
+    "rgb",
+    "train_indices",
+    "heldout_indices",
+}
+MAX_TEMPORAL_IMAGE_BYTES = 512 << 20
 
 
 @dataclass(frozen=True)
@@ -16,10 +28,17 @@ class Dataset:
     rgb: np.ndarray
     train_indices: np.ndarray
     heldout_indices: np.ndarray
+    frame_times: np.ndarray | None = None
+
+    @property
+    def frame_rate(self) -> float:
+        return 1.0 if self.frame_times is None else float(1 / self.frame_times[1])
 
 
-def load_dataset(path: Path) -> Dataset:
-    keys = set(Dataset.__dataclass_fields__)
+def _validate_archive(path, mode):
+    """Check actual NPY headers before NumPy can allocate from an unsafe shape."""
+    keys = STATIC_KEYS | ({"frame_times"} if mode == "dynamic" else set())
+    headers = {}
     with zipfile.ZipFile(path) as archive:
         members = archive.infolist()
         if (
@@ -28,27 +47,71 @@ def load_dataset(path: Path) -> Dataset:
             or sum(entry.file_size for entry in members) > 1 << 30
         ):
             raise ValueError("Invalid or oversized dataset archive")
+        for entry in members:
+            if entry.flag_bits & 1 or entry.compress_type not in (
+                zipfile.ZIP_STORED,
+                zipfile.ZIP_DEFLATED,
+            ):
+                raise ValueError("Unsupported dataset archive member")
+            with archive.open(entry) as member:
+                version = np.lib.format.read_magic(member)
+                if version == (1, 0):
+                    shape, _, dtype = np.lib.format.read_array_header_1_0(
+                        member, max_header_size=4096
+                    )
+                elif version == (2, 0):
+                    shape, _, dtype = np.lib.format.read_array_header_2_0(
+                        member, max_header_size=4096
+                    )
+                else:
+                    raise ValueError("Unsupported NumPy array version")
+                if (
+                    dtype.hasobject
+                    or dtype.fields is not None
+                    or dtype.kind not in "uif"
+                    or member.tell() + math.prod(shape) * dtype.itemsize
+                    != entry.file_size
+                ):
+                    raise ValueError("Invalid NumPy array dtype or declared size")
+                headers[entry.filename[:-4]] = (shape, dtype)
+    shape, dtype = headers["images"]
+    dimensions = 5 if mode == "dynamic" else 4
+    if dtype != np.uint8 or len(shape) != dimensions or shape[-1] != 3:
+        raise ValueError(
+            f"images must be uint8 with {dimensions} dimensions ending in RGB"
+        )
+    views, height, width, _ = shape[-4:]
+    if not (4 <= views <= 64 and 64 <= height <= 1080 and 64 <= width <= 1920):
+        raise ValueError("Dataset image budget exceeded")
+    if mode == "dynamic":
+        if not 2 <= shape[0] <= 32 or math.prod(shape) > MAX_TEMPORAL_IMAGE_BYTES:
+            raise ValueError("Temporal dataset image budget exceeded")
+        if headers["frame_times"] != ((shape[0],), np.dtype("float64")):
+            raise ValueError("frame_times must be float64 [frames]")
+    elif math.prod(shape) > 256_000_000:
+        raise ValueError("Dataset image budget exceeded")
+    # Reject oversized geometry/splits before allocating them as well.
+    xyz_shape, _ = headers["xyz"]
+    if len(xyz_shape) != 2 or xyz_shape[1] != 3 or not 100 <= xyz_shape[0] <= 1_000_000:
+        raise ValueError("xyz must contain 100 to 1,000,000 seed points")
+    expected = {"viewmats": (views, 4, 4), "Ks": (views, 3, 3), "rgb": xyz_shape}
+    if any(headers[key][0] != shape for key, shape in expected.items()):
+        raise ValueError("Invalid camera or seed color shape")
+    if any(
+        len(headers[key][0]) != 1 or not 1 <= headers[key][0][0] <= views
+        for key in ("train_indices", "heldout_indices")
+    ):
+        raise ValueError("Invalid training/evaluation camera split")
+    return keys
+
+
+def load_dataset(path: Path, mode="static") -> Dataset:
+    if mode not in ("static", "dynamic"):
+        raise ValueError("Invalid training mode")
+    keys = _validate_archive(path, mode)
     with np.load(path, allow_pickle=False, max_header_size=4096) as arrays:
         data = Dataset(**{key: arrays[key] for key in keys})
-    images = data.images
-    if images.dtype != np.uint8 or images.ndim != 4 or images.shape[-1] != 3:
-        raise ValueError("images must be uint8 [views, height, width, 3]")
-    views, height, width, _ = images.shape
-    if not (
-        4 <= views <= 64
-        and 64 <= height <= 1080
-        and 64 <= width <= 1920
-        and images.size <= 256_000_000
-    ):
-        raise ValueError("Dataset image budget exceeded")
-    if data.viewmats.shape != (views, 4, 4) or data.Ks.shape != (views, 3, 3):
-        raise ValueError("One calibrated OpenCV camera is required per image")
-    if (
-        data.xyz.ndim != 2
-        or data.xyz.shape[1] != 3
-        or not 100 <= len(data.xyz) <= 1_000_000
-    ):
-        raise ValueError("xyz must contain 100 to 1,000,000 seed points")
+    views = data.images.shape[-4]
     if data.rgb.dtype != np.uint8 or data.rgb.shape != data.xyz.shape:
         raise ValueError("rgb must be uint8 and match the seed points")
     for array in (data.viewmats, data.Ks, data.xyz):
@@ -70,8 +133,6 @@ def load_dataset(path: Path) -> Dataset:
     for indices in (data.train_indices, data.heldout_indices):
         if (
             indices.dtype.kind not in "iu"
-            or indices.ndim != 1
-            or len(indices) == 0
             or len(np.unique(indices)) != len(indices)
             or (indices >= views).any()
             or (indices < 0).any()
@@ -82,6 +143,20 @@ def load_dataset(path: Path) -> Dataset:
         or np.intersect1d(data.train_indices, data.heldout_indices).size
     ):
         raise ValueError("Training and evaluation views must be disjoint")
+    if data.frame_times is not None:
+        times = data.frame_times
+        intervals = np.diff(times)
+        if (
+            not np.isfinite(times).all()
+            or times[0] != 0
+            or (intervals <= 0).any()
+            or times[-1] > 1e6
+            or not np.allclose(intervals, intervals[0], rtol=1e-8, atol=1e-10)
+            or not 0 < 1 / intervals[0] <= 240
+        ):
+            raise ValueError(
+                "frame_times must be uniform finite seconds from zero, at most 240 fps"
+            )
     return data
 
 
@@ -95,7 +170,7 @@ def scene_camera(data: Dataset) -> dict:
     depths = (data.xyz - position) @ forward
     positive = depths[depths > 0]
     distance = max(float(np.median(positive)) if positive.size else 1.0, 0.1)
-    height, width = data.images.shape[1:3]
+    height, width = data.images.shape[-3:-1]
     K = data.Ks[index]
     return {
         "position": position.tolist(),
