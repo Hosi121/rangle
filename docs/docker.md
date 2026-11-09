@@ -87,11 +87,11 @@ Cloud Runでは、渡されたPORTを使って接続を受け付ける。
 
 ## テスト
 
-Goの作業用イメージを作成し、Linux環境で検証する。
+Go 1.27.3とPython 3を用意し、完全なcheckoutのリポジトリrootで[開発ルール](../CONTRIBUTING.md#goの検証)に従って検証する。共有契約テストは `testdata/contracts/`、`ml/tests/live_contract_oracle.py`、`scripts/` のpublisherも参照するため、これらのファイルを含むcheckoutが必要になる。
 
 ```sh
-docker build --target go-build -t rangle-go-build .
-docker run --rm rangle-go-build sh -c "go test -race ./... && go vet ./..."
+go test -race ./...
+go vet ./...
 ```
 
 ## 手順の範囲
