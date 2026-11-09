@@ -21,6 +21,7 @@ const (
 
 type Preset struct {
 	ID          string `json:"id"`
+	Mode        string `json:"mode,omitempty"`
 	Title       string `json:"title"`
 	Sport       string `json:"sport"`
 	Description string `json:"description"`
@@ -29,6 +30,14 @@ type Preset struct {
 	PreviewURL  string `json:"preview_url"`
 	Source      string `json:"source"`
 	License     string `json:"license"`
+}
+
+// ModeName keeps immutable presets written before temporal training compatible.
+func (p Preset) ModeName() string {
+	if p.Mode == "" {
+		return "static"
+	}
+	return p.Mode
 }
 
 type Config struct {
@@ -93,6 +102,9 @@ func (c Config) Validate() error {
 	}
 	seen := map[string]bool{}
 	for _, p := range c.Presets {
+		if p.ModeName() != "static" && p.ModeName() != "dynamic" {
+			return fmt.Errorf("generation preset %q has an unsupported mode", p.ID)
+		}
 		u, err := url.Parse(p.InputURI)
 		if !identifier.MatchString(p.ID) || seen[p.ID] || p.Title == "" || p.Sport == "" || p.Description == "" || p.License != "CC BY 4.0" || !httpsURL(p.Source) || !httpsURL(p.PreviewURL) || !checksum.MatchString(p.InputSHA256) || err != nil || u.Scheme != "gs" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !strings.HasPrefix(u.Path, "/datasets/") || !strings.HasSuffix(u.Path, ".npz") || strings.Contains(u.Path, "..") {
 			return fmt.Errorf("generation preset %q must have reviewed CC BY 4.0 provenance and a checksummed dataset bundle", p.ID)

@@ -28,6 +28,20 @@ func NewVertex(ctx context.Context, cfg Config, opts ...option.ClientOption) (*V
 }
 
 func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, error) {
+	args := []string{
+		"--input-uri", preset.InputURI, "--input-sha256", preset.InputSHA256,
+		"--output-prefix", "gs://" + v.config.OutputBucket + "/generated/" + job.ID + "/",
+		"--job-id", job.ID, "--deadline", job.CreatedAt.Add(MaxRuntime).Format(time.RFC3339Nano),
+		"--title", preset.Title, "--source", preset.Source, "--license", preset.License,
+	}
+	switch preset.ModeName() {
+	case "dynamic":
+		args = append(args, "--mode", "dynamic", "--steps", "12000")
+	case "static":
+		// Existing digest-pinned static workers do not accept --mode.
+	default:
+		return "", &Rejected{Err: ErrInvalid}
+	}
 	request := &aiplatform.GoogleCloudAiplatformV1CustomJob{
 		DisplayName: "rangle-" + job.ID,
 		Labels:      map[string]string{"application": "rangle", "environment": "presentation-stg", "rangle_job": job.ID},
@@ -44,12 +58,7 @@ func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, er
 				DiskSpec: &aiplatform.GoogleCloudAiplatformV1DiskSpec{BootDiskType: "pd-standard", BootDiskSizeGb: 100},
 				ContainerSpec: &aiplatform.GoogleCloudAiplatformV1ContainerSpec{
 					ImageUri: v.config.Image,
-					Args: []string{
-						"--input-uri", preset.InputURI, "--input-sha256", preset.InputSHA256,
-						"--output-prefix", "gs://" + v.config.OutputBucket + "/generated/" + job.ID + "/",
-						"--job-id", job.ID, "--deadline", job.CreatedAt.Add(MaxRuntime).Format(time.RFC3339Nano),
-						"--title", preset.Title, "--source", preset.Source, "--license", preset.License,
-					},
+					Args:     args,
 				},
 			}},
 		},
