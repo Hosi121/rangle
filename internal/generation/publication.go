@@ -115,21 +115,21 @@ func (s *Service) PublicClips(ctx context.Context) ([]catalog.PublicClip, error)
 	return clips, nil
 }
 
-func (s *Service) PublishedClipExists(ctx context.Context, id string) (bool, error) {
+// CompletedClipExists matches public generated-detail eligibility independently
+// of feed membership. It performs one known-ID lookup and never lists jobs.
+func (s *Service) CompletedClipExists(ctx context.Context, id string) (bool, error) {
 	raw, ok := strings.CutPrefix(id, "generated-")
 	if !ok || !requestID.MatchString(raw) {
 		return false, nil
 	}
-	clips, err := s.PublicClips(ctx)
+	job, err := s.Store.Get(ctx, raw)
+	if errors.Is(err, ErrNotFound) {
+		return false, nil
+	}
 	if err != nil {
 		return false, err
 	}
-	for _, clip := range clips {
-		if clip.ID == id {
-			return true, nil
-		}
-	}
-	return false, nil
+	return job.ID == raw && job.State == Succeeded && job.Snapshot.ID != "", nil
 }
 
 func (p Publication) validProofs() bool {
