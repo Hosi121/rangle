@@ -1,5 +1,6 @@
 """Exercise deployment transitions with stub gcloud/curl/date; never contact GCP."""
 import json
+import importlib.util
 import os
 from pathlib import Path
 import subprocess
@@ -7,6 +8,9 @@ import tempfile
 import unittest
 
 SCRIPT = Path(__file__).with_name('deploy-stg.sh')
+RECEIPT_SPEC = importlib.util.spec_from_file_location('release_receipt', SCRIPT.with_name('release-receipt.py'))
+RECEIPT = importlib.util.module_from_spec(RECEIPT_SPEC)
+RECEIPT_SPEC.loader.exec_module(RECEIPT)
 FAKE = r'''#!/usr/bin/env python3
 import json, os, sys
 from pathlib import Path
@@ -58,23 +62,81 @@ if name == 'curl':
         body = '<html><base href="/demo/"><script src="flutter_bootstrap.js"></script></html>'
     else:
         body = '<html>rangle</html>'
+    if '--dump-header' in args:
+        header = 'HTTP/2 200\r\n'
+        if not os.environ.get('MISSING_CATALOG_HEADER'):
+            sha = 'd' * 64
+            if (os.environ.get('BAD_CANDIDATE_SHA') and candidate or
+                os.environ.get('BAD_PUBLIC_SHA') and not candidate or
+                os.environ.get('BAD_CANONICAL_SHA') and url.startswith('https://app.')):
+                sha = 'f' * 64
+            header += 'X-Rangle-Catalog-SHA256: ' + sha + '\r\n'
+        Path(args[args.index('--dump-header') + 1]).write_text(header + '\r\n')
     Path(args[args.index('--output') + 1]).write_text(body)
     sys.exit(0)
 assert name == 'gcloud'
 assert '--project=comin-up' in args and '--region=asia-northeast1' in args
+image_base = 'asia-northeast1-docker.pkg.dev/comin-up/rangle-stg/server'
+target_args = ['-ui-root', '/app/web', '-catalog', '/mnt/catalog/snapshots/' + 'd' * 64 + '.json',
+               '-asset-origin', 'https://media.replay.example.test',
+               '-private-input', 'gs://DO_NOT_EXPORT_INPUT/private']
+if os.environ.get('WITH_GENERATION'):
+    target_args += ['-generation-config', '/mnt/catalog/generation/' + 'e' * 64 + '.json']
+secret_env = [{'name': 'PRIVATE_TOKEN', 'value': 'DO_NOT_EXPORT_TOKEN'}]
+if args[:3] == ['run', 'revisions', 'describe']:
+    revision = args[3]
+    if os.environ.get('FAIL_PREVIOUS_READ') and revision == 'rangle-stg-old-b':
+        sys.exit(1)
+    if revision == 'rangle-stg-old-a':
+        item = {'image': image_base + ':legacy-a', 'args': [
+            '-catalog', '/mnt/catalog/snapshots/' + '1' * 64 + '.json',
+            '-asset-origin', 'https://media.previous.example.test']}
+        if os.environ.get('UNKNOWN_PREVIOUS'):
+            item = {'image': 'DO_NOT_EXPORT_CREDENTIAL:secret@host/path',
+                    'args': ['-catalog', 'gs://DO_NOT_EXPORT_INPUT/legacy.json']}
+    elif revision == 'rangle-stg-old-b':
+        item = {'image': image_base + '@sha256:' + 'c' * 64, 'args': [
+            '-catalog', '/mnt/catalog/snapshots/' + '2' * 64 + '.json',
+            '-asset-origin', 'https://media.previous.example.test']}
+    else:
+        assert revision == 'rangle-stg-00003-abc'
+        item = {'image': os.environ['STG_IMAGE'], 'args': target_args}
+        if os.environ.get('WRONG_ACTUAL_IMAGE'):
+            item['image'] = image_base + '@sha256:' + 'f' * 64
+        if os.environ.get('DRIFT_ACTUAL_ARGS'):
+            item['args'] = target_args + ['-unexpected', 'changed']
+    item['env'] = secret_env
+    if os.environ.get('WRONG_PREVIOUS_NAME') and revision.startswith('rangle-stg-old-'):
+        revision = 'rangle-stg-unrelated'
+    print(json.dumps({'metadata': {'name': revision}, 'spec': {'containers': [item]}}))
+    sys.exit(0)
 assert args[:2] == ['run', 'services']
 status = {'url': 'https://rangle-stg-test.run.app', 'latestReadyRevisionName': 'rangle-stg-old-a',
           'traffic': [{'revisionName': 'rangle-stg-old-a', 'percent': 80}, {'revisionName': 'rangle-stg-old-b', 'percent': 20}]}
 if (root / 'deployed').exists():
     status['latestCreatedRevisionName'] = 'rangle-stg-00003-abc'
+if (root / 'promoted').exists():
+    status['traffic'] = [{'revisionName': 'rangle-stg-00003-abc', 'percent': 100}]
+    status['latestReadyRevisionName'] = 'rangle-stg-00003-abc'
+    if args[2] == 'describe':
+        if os.environ.get('FAIL_AFTER_READ'):
+            sys.exit(1)
+        if os.environ.get('BAD_AFTER_TRAFFIC'):
+            status['traffic'] = [{'revisionName': 'rangle-stg-old-a', 'percent': 80},
+                                 {'revisionName': 'rangle-stg-00003-abc', 'percent': 20}]
+        if os.environ.get('FAIL_RECEIPT_OUTPUT'):
+            Path(os.environ['RELEASE_RECEIPT_PATH']).mkdir()
 if (root / 'tagged').exists():
     status['traffic'].append({'tag': 'candidate-123-1', 'revisionName': 'rangle-stg-00003-abc',
                              'url': 'https://candidate-123-1---rangle-stg-test.run.app'})
-doc = {'status': status, 'spec': {'template': {'spec': {'containers': [{'args': [
-    '-ui-root', '/app/web', '-catalog', '/mnt/catalog/snapshots/hash.json',
-    '-asset-origin', 'https://media.replay.example.test'], 'image': os.environ['STG_IMAGE']}]}}}}
+doc = {'status': status, 'spec': {'template': {'spec': {'containers': [
+    {'args': target_args, 'image': os.environ['STG_IMAGE'], 'env': secret_env}]}}}}
 if os.environ.get('BAD_RUNTIME'):
     doc['spec']['template']['spec']['containers'][0]['args'] = []
+if os.environ.get('BAD_CATALOG_PATH'):
+    target_args[3] = '/mnt/catalog/snapshots/not-a-sha.json'
+if os.environ.get('BAD_RUNTIME_ORIGIN'):
+    target_args[5] += '/'
 if args[2] == 'update':
     assert '--no-traffic' in args
     assert not any(x.startswith(('--tag=', '--revision-suffix=')) for x in args)
@@ -92,14 +154,20 @@ elif args[2] == 'update-traffic':
             sys.exit(1)
         status['traffic'].append({'tag': 'candidate-123-1', 'revisionName': 'rangle-stg-00003-abc',
                                  'url': 'https://candidate-123-1---rangle-stg-test.run.app'})
-    if '--to-revisions=rangle-stg-00003-abc=100' in args and os.environ.get('FAIL_PROMOTION'):
-        sys.exit(1)
+    if '--to-revisions=rangle-stg-00003-abc=100' in args:
+        (root / 'promoted').touch()
+        if os.environ.get('FAIL_PROMOTION'):
+            sys.exit(1)
+    if '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20' in args:
+        (root / 'promoted').unlink(missing_ok=True)
+    if '--remove-tags=candidate-123-1' in args:
+        (root / 'tagged').unlink(missing_ok=True)
 print(json.dumps(status['traffic'] if args[2] == 'update-traffic' else doc))
 '''
 
 
 class Deployment(unittest.TestCase):
-    def run_case(self, extra=None, command='deploy'):
+    def run_case(self, extra=None, command='deploy', inspect=False):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             bindir = root / 'bin'
@@ -116,11 +184,20 @@ class Deployment(unittest.TestCase):
                        GCP_DEPLOY_SERVICE_ACCOUNT='rangle-stg-deploy@comin-up.iam.gserviceaccount.com',
                        GCP_WORKLOAD_IDENTITY_PROVIDER='projects/113704194486/locations/global/workloadIdentityPools/github/providers/stg',
                        RANGLE_STG_DOMAIN='replay.example.test',
+                       RUNNER_TEMP=str(root), RELEASE_RECEIPT_PATH=str(root / 'rangle-release-receipt.json'),
+                       GITHUB_STEP_SUMMARY=str(root / 'summary.md'),
                        STG_IMAGE='asia-northeast1-docker.pkg.dev/comin-up/rangle-stg/server@sha256:' + 'b' * 64)
-            env.pop('GITHUB_STEP_SUMMARY', None)
             env.update(extra or {})
-            result = subprocess.run(['bash', str(SCRIPT), command], env=env, capture_output=True, text=True, timeout=20)
+            if env.get('BAD_SUMMARY'):
+                env['GITHUB_STEP_SUMMARY'] = str(root)
+            invocation = (['bash', str(SCRIPT.with_name('check-deployment.sh')), 'https://candidate-123-1---rangle-stg-test.run.app']
+                          if command == 'check' else ['bash', str(SCRIPT), command])
+            result = subprocess.run(invocation, env=env, capture_output=True, text=True, timeout=20)
             calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()] if (root / 'calls').exists() else []
+            if inspect:
+                receipt = root / 'rangle-release-receipt.json'
+                summary = root / 'summary.md'
+                return result, calls, json.loads(receipt.read_text()) if receipt.is_file() else None, summary.read_text() if summary.is_file() else ''
             return result, calls
 
     @staticmethod
@@ -137,6 +214,90 @@ class Deployment(unittest.TestCase):
         probed_urls = [call[-1] for call in calls if call[0] == 'curl']
         self.assertIn('https://rangle-stg-test.run.app/health', probed_urls)
         self.assertIn('https://app.replay.example.test/health', probed_urls)
+
+    def test_receipt_uses_served_revisions_not_the_desired_template_and_excludes_secrets(self):
+        result, calls, receipt, summary = self.run_case({'WITH_GENERATION': '1'}, inspect=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(receipt['source_commit'], 'a' * 40)
+        self.assertEqual((receipt['run_id'], receipt['run_attempt']), ('123', '1'))
+        self.assertEqual(receipt['candidate']['catalog_sha256'], 'd' * 64)
+        self.assertEqual(receipt['candidate']['generation_config_sha256'], 'e' * 64)
+        self.assertEqual(receipt['candidate']['asset_origin'], 'https://media.replay.example.test')
+        self.assertEqual(receipt['confirmed_traffic'], {'rangle-stg-00003-abc': 100})
+        self.assertEqual(receipt['previous_traffic'], {'rangle-stg-old-a': 80, 'rangle-stg-old-b': 20})
+        previous = receipt['previous_revisions']
+        self.assertEqual([item['catalog_sha256'] for item in previous], ['1' * 64, '2' * 64])
+        self.assertTrue(previous[0]['image'].endswith(':legacy-a'))
+        self.assertIsNone(previous[0]['image_digest'])
+        self.assertTrue(previous[1]['image_digest'].endswith('@sha256:' + 'c' * 64))
+        self.assertEqual([call[4] for call in calls if call[1:4] == ['run', 'revisions', 'describe']],
+                         ['rangle-stg-old-a', 'rangle-stg-old-b', 'rangle-stg-00003-abc'])
+        exported = json.dumps(receipt)
+        self.assertLess(len(exported), 8192)
+        self.assertIn(json.dumps(receipt, indent=2, sort_keys=True), summary)
+        for secret in ('DO_NOT_EXPORT', 'gs://', 'PRIVATE_TOKEN', 'containers', 'workloadIdentityPools'):
+            self.assertNotIn(secret, exported + summary)
+
+    def test_unknown_previous_fields_are_null_instead_of_invented(self):
+        result, _, receipt, summary = self.run_case({'UNKNOWN_PREVIOUS': '1'}, inspect=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        previous = receipt['previous_revisions'][0]
+        for key in ('image', 'image_digest', 'catalog_sha256', 'generation_config_sha256', 'asset_origin'):
+            self.assertIsNone(previous[key])
+        self.assertIsNone(receipt['candidate']['generation_config_sha256'])
+        self.assertNotIn('DO_NOT_EXPORT', json.dumps(receipt) + summary)
+
+    def test_previous_revision_metadata_failure_stops_before_update(self):
+        for key in ('FAIL_PREVIOUS_READ', 'WRONG_PREVIOUS_NAME', 'BAD_CATALOG_PATH', 'BAD_RUNTIME_ORIGIN'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(any(call[1:4] == ['run', 'services', 'update'] for call in calls))
+                self.assertEqual(self.traffic(calls), [])
+                self.assertIsNone(receipt)
+
+    def test_candidate_catalog_mismatch_never_promotes(self):
+        for key in ('BAD_CANDIDATE_SHA', 'MISSING_CATALOG_HEADER'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls), [])
+                self.assertIsNone(receipt)
+                self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+
+    def test_public_catalog_mismatch_restores_the_previous_split(self):
+        for key in ('BAD_PUBLIC_SHA', 'BAD_CANONICAL_SHA'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls)[-1], '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20')
+                self.assertIsNone(receipt)
+
+    def test_receipt_validation_or_storage_failure_rolls_back_after_promotion(self):
+        for key in ('FAIL_AFTER_READ', 'BAD_AFTER_TRAFFIC', 'WRONG_ACTUAL_IMAGE',
+                    'DRIFT_ACTUAL_ARGS', 'FAIL_RECEIPT_OUTPUT', 'BAD_SUMMARY'):
+            with self.subTest(key=key):
+                result, calls, receipt, _ = self.run_case({key: '1'}, inspect=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100',
+                                                     '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20'])
+                self.assertIsNone(receipt)
+                self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+
+    def test_receipt_path_is_fixed_before_any_cloud_call(self):
+        for change in ({'RELEASE_RECEIPT_PATH': '/tmp/unrelated-receipt.json'}, {'GITHUB_STEP_SUMMARY': ''}):
+            with self.subTest(change=change):
+                result, calls = self.run_case(change)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(calls, [])
+
+    def test_standalone_smoke_keeps_optional_header_compatibility(self):
+        result, calls = self.run_case({'MISSING_CATALOG_HEADER': '1'}, command='check')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(call[0] == 'gcloud' for call in calls))
+        result, calls = self.run_case({'EXPECTED_CATALOG_SHA256': 'invalid'}, command='check')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(calls, [])
 
     def test_candidate_failure_keeps_previous_traffic(self):
         result, calls = self.run_case({'FAIL_CANDIDATE': '1'})
@@ -233,6 +394,34 @@ class Deployment(unittest.TestCase):
         self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100',
                                              '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20'])
         self.assertTrue(any('--remove-tags=candidate-123-1' in call for call in calls))
+
+
+class ReceiptStorage(unittest.TestCase):
+    def test_latest_and_tagged_traffic_resolve_to_concrete_serving_revisions(self):
+        document = {'status': {'latestReadyRevisionName': 'rangle-stg-old-a', 'traffic': [
+            {'latestRevision': True, 'percent': 80},
+            {'revisionName': 'rangle-stg-old-b', 'percent': 20},
+            {'tag': 'unrelated-tag', 'percent': None},
+        ]}}
+        self.assertEqual(RECEIPT.traffic(document), {'rangle-stg-old-a': 80, 'rangle-stg-old-b': 20})
+        for percent in (True, '100', -1, 101):
+            with self.subTest(percent=percent), self.assertRaises(ValueError):
+                RECEIPT.traffic({'status': {'traffic': [{'revisionName': 'rangle-stg-old-a', 'percent': percent}]}})
+
+    def test_atomic_output_does_not_replace_existing_receipts_and_cleans_partial_files(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'receipt.json'
+            output.write_text('existing')
+            with self.assertRaises(FileExistsError):
+                RECEIPT.save_receipt({'schema_version': 1}, output)
+            self.assertEqual(output.read_text(), 'existing')
+            self.assertEqual(list(root.glob('*.tmp')), [])
+            output.unlink()
+            with self.assertRaises(IsADirectoryError):
+                RECEIPT.save_receipt({'schema_version': 1}, output, root)
+            self.assertFalse(output.exists())
+            self.assertEqual(list(root.glob('*.tmp')), [])
 
 
 if __name__ == '__main__':

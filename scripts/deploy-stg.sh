@@ -48,6 +48,11 @@ readonly app_origin media_origin
 [[ ${GITHUB_SHA:-} =~ ^[0-9a-f]{40}$ && ${GITHUB_RUN_ID:-} =~ ^[0-9]+$ && ${GITHUB_RUN_ATTEMPT:-} =~ ^[0-9]+$ ]] || {
   echo 'A complete commit SHA and GitHub run identity are required.' >&2; exit 1;
 }
+[[ -n ${RUNNER_TEMP:-} && -d $RUNNER_TEMP && -n ${GITHUB_STEP_SUMMARY:-} && ${RELEASE_RECEIPT_PATH:-} == "$RUNNER_TEMP/rangle-release-receipt.json" ]] || {
+  echo 'Set the dedicated receipt path in RUNNER_TEMP and the Actions summary path.' >&2; exit 1;
+}
+readonly receipt_path=$RELEASE_RECEIPT_PATH
+[[ ! -e $receipt_path && ! -L $receipt_path ]] || { echo 'Release receipt already exists.' >&2; exit 1; }
 readonly tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 work=$(mktemp -d)
 promotion_attempted=false
@@ -79,41 +84,19 @@ trap 'exit 143' TERM
 
 # Refuse to create a service or replace its IaC-owned runtime configuration.
 cloud_run services describe "$service" --format=json > "$work/before.json"
-mapfile -t before < <(python3 - "$work/before.json" "$media_origin" <<'PY'
-import json, sys
-from urllib.parse import urlsplit
-doc = json.load(open(sys.argv[1]))
-status = doc.get('status', {})
-url = status.get('url', '')
-u = urlsplit(url)
-if u.scheme != 'https' or not u.netloc.endswith('.run.app') or u.path:
-    raise SystemExit('Expected a pre-existing HTTPS run.app service.')
-containers = doc.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [])
-if len(containers) != 1:
-    raise SystemExit('Expected one preconfigured application container.')
-args = containers[0].get('args', [])
-for flag in ('-ui-root', '-catalog'):
-    if flag not in args or args.index(flag) + 1 >= len(args):
-        raise SystemExit('Missing IaC-owned runtime argument: ' + flag)
-if '-asset-origin' not in args or args[args.index('-asset-origin') + 1] != sys.argv[2] or '-asset-root' in args:
-    raise SystemExit('The existing service does not advertise the approved external media origin.')
-traffic = {}
-for target in status.get('traffic', []):
-    percent = target.get('percent', 0)
-    if percent:
-        revision = target.get('revisionName') or (status.get('latestReadyRevisionName') if target.get('latestRevision') else None)
-        if not revision:
-            raise SystemExit('Cannot resolve the existing traffic allocation.')
-        traffic[revision] = traffic.get(revision, 0) + percent
-if sum(traffic.values()) != 100:
-    raise SystemExit('A healthy, pre-existing 100% traffic allocation is required for rollback.')
-print(url)
-print(','.join(f'{revision}={percent}' for revision, percent in sorted(traffic.items())))
-PY
-)
-[[ ${#before[@]} == 2 ]] || { echo 'Existing service validation failed.' >&2; exit 1; }
-readonly service_url=${before[0]}
+mapfile -t before < <(python3 "$script_dir/release-receipt.py" plan "$work/before.json" "$media_origin")
+[[ ${#before[@]} == 3 ]] || { echo 'Existing service validation failed.' >&2; exit 1; }
+readonly service_url=${before[0]} expected_catalog_sha=${before[2]}
 previous_traffic=${before[1]}
+mkdir "$work/previous"
+IFS=',' read -r -a previous_allocations <<< "$previous_traffic"
+for allocation in "${previous_allocations[@]}"; do
+  previous_revision=${allocation%=*}
+  cloud_run revisions describe "$previous_revision" --format=json > "$work/previous/$previous_revision.json"
+done
+# Verify actual served revisions before making changes. The desired service
+# template can already contain a different Terraform-selected catalog.
+python3 "$script_dir/release-receipt.py" plan "$work/before.json" "$media_origin" "$work/previous" > /dev/null
 check_deadline
 # Let Cloud Run name the revision. A tag on this update makes gcloud persist an
 # explicit template revision, causing drift on the next Terraform runtime edit.
@@ -151,13 +134,14 @@ else:
 PY
 )
 [[ -n $candidate_url ]] || { echo 'Candidate URL missing.' >&2; exit 1; }
-bash "$script_dir/check-deployment.sh" "$candidate_url"
+EXPECTED_CATALOG_SHA256="$expected_catalog_sha" bash "$script_dir/check-deployment.sh" "$candidate_url"
 check_deadline
 promotion_attempted=true
 cloud_run services update-traffic "$service" --to-revisions="$revision=100"
-bash "$script_dir/check-deployment.sh" "$service_url"
-bash "$script_dir/check-deployment.sh" "$app_origin"
-if [[ -n ${GITHUB_STEP_SUMMARY:-} ]]; then
-  printf 'Deployed %s\n\nRevision: %s\n\nURL: %s\n\nCanonical URL: %s\n' "$STG_IMAGE" "$revision" "$service_url" "$app_origin" >> "$GITHUB_STEP_SUMMARY"
-fi
+EXPECTED_CATALOG_SHA256="$expected_catalog_sha" bash "$script_dir/check-deployment.sh" "$service_url"
+EXPECTED_CATALOG_SHA256="$expected_catalog_sha" bash "$script_dir/check-deployment.sh" "$app_origin"
+cloud_run services describe "$service" --format=json > "$work/after.json"
+cloud_run revisions describe "$revision" --format=json > "$work/verified-revision.json"
+python3 "$script_dir/release-receipt.py" write "$work/before.json" "$work/previous" \
+  "$work/after.json" "$work/verified-revision.json" "$revision" "$media_origin" "$receipt_path"
 printf 'Verified stg revision %s at %s and %s\n' "$revision" "$service_url" "$app_origin"
