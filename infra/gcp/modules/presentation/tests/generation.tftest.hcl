@@ -52,8 +52,12 @@ run "generation_uses_private_config_and_separate_trainer" {
     error_message = "Trainer input is exact-object get, and append-only output stays inside generated media."
   }
   assert {
-    condition     = index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "verify_service_absent") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "cancel_owned_generation") && index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "cancel_owned_generation") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "check_shutdown")
+    condition     = index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "stop_owned_service") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "cancel_owned_generation") && index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "cancel_owned_generation") < index([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : keys(step)[0]], "check_shutdown")
     error_message = "Always attempt existing ingress/service shutdown before bounded GPU cancellation and final error handling."
+  }
+  assert {
+    condition     = can(one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.stop_owned_service if can(step.stop_owned_service)]).except.steps[0].record_run_error) && alltrue([for name in ["inspect_before_delete", "delete_owned_service", "wait_for_deletion_operation", "verify_service_absent"] : contains([for step in one([for main_step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : main_step.stop_owned_service if can(main_step.stop_owned_service)]).try.steps : keys(step)[0]], name)])
+    error_message = "Every Cloud Run shutdown phase must share an exception handler so API and operation-name failures cannot bypass GPU cancellation or failure receipts."
   }
   assert {
     condition     = can(one([for step in yamldecode(google_workflows_workflow.guard.source_contents).main.steps : step.cancel_owned_generation if can(step.cancel_owned_generation)]).switch[0].steps[0].cancel_jobs.except.steps[0].record_generation_error) && strcontains(google_workflows_workflow.guard.source_contents, "guard/failures/")

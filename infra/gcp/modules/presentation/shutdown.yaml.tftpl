@@ -94,61 +94,71 @@ main:
                     - record_edge_error:
                         assign:
                           - errors: $${list.concat(errors, error)}
-    - inspect_before_delete:
-        call: service_is_absent
-        args:
-          url: "https://run.googleapis.com/v2/${service}"
-        result: already_absent
-    - skip_missing_service:
-        switch:
-          - condition: $${already_absent}
-            next: verify_service_absent
-    - delete_owned_service:
+    # An unknown Run state must skip deletion without skipping GPU cancellation.
+    - stop_owned_service:
         try:
           steps:
-            - request_deletion:
-                call: http.delete
+            - inspect_before_delete:
+                call: service_is_absent
                 args:
                   url: "https://run.googleapis.com/v2/${service}"
-                  auth: {type: OAuth2}
-                result: deletion
-            - remember_operation:
-                assign:
-                  - operation_name: $${deletion.body.name}
+                result: already_absent
+            - skip_missing_service:
+                switch:
+                  - condition: $${already_absent}
+                    next: verify_service_absent
+            - delete_owned_service:
+                try:
+                  steps:
+                    - request_deletion:
+                        call: http.delete
+                        args:
+                          url: "https://run.googleapis.com/v2/${service}"
+                          auth: {type: OAuth2}
+                        result: deletion
+                    - remember_operation:
+                        assign:
+                          - operation_name: $${deletion.body.name}
+                except:
+                  as: error
+                  steps:
+                    - accept_absent_service:
+                        switch:
+                          - condition: $${map.get(error, "code") == 404}
+                            next: verify_service_absent
+                    - record_service_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+            - wait_for_deletion_operation:
+                call: wait_until_operation_done
+                args:
+                  operation_name: $${operation_name}
+                result: operation_ok
+            - verify_operation:
+                switch:
+                  - condition: $${not operation_ok}
+                    steps:
+                      - operation_failed:
+                          assign:
+                            - errors: $${list.concat(errors, "Owned service deletion operation failed or timed out")}
+            - verify_service_absent:
+                call: wait_until_absent
+                args:
+                  url: "https://run.googleapis.com/v2/${service}"
+                result: service_absent
+            - verify_deletion:
+                switch:
+                  - condition: $${not service_absent}
+                    steps:
+                      - deletion_failed:
+                          assign:
+                            - errors: $${list.concat(errors, "Service deletion was not confirmed")}
         except:
           as: error
           steps:
-            - accept_absent_service:
-                switch:
-                  - condition: $${map.get(error, "code") == 404}
-                    next: verify_service_absent
-            - record_service_error:
+            - record_run_error:
                 assign:
                   - errors: $${list.concat(errors, error)}
-    - wait_for_deletion_operation:
-        call: wait_until_operation_done
-        args:
-          operation_name: $${operation_name}
-        result: operation_ok
-    - verify_operation:
-        switch:
-          - condition: $${not operation_ok}
-            steps:
-              - operation_failed:
-                  assign:
-                    - errors: $${list.concat(errors, "Owned service deletion operation failed or timed out")}
-    - verify_service_absent:
-        call: wait_until_absent
-        args:
-          url: "https://run.googleapis.com/v2/${service}"
-        result: service_absent
-    - verify_deletion:
-        switch:
-          - condition: $${not service_absent}
-            steps:
-              - deletion_failed:
-                  assign:
-                    - errors: $${list.concat(errors, "Service deletion was not confirmed")}
     - cancel_owned_generation:
         switch:
           - condition: ${generation_enabled}
