@@ -20,7 +20,7 @@ state・catalog・入力・mediaのbucketとruntime・deploy・trainerのidentit
 
 GitHub ActionsはWIFでrepository数値ID・owner数値ID・`refs/heads/stg`・deploy workflowを限定する。CIはdigest固定の候補revisionを検証してからtrafficを切り替える。mainからこのstg identityを使う経路はない。汎用stg/main rootはbackend bucket・prefix・impersonation SAを別々にする雛形とmock検証までで、main環境を実配備したという意味ではない。
 
-発表用はmin0/max1・concurrency40・CPU1・512MiBの費用優先設定。GPU学習は配信APIと別の東京Spot T4、同時1件・最大30分・永続10試行。停止期限は2026-11-14 15:00 UTC。budget/期限guardと停止手順は配備済みだが、請求の厳密なhard capや10万人向け容量を保証しない。AWS経由のB300は私的な検証用で、この構成へ接続しない。
+発表用はmin0/max1・concurrency40・CPU1・512MiBの費用優先設定。GPU学習は配信APIと別の東京Spot T4、同時1件・最大30分・永続10試行。停止期限は2026-11-14 15:00 UTC。budget/期限guardと停止手順は配備済みだが、請求の厳密なhard capや10万人向け容量を保証しない。私的な実験環境はこの構成へ接続しない。
 
 ライブ生成の権限は `application.generation_live_enabled=true` で明示的に有効化する。`generation_config_sha256`、`live_streaming_enabled=true`、domainの設定が必要。専用の `rangle-stg-live-trainer` は入力の `datasets/live/` をgetし、mediaの `live/` とcatalogの `live/snapshots/` にget/createだけを持つ。更新するmediaの `live-index/` とcatalogの単一object `live/index.json` に限り、get/create/deleteを許す。GCSで既存objectを置き換えるには、generation条件付きでもcreateとdeleteが必要なためで、model・scene・archiveにはdeleteを付けない。metadataは初回insertで指定するためupdate・list・bucket readは不要。すべてのgrantとruntimeのactAsを発表期限で制限する。[GCS object insertの必要権限](https://docs.cloud.google.com/storage/docs/json_api/v1/objects/insert)
 

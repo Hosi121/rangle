@@ -1,6 +1,6 @@
 # GS生成基盤
 
-Cloud Runの生成API、Firestoreの実行台帳、Vertex AIの学習、GCS/CDNの出力配信をIaCと不変configで接続する。GCPの生成経路と、独立したB300ローカル検証経路は接続しない。
+Cloud Runの生成API、Firestoreの実行台帳、Vertex AIの学習、GCS/CDNの出力配信をIaCと不変configで接続する。GCPの生成経路と、独立した私的な検証経路は接続しない。
 
 ## 接続契約
 
