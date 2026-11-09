@@ -70,7 +70,7 @@ func TestVertexLiveUsesPublisherIdentityWithoutChangingBudget(t *testing.T) {
 			t.Fatal("live job changed shared compute limits or publisher identity")
 		}
 		p := s.WorkerPoolSpecs[0]
-		if p.ContainerSpec.ImageUri != c.Live.Image || p.ReplicaCount != 1 || p.MachineSpec.AcceleratorCount != 1 || p.MachineSpec.AcceleratorType != "NVIDIA_TESLA_T4" || p.MachineSpec.MachineType != "n1-standard-4" || job.Labels["rangle_job"] != id {
+		if p.ContainerSpec.ImageUri != c.Live.Image || p.ReplicaCount != 1 || p.MachineSpec.AcceleratorCount != 1 || p.MachineSpec.AcceleratorType != "NVIDIA_TESLA_T4" || p.MachineSpec.MachineType != "n1-standard-16" || job.Labels["rangle_job"] != id {
 			t.Fatal("live job changed pinned shape, image or shutdown ownership")
 		}
 		args := p.ContainerSpec.Args
@@ -83,7 +83,7 @@ func TestVertexLiveUsesPublisherIdentityWithoutChangingBudget(t *testing.T) {
 			"--output-prefix": "gs://" + c.OutputBucket + "/live/" + id + "/", "--catalog-bucket": c.Live.CatalogBucket,
 			"--session-id": id, "--deadline": created.Add(MaxRuntime).Format(time.RFC3339Nano),
 			"--media-origin": c.MediaOrigin, "--source-seconds": "10", "--seed-available-after": "0.8",
-			"--bootstrap-steps": "300", "--steps-per-update": "300", "--decode-workers": "4",
+			"--bootstrap-steps": "300", "--steps-per-update": "300", "--decode-workers": "16",
 			"--title": c.Presets[1].Title, "--source": c.Presets[1].Source, "--license": "CC BY 4.0",
 		}
 		if len(got) != len(want) {
