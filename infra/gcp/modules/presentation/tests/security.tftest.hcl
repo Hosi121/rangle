@@ -123,18 +123,19 @@ run "no_policies_or_database_backups_for_an_unpublished_foundation" {
   }
 }
 
-run "generation_only_still_audits_firestore_writes" {
+run "generation_still_audits_firestore_writes" {
   command = plan
   variables {
     application = {
       image_digest             = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
       catalog_sha256           = "1111111111111111111111111111111111111111111111111111111111111111"
+      community_enabled        = true
       generation_config_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
     }
   }
   assert {
-    condition     = toset([for log in google_project_iam_audit_config.security["datastore.googleapis.com"].audit_log_config : log.log_type]) == toset(["ADMIN_READ", "DATA_WRITE"]) && length(google_firestore_backup_schedule.community_daily) == 0
-    error_message = "A separate generation database still needs service-wide Firestore audit coverage when community is disabled."
+    condition     = toset([for log in google_project_iam_audit_config.security["datastore.googleapis.com"].audit_log_config : log.log_type]) == toset(["ADMIN_READ", "DATA_WRITE"]) && length(google_firestore_backup_schedule.generation_daily) == 1
+    error_message = "The isolated generation database needs service-wide Firestore audit coverage and recovery."
   }
 }
 

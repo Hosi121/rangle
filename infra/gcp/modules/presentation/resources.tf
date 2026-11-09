@@ -149,8 +149,8 @@ resource "google_cloud_run_v2_service" "app" {
         "-firestore-project", var.project_id,
         "-firestore-database", google_firestore_database.community[0].name
         ] : [], local.generation_enabled ? [
-        "-generation-config", "/mnt/catalog/generation/${var.application.generation_config_sha256}.json"
-      ] : [], local.generation_sync_enabled ? ["-generation-sync-audience", local.generation_sync_uri] : [])
+        "-generation-manager-url", local.generation_manager_origin
+      ] : [])
       ports { container_port = 8080 }
       resources {
         limits            = { cpu = "1", memory = "512Mi" }
@@ -189,7 +189,7 @@ resource "google_cloud_run_v2_service" "app" {
       error_message = "The presentation deadline has passed; do not recreate the stopped service."
     }
   }
-  depends_on = [google_storage_bucket_iam_member.catalog_reader, google_cloud_scheduler_job.guard, google_project_iam_member.community_runtime, google_project_iam_member.generation_runtime, google_project_iam_member.generation_service_agent, google_service_account_iam_member.trainer_act_as, google_storage_bucket_iam_member.trainer_input, google_storage_bucket_iam_member.trainer_output, google_service_account_iam_member.live_trainer_act_as, google_storage_bucket_iam_member.live_trainer_input, google_storage_bucket_iam_member.live_trainer_immutable, google_storage_bucket_iam_member.live_trainer_pointer]
+  depends_on = [google_storage_bucket_iam_member.catalog_reader, google_cloud_scheduler_job.guard, google_project_iam_member.community_runtime, google_cloud_run_v2_service.generation, google_cloud_run_v2_service_iam_member.generation_runtime_invoker, google_storage_bucket_iam_member.trainer_input, google_storage_bucket_iam_member.trainer_output, google_storage_bucket_iam_member.live_trainer_input, google_storage_bucket_iam_member.live_trainer_immutable, google_storage_bucket_iam_member.live_trainer_pointer]
 }
 resource "google_cloud_run_v2_service_iam_member" "deployer" {
   count    = local.app_enabled ? 1 : 0

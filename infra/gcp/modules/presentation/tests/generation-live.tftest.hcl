@@ -12,6 +12,7 @@ variables {
   application = {
     image_digest             = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
     catalog_sha256           = "1111111111111111111111111111111111111111111111111111111111111111"
+    community_enabled        = true
     generation_config_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
   }
 }
@@ -30,6 +31,7 @@ run "enabled_live_identity_has_only_scoped_deadline_grants" {
     application = {
       image_digest             = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
       catalog_sha256           = "1111111111111111111111111111111111111111111111111111111111111111"
+      community_enabled        = true
       generation_config_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
       generation_live_enabled  = true
     }
@@ -79,6 +81,7 @@ run "live_worker_requires_live_metadata" {
     application = {
       image_digest             = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
       catalog_sha256           = "1111111111111111111111111111111111111111111111111111111111111111"
+      community_enabled        = true
       generation_config_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
       generation_live_enabled  = true
     }
@@ -93,6 +96,7 @@ run "live_worker_requires_configured_domain" {
     application = {
       image_digest             = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
       catalog_sha256           = "1111111111111111111111111111111111111111111111111111111111111111"
+      community_enabled        = true
       generation_config_sha256 = "2222222222222222222222222222222222222222222222222222222222222222"
       generation_live_enabled  = true
     }

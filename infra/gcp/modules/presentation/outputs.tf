@@ -37,10 +37,13 @@ output "deployment" {
       } : null
       sync = local.generation_sync_enabled ? {
         scheduler = local.generation_sync_job
-        audience  = local.generation_sync_uri
+        audience  = local.generation_manager_origin
         identity  = google_service_account.generation_sync[0].email
       } : null
       config_object           = "generation/${var.application.generation_config_sha256}.json"
+      manager_origin          = local.generation_manager_origin
+      manager_service_account = google_service_account.generation_manager[0].email
+      database                = google_firestore_database.generation[0].name
       trainer_service_account = google_service_account.trainer[0].email
       region                  = var.region
       input_prefix            = "gs://${google_storage_bucket.private["inputs"].name}/datasets/"

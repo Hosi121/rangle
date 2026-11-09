@@ -36,8 +36,8 @@ run "generation_uses_private_config_and_separate_trainer" {
     }
   }
   assert {
-    condition     = google_service_account.trainer[0].account_id == "rangle-stg-trainer" && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "/mnt/catalog/generation/2222222222222222222222222222222222222222222222222222222222222222.json") && google_service_account_iam_member.trainer_act_as[0].role == "roles/iam.serviceAccountUser"
-    error_message = "Use the dedicated trainer through the one immutable, readonly-mounted generation config flag."
+    condition     = google_service_account.trainer[0].account_id == "rangle-stg-trainer" && contains(google_cloud_run_v2_service.generation[0].template[0].containers[0].args, "/mnt/catalog/generation/2222222222222222222222222222222222222222222222222222222222222222.json") && !contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-generation-config") && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-generation-manager-url") && google_service_account_iam_member.trainer_act_as[0].role == "roles/iam.serviceAccountUser"
+    error_message = "Only the private manager loads the immutable generation config; public runtime calls its bounded API."
   }
   assert {
     condition     = length(google_project_iam_member.generation_service_agent) == 1 && google_project_iam_member.generation_service_agent[0].project == "rangle-example" && google_project_iam_member.generation_service_agent[0].role == "roles/aiplatform.serviceAgent" && google_project_iam_member.generation_service_agent[0].member == "serviceAccount:service-123456789012@gcp-sa-aiplatform.iam.gserviceaccount.com"

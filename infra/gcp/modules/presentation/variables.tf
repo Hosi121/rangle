@@ -73,6 +73,10 @@ variable "application" {
     error_message = "Generation config must be null or the lowercase SHA256 of a reviewed immutable private JSON file."
   }
   validation {
+    condition     = var.application == null ? true : var.application.generation_config_sha256 == null || var.application.community_enabled
+    error_message = "Generation requires persistent public account authentication and an isolated manager database."
+  }
+  validation {
     condition = var.application == null ? true : (
       !var.application.generation_live_enabled || (
         var.application.generation_config_sha256 != null && var.base_domain != null
