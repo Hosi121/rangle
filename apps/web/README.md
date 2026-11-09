@@ -46,7 +46,7 @@ go run ./cmd/rangle-server -ui-root apps/web/build/web \
 
 `http://127.0.0.1:4174/demo/`を開き、映像タップで動画を再生 →「自由視点で見る」→ ダブルタップまたはダブルクリックで動きを流す → シーンをドラッグして視点を回す →「動画に戻る」の順に操作できます。時刻は最下端のシークバーで操作できます。scene URLはcatalogの`scene_url`から読み、モデルや各frameは版付きHTTP資産として配信します。上のAPI URLは同じoriginを使うため、`localhost`でも開けます。
 
-初期版は先頭の1ページだけを読みます（API既定10件、最大50件）。自動追加読込・ABR制御は未実装です。API URLの不正・未設定のcatalog・API失敗時はエラーまたは空状態を表示し、デモへ自動で切り替えません。`RANGLE_API_URL` は `/api/v1/clips` のようなroot相対path、または認証情報・fragmentを含まないHTTP(S)絶対URLです。外部APIを指定する場合は、そのAPIと資産にCORSが必要です。
+フィードは20件単位で `next_cursor` を辿り、最大100件のメタデータを保持します。読み進めると古い閲覧履歴を破棄し、100件より前には戻れません。失敗したページは手動で再試行でき、検索変更では古い取得を中止します。[ページングの仕様](../../docs/feed-pagination.md)を参照してください。ABR制御は未接続です。API URLの不正・未設定のcatalog・API失敗時はエラーまたは空状態を表示し、デモへ自動で切り替えません。`RANGLE_API_URL` は `/api/v1/clips` のようなroot相対path、または認証情報・fragmentを含まないHTTP(S)絶対URLです。外部APIを指定する場合は、そのAPIと資産にCORSが必要です。
 
 設定はコンパイル時に固定します。`docker run -e RANGLE_DEMO=...` 等のruntime環境変数では切り替わりません。
 
