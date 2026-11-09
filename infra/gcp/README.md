@@ -1,6 +1,6 @@
 # GCP 配信基盤の Terraform
 
-コード準備とローカル検証までの構成。実 project への接続、API 有効化、IAM 変更、apply、データ公開は実施していない。10 万同時視聴は将来の検証対象で、ここに性能・quota・費用の達成証拠はない。[設計](../../docs/infrastructure-design.md)、[課題一覧 #20](https://github.com/Hosi121/rangle/issues/20)
+発表用の `environments/presentation/` は東京へ配備済み。Go/Web の Cloud Run と、大容量資産の GCS/CDN を分離し、[公開アプリ](https://app.rangleplay.stream/demo/)・API・media の HTTPS 接続を確認している。以下の汎用 `stg/main` 雛形と、実配備した発表用構成を区別する。10万同時視聴の性能・quota適合・費用は未検証。[配備手順](../../docs/stg-deployment.md)、[実装状況](../../docs/backend-status.md)
 
 ## 管理単位
 
@@ -10,6 +10,19 @@
 | `environments/stg/` | stg 専用 backend・実行 identity・設定 |
 | `environments/main/` | main 専用 backend・実行 identity・設定 |
 | `modules/platform/` | 新規 GCS bucket、Cloud Run、serverless NEG、Cloud CDN、外部 Application Load Balancer、HTTPS、各 resource の IAM |
+| `environments/presentation/` / `modules/presentation/` | 実配備した期限・予算付きstg。既存project内に専用state・identity・資源を管理 |
+
+## 配備済みの発表用stg
+
+2026-11-09時点。リージョンは `asia-northeast1`。Cloud RunはGoとFlutter Webの同一imageを使い、`app.rangleplay.stream` を処理する。`media.rangleplay.stream` はHTTPS LBの別hostからCloud CDN/backend bucketへ進み、Goへmodel bytesを通さない。両方のHTTPS疎通と、実モデルのサイズ・SHA256・Range取得を確認済み。
+
+state・catalog・入力・mediaのbucketとruntime・deploy・trainerのidentityを分離する。非公開catalogは内容SHAを含むpathへ新規作成限定で保存し、Cloud Runへreadonly mountする。runtimeはcatalog readに加え、有効なアカウント・生成機能に必要なFirestore/Vertex権限を持つ。trainerは入力readと出力createを担当し、Firestoreやstateの権限を持たない。正本は `modules/presentation/` と[生成基盤](../../docs/generation-infrastructure.md)。
+
+GitHub ActionsはWIFでrepository数値ID・owner数値ID・`refs/heads/stg`・deploy workflowを限定する。CIはdigest固定の候補revisionを検証してからtrafficを切り替える。mainからこのstg identityを使う経路はない。汎用stg/main rootはbackend bucket・prefix・impersonation SAを別々にする雛形とmock検証までで、main環境を実配備したという意味ではない。
+
+発表用はmin0/max1・concurrency40・CPU1・512MiBの費用優先設定。GPU学習は配信APIと別の東京Spot T4、同時1件・最大30分・永続10試行。停止期限は2026-11-14 15:00 UTC。budget/期限guardと停止手順は配備済みだが、請求の厳密なhard capや10万人向け容量を保証しない。AWS経由のB300は私的な検証用で、この構成へ接続しない。
+
+以下は主に汎用stg/main rootの設定契約と初回配備手順。既存発表環境へそのまま新規適用せず、privateなbackend・tfvars・現在のplanを確認する。TerraformとCIによるCloud Run更新は同時に実行しない。
 
 Terraform **1.17.1** と `hashicorp/google` **8.10.0** に固定し、各 root と直接テストする module に `.terraform.lock.hcl` を管理する。2026-11-08 に [公式 CLI release API](https://api.releases.hashicorp.com/v1/releases/terraform/latest) と [公式 provider Registry API](https://registry.terraform.io/v1/providers/hashicorp/google) で stable を確認した。CLI の [公式 SHA256SUMS](https://releases.hashicorp.com/terraform/1.17.1/terraform_1.17.1_SHA256SUMS) と照合した Linux amd64 ZIP は `4638628058e71a55212b1c563712eac03b902128f40740f3dc8174df12135061`。provider は `init` 時に HashiCorp 署名を検証した。ユーザーの global CLI を更新する必要はない。[Terraform のインストール](https://developer.hashicorp.com/terraform/install)
 
@@ -43,11 +56,11 @@ catalog 専用 bucket を read-only GCS volume として `/mnt/catalog` へ moun
 
 FUSE は Object Versioning bucket を正式にサポートしないため、catalog bucket の versioning は無効とする。state、media、入力には有効にする。readonly mount は同名 object の更新を防がず、hash を path に含めても内容の照合自体は行わない。有限の publisher が実際の SHA256 と path を照合し、`ifGenerationMatch=0` で新規配置する必要がある。publisher の IAM は media/catalog の objectCreator + objectViewer で、上書き・削除権限を持たない。管理者も公開済み key を変更しない。[FUSE の制約](https://docs.cloud.google.com/storage/docs/cloud-storage-fuse/overview#limitations)
 
-公開順は、許諾済み asset を新 revision に配置 → 参照先・サイズ・SHA256・codec・timeline・Content-Type・`Cache-Control: public, max-age=..., immutable, no-transform`・CORS を検証 → versioned manifest → 最後に catalog snapshot とする。GCS の ETag が Go の SHA256 ETag と一致するとは仮定しない。`Content-Encoding: gzip` による GCS 自動展開も避け、配信 bytes と hash を確認する。この publisher と rights gate は [#22](https://github.com/Hosi121/rangle/issues/22)、[#25](https://github.com/Hosi121/rangle/issues/25) の未実装範囲で、Terraform は object を一切配置しない。
+公開順は、許諾済み asset を新 revision に配置 → 参照先・サイズ・SHA256・codec・timeline・Content-Type・cache/CORS を検証 → versioned manifest → 最後に catalog snapshot とする。contentの不変性は新規作成限定のpathとhashで確認し、CDNが省略することのあるHTTPのimmutable hintだけに依存しない。GCSのETagをSHA256と仮定せず、`Content-Encoding`による変換も区別して実bytesを検証する。publisherと来歴gateは [#22](https://github.com/Hosi121/rangle/issues/22)、[#25](https://github.com/Hosi121/rangle/issues/25) で管理し、Terraform自身はobjectを配置しない。
 
 ## 設定と初回の順序
 
-以下は**実配備を任された段階の手順**。この PR では実行していない。`.example` の project、domain、SA、digest、region、scale は架空・例示値で、推奨容量や費用上限ではない。
+以下は汎用stg/main環境の初回配備手順。これらのrootは実配備していない。`.example` のproject、domain、SA、digest、region、scaleは架空・例示値で、推奨容量や費用上限ではない。
 
 1. 実 project と numeric project number、region、DNS 管理権、quota、公開対象、配信量・期間・予算・中止条件を決める。既存の bootstrap / stg / main / publisher identity を用意し、stg/main の実行 SA と state bucket を別にする。別 project を推奨する。project、billing account、実行 SA 自体はこのコードで作らない。
 2. `bootstrap/terraform.tfvars.example` を private な `.tfvars` に写し、必要権限を持つ既存 bootstrap identity の impersonation で state 専用 bucket を作る。bootstrap のローカル state は暗号化・アクセス制限された作業場所に保管する。公開・一般 asset bucket を backend に流用しない。
@@ -92,4 +105,4 @@ terraform -chdir=infra/gcp/modules/platform validate
 terraform -chdir=infra/gcp/modules/platform test
 ```
 
-2026-11-08: 上記は成功。mock は bootstrap 2 ケース、platform 4 ケースで、全 run を `command=plan` としている。空 catalog での app 未作成、runtime の外部 asset-origin と readonly snapshot、private origin の cache-fill identity、環境 state 分離、公開/非公開 bucket の混同・mutable image tag の拒否を確認した。mock は Google API の resource 間制約を再現しない。実 ADC を使う plan/apply、実起動、権限、DNS/CDN、quota、費用、GPU、10 万 CCU は検証していない。
+汎用rootのmockはbootstrap 2ケース、platform 4ケースで、全runを `command=plan` としている。空catalogでのapp未作成、外部asset-originとreadonly snapshot、private originのcache-fill identity、環境state分離、bucket混同・mutable image tagの拒否を確認する。mockはGoogle APIのresource間制約を再現しない。発表用の実plan/apply・起動・権限・DNS/CDN・GPU確認とは別の証拠として扱う。10万CCUはどちらでも未検証。
