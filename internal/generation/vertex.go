@@ -46,7 +46,7 @@ func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, er
 		}
 		image, serviceAccount = v.config.Live.Image, v.config.Live.ServiceAccount
 		// Decode the 34 original camera streams without starving GPU input.
-		machineType = "n1-standard-32"
+		machineType = "n1-standard-16"
 		args = []string{
 			"--input-uri", preset.InputURI, "--input-sha256", preset.InputSHA256,
 			"--output-prefix", "gs://" + v.config.OutputBucket + "/live/" + job.ID + "/",
@@ -54,7 +54,7 @@ func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, er
 			"--session-id", job.ID, "--deadline", job.CreatedAt.Add(MaxRuntime).Format(time.RFC3339Nano),
 			"--title", preset.Title, "--source", preset.Source, "--license", preset.License,
 			"--source-seconds", "10", "--seed-available-after", "0.8",
-			"--bootstrap-steps", "300", "--steps-per-update", "300", "--decode-workers", "24",
+			"--bootstrap-steps", "300", "--steps-per-update", "300", "--decode-workers", "16",
 		}
 	case "dynamic":
 		args = append(args, "--mode", "dynamic", "--steps", "12000")

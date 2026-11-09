@@ -15,7 +15,7 @@ const (
 	Location   = "asia-northeast1"
 	MaxRuntime = 30 * time.Minute
 	// Reserve a conservative $2 per attempt, at most $20 for this release. The
-	// compute is Spot T4 + n1-standard-4 (offline) or n1-standard-32 (live),
+	// compute is Spot T4 + n1-standard-4 (offline) or n1-standard-16 (live),
 	// without automatic retry. Both share the same ledger and reservation.
 	MaxAttempts = 10
 )
