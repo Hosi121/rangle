@@ -18,11 +18,17 @@ COPY apps/web/pubspec.yaml apps/web/pubspec.lock ./
 RUN flutter --suppress-analytics pub get --enforce-lockfile
 
 FROM web-deps AS web-build
-ARG RANGLE_API_URL=
+ARG RANGLE_API_URL=/api/v1/clips
+ARG RANGLE_DEMO=false
+ARG RANGLE_PREVIEW_URL=
+ARG RANGLE_SCENE_URL=
 COPY apps/web/ ./
 RUN npm run build --prefix viewer \
     && flutter --suppress-analytics build web --release --no-pub --no-web-resources-cdn \
-       --dart-define=RANGLE_API_URL="${RANGLE_API_URL}"
+       --dart-define=RANGLE_API_URL="${RANGLE_API_URL}" \
+       --dart-define=RANGLE_DEMO="${RANGLE_DEMO}" \
+       --dart-define=RANGLE_PREVIEW_URL="${RANGLE_PREVIEW_URL}" \
+       --dart-define=RANGLE_SCENE_URL="${RANGLE_SCENE_URL}"
 
 FROM golang:1.27.3-bookworm AS go-build
 WORKDIR /src

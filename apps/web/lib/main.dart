@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'app.dart';
-import 'data/api_clip_repository.dart';
+import 'config/app_config.dart';
 import 'data/clip_repository.dart';
 import 'community/community_api.dart';
 import 'generation/generation_api.dart';
@@ -10,22 +10,16 @@ import 'sharing/share_clip.dart';
 import 'viewer/free_view_adapter.dart';
 
 void main() {
-  const apiUrl = String.fromEnvironment('RANGLE_API_URL');
+  const config = AppConfig.fromEnvironment();
+  final communityEndpoint = config.communityEndpoint();
   runApp(
     RangleApp(
-      community: CommunityApi(
-        endpoint: Uri.base
-            .resolve(apiUrl.isEmpty ? '/api/v1/' : apiUrl)
-            .resolve('./'),
-      ),
+      community: communityEndpoint == null
+          ? null
+          : CommunityApi(endpoint: communityEndpoint),
       initialClipId: Uri.base.queryParameters['clip'],
       initialGeneration: Uri.base.queryParameters['generate'] == '1',
-      repository: apiUrl.isEmpty
-          ? const DemoClipRepository(
-              previewUrl: String.fromEnvironment('RANGLE_PREVIEW_URL'),
-              sceneUrl: String.fromEnvironment('RANGLE_SCENE_URL'),
-            )
-          : ApiClipRepository(endpoint: apiUrl),
+      repository: config.createClipRepository(),
     ),
   );
 }
