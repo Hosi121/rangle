@@ -107,7 +107,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			if generationService == nil {
 				return false, nil
 			}
-			return generationService.PublishedClipExists(ctx, id)
+			return generationService.CompletedClipExists(ctx, id)
 		},
 	})
 	for _, pattern := range []string{"/api/v1/auth/", "/api/v1/clips/{clip}/engagement", "/api/v1/clips/{clip}/likes", "/api/v1/clips/{clip}/comments", "/api/v1/clips/{clip}/comments/{comment}"} {

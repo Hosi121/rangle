@@ -1,6 +1,6 @@
 # 生成結果のフィード掲載
 
-生成結果の公開URLと、フィードへの掲載は別の状態として扱う。成功した生成結果は従来どおり `/demo/?clip=generated-{job-id}` で開ける。掲載すると通常の `/api/v1/clips` の検索・タグ・pagingに入り、同じclip IDでいいね・コメントを使える。掲載取り下げはフィードと新しいコミュニティ操作から外すもので、結果のURLやmedia bytesを非公開化・削除する操作ではない。
+生成結果の公開URLと、フィードへの掲載は別の状態として扱う。成功した生成結果は従来どおり `/demo/?clip=generated-{job-id}` で開ける。掲載すると通常の `/api/v1/clips` の検索・タグ・pagingに入る。成功した既知の結果は掲載前・取り下げ後も同じ共有URLから閲覧し、ログイン済みの第三者もいいね・コメントを使える。掲載取り下げはフィード一覧から外す操作で、共有リンク・交流操作・media bytesを非公開化・削除する操作ではない。
 
 ## APIと認可
 
@@ -32,7 +32,7 @@ static catalogは従来の厳格なtransport manifestを通して起動時に検
 
 公開URLと既存 `public, max-age=15, stale-while-revalidate=30` は維持する。掲載直後の明示更新では、UIが最初のmetadata GETへ `Cache-Control: no-cache` を付け、古いvalidatorを再検証する。originは必ずFirestoreの最新registryを読む。明示更新のない閲覧者にはHTTP cache期間中、旧フィードが残り得る。個人ID・nonce・時刻などのqueryで共有cacheを分断しない。
 
-communityの存在確認はstatic ID集合に加え、掲載済みgenerated IDを確認する。取り下げで既存のいいね・コメントを削除せず、再掲載でも同じIDの反応を維持する。
+communityの存在確認はstatic ID集合に加え、既知のgenerated IDのSucceeded jobを1件だけ確認する。public registryや掲載状態には依存せず、未成功・不明IDを拒否する。掲載前・取り下げ後も反応の閲覧とログイン済み利用者の投稿を続けられ、再掲載でも同じIDの反応を維持する。job一覧・job詳細・掲載管理の所有者制限は変えず、未掲載結果を列挙・探索するAPIを追加しない。
 
 ## 検証と運用範囲
 
