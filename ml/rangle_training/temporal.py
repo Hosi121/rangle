@@ -10,7 +10,8 @@ import time
 import numpy as np
 
 from .data import training_activity
-from .packing import TEMPORAL, compress_temporal, pack_temporal, unpack_temporal
+from .packing import TEMPORAL, pack_temporal, unpack_temporal
+from .packing import compress_temporal_smallest as compress_temporal
 
 
 def temporal_values(params, time_seconds):
