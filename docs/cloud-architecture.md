@@ -1,6 +1,27 @@
 # rangle のクラウド構成
 
-2026-11-08に構築した発表用stgの配信・配備経路を示す。正本は [Terraform](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。逐次GPU生成の拡張と実測は[クラウドLIVE](cloud-live.md)を参照。CI の変更は [PR #42](https://github.com/Hosi121/rangle/pull/42)。
+発表用stgを、全体・ML・配信の3図で示す。2026-11-10時点の `origin/stg`（`10bd7cd`）のcode・IaCと既存の検証記録に基づき、クラウドの現在状態を再照会したものではない。正本は `infra/gcp/environments/presentation` → [presentation module](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。汎用stgのplatform moduleとは別の構成である。
+
+| 図 | 読み取ること | 実装の入口 |
+| --- | --- | --- |
+| [全体構成を開く](diagrams/overview.html) | Flutter Web、Go API、Google Cloud上の有限GPU生成、CDN、下段のCI/CD | [Goの接続](../cmd/rangle-server/application.go)、[LBとCDN](../infra/gcp/modules/presentation/edge.tf) |
+| [ML処理を開く](diagrams/ml-pipeline.html) | 管理者の受付と共通台帳、NPZ/bundle、offlineとliveの分岐、検証・公開の出口 | [CustomJob](../internal/generation/vertex.go)、[offline worker](../ml/rangle_training/train.py)、[live worker](../ml/rangle_live/cloud.py) |
+| [配信処理を開く](diagrams/delivery.html) | feed/manifest・LIVE indexと、不変資産の取得、Worker復号・WebGL描画 | [LIVE配信契約](live-streaming.md)、[JS viewer](../apps/web/viewer/src/session.js)、[Worker](../apps/web/viewer/src/temporal-worker.js) |
+
+各HTMLはアイコン・日本語フォントを内包する。青実線はHTTP・モデルデータ、灰実線は制御・メタデータ、破線はCI/CD。全体図のHTTP双方向矢印は要求と応答を示す。PNGはこのHTMLからlight/darkの両方を生成する。[再生成・出典](diagrams/README.md)
+
+図は実装・設定による接続を示し、すべての機能が無条件で有効になるという意味ではない。生成は不変configのSHA、LIVEは専用設定とfeature flagを使って有効にする。[生成基盤](generation-infrastructure.md)と[クラウドLIVEの配備条件](cloud-live.md#権限と配備)を参照。
+
+- GPUはVertex AI CustomJobのTokyo Spot T4×1。Cloud RunはCPUのUI/APIであり、常駐GPUや独立したGCE workerを採用した図ではない。
+- 入力は承認済みの校正・同期済み複数カメラ録画とseed。任意の単眼uploadやRTMP/RTSP受信は含まない。liveでは録画を元のPTSで供給し、到着した画像だけで更新する。提供seed・校正は事前情報を含む。
+- クライアントはFlutter **Web**とJS iframe viewer。native mobileの実装・端末性能や大規模同時視聴を示すものではない。ABR・差分codecをこの配信経路へ追加した図でもない。
+- 実GPUで入力→逐次生成→CDN公開は確認済みだが、**30秒の遅延を継続して満たす目標は未達**。起動待ち・画質・破棄window・測定範囲は[実測](cloud-live.md#2026-11-09の実gpu検証)を参照する。
+
+LIVEの処理待ちは最新window 1件で、評価4視点の画素は学習から除外する。配信側も待ち更新を最新1件にまとめ、新モデルの準備中は旧モデルと視点を保持する。通常のpreview動画はFlutter側の別経路で再生し、Goは大容量モデルを中継しない。
+
+## 旧配備図（2026-11-08）
+
+以下は初期の配信・配備図として保持する。ML生成とLIVEの更新経路を含まないため、現在の全体説明には上の3図を使う。
 
 ![rangle: Cloudflare DNSからGoogle HTTPS LBへ接続し、Cloud RunのUI/APIとCloud CDN・private GCSのmediaへ分岐する構成。下段はWIFによる配備と予算・期限停止。](diagrams/cloud-architecture.svg)
 
@@ -34,7 +55,7 @@ Cloud Run / NEG / LB / Cloud CDN / private GCS は作成済み。app / mediaの�
 
 guard は期限前の `stopped=false / reason=not_due`、Scheduler による起動、費用0円の検証通知の decode・閾値判定・ack を確認済み。予算・期限到達時に資源を削除する分岐と、その実 IAM は未検証。実際の到達点の更新先は [stg 配備手順](stg-deployment.md#検証と到達点)。
 
-## 図の再生成
+## 旧配備図の再生成
 
 SVG は1920×1080、PNG は3840×2160。文字・線・図形・公式アイコンのパスを含む SVG で、スクリーンショットではない。生成元にアイコンを埋め込んでいるためネットワーク接続は不要。
 
@@ -44,7 +65,7 @@ python3 docs/diagrams/cloud-architecture.py
 python3 docs/diagrams/cloud-architecture.py --png
 ```
 
-Google の [公式アイコン](https://cloud.google.com/icons) と [製品アイコンガイド（2026年5月版）](https://services.google.com/fh/files/misc/google-cloud-product-icons.pdf) を使用。アイコン・商標は Google LLC に帰属する。
+Google の [公式アイコン](https://cloud.google.com/icons) と [製品アイコンガイド（2026年5月版）](https://services.google.com/fh/files/misc/google-cloud-product-icons.pdf) を使用。アイコン・商標は Google LLC に帰属する。新しい3図の再生成は[別手順](diagrams/README.md)を使う。
 
 ## GCP向けスキルの確認
 
