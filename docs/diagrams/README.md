@@ -6,32 +6,20 @@
 
 ## PNGだけを生成する
 
-使用したtool commitは **`5af3b095fff7109c905c5284dc510dc06588bade`**。Python 3.14.9、Playwright 1.64.1、Chromium revision 1248で確認した。必要な依存は一時venvに置き、projectのruntimeやCI依存は増やさない。以下はrepo rootで実行する。`uv`がない環境では通常のvenvとpipでも同じversionを使用できる。
+HTML生成に使用したtool commitは **`5af3b095fff7109c905c5284dc510dc06588bade`**。PNG出力はrepoの`render-architecture-views.py`を使い、Python 3.14.9、Playwright 1.64.1、Chromium revision 1248で確認した。必要な依存は一時venvに置き、projectのruntimeやCI依存は増やさない。以下はrepo rootで実行する。`uv`がない環境では通常のvenvとpipでも同じversionを使用できる。
 
 ```bash
 diagram_work=$(mktemp -d)
 git clone https://github.com/caru-ini/stack-diagram.git "$diagram_work/stack-diagram"
 git -C "$diagram_work/stack-diagram" checkout --detach 5af3b095fff7109c905c5284dc510dc06588bade
 uv venv "$diagram_work/venv" --python 3.14
-uv pip install --python "$diagram_work/venv/bin/python" 'playwright==1.64.1' 'fonttools[woff]==4.61.1'
+uv pip install --python "$diagram_work/venv/bin/python" 'playwright==1.64.1' 'fonttools[woff]==4.61.1' 'cairosvg==2.9.1'
 "$diagram_work/venv/bin/python" -m playwright install chromium
 mkdir -p .local/qa/architecture-views
 for diagram in overview ml-pipeline delivery observability; do
-  # Set the theme before loading: toggling a loaded page can drop SVGs in Chromium.
-  python3 - "docs/diagrams/$diagram.html" "$diagram_work/$diagram-dark.html" <<'PY'
-from pathlib import Path
-import sys
-source = Path(sys.argv[1]).read_text()
-Path(sys.argv[2]).write_text(source.replace('<html lang="ja">', '<html lang="ja" data-theme="dark">', 1))
-PY
   "$diagram_work/venv/bin/python" \
-    "$diagram_work/stack-diagram/skills/stack-diagram/scripts/render_png.py" \
-    "docs/diagrams/$diagram.html" ".local/qa/architecture-views/$diagram.png" \
-    --selector .canvas --scale 2 --single
-  "$diagram_work/venv/bin/python" \
-    "$diagram_work/stack-diagram/skills/stack-diagram/scripts/render_png.py" \
-    "$diagram_work/$diagram-dark.html" ".local/qa/architecture-views/$diagram-dark.png" \
-    --selector .canvas --scale 2 --single
+    docs/diagrams/render-architecture-views.py \
+    "docs/diagrams/$diagram.html" ".local/qa/architecture-views/$diagram.png" --scale 2
 done
 ```
 
@@ -63,4 +51,4 @@ JPフォントはNoto Sans CJK Regularのcollection 0（`Noto Sans CJK JP`）を
 
 最終確認では、全8PNGの文字・線・group padding・dark時のロゴを読む。HTMLに未解決token、外部script/CSS/画像依存、私的環境情報がないことも確認する。公開galleryへの送信は行わない。
 
-PNG出力はlight/darkを別documentとして読み込む。白地のbrand tileは `color-scheme: light` に固定し、文字背景の半透明veilは維持してbackdrop blurを無効にしている。Chromiumのdark出力で一部のSVGが欠ける現象を避けるため。dark用の一時HTMLも同じ正本からattributeを変えただけのもので、描画コードは共通である。
+PNG出力はlight/darkを別pageへ読み込み、フォントと全画像のdecode完了を待って撮影する。PNG専用のdocumentではページ見出し・nav・footer等を非表示にしてcanvas全体をviewport内へ収める。ChromiumのSVG image cacheによる欠けを避けるため、出力時だけ埋め込みアイコンをCairoSVG 2.9.1で幅512pxのPNGへ変換し、元の縦横比を維持する。HTMLの正本には公式SVGを保持し、canvasの配置・文字・線は共通である。閲覧用HTMLのページ要素は残す。
