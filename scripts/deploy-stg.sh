@@ -53,12 +53,35 @@ readonly app_origin media_origin
 }
 readonly receipt_path=$RELEASE_RECEIPT_PATH
 [[ ! -e $receipt_path && ! -L $receipt_path ]] || { echo 'Release receipt already exists.' >&2; exit 1; }
-readonly tag="candidate-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+# Reserved by the serialized deploy-rangle-stg workflow and the IaC-owned NEG.
+readonly tag=ci-candidate
 work=$(mktemp -d)
 promotion_attempted=false
 candidate_created=false
 previous_traffic=''
 cloud_run() { gcloud run "$@" --project="$project" --region="$region" --quiet; }
+expect_direct_rejected() {
+  local status
+  status=$(curl --silent --show-error --proto '=https' --connect-timeout 5 --max-time 20 \
+    --output /dev/null --write-out '%{http_code}' "$1/health") || return
+  [[ $status == 404 ]] || {
+    echo "Public run.app ingress was not rejected (HTTP $status)." >&2; return 1;
+  }
+}
+probe_candidate() {
+  local attempt
+  # Tag routing can take time to converge. A stale revision with the same
+  # catalog must fail HTTP revision verification, never pass via the default.
+  for attempt in 1 2 3 4 5; do
+    if EXPECTED_CATALOG_SHA256="$expected_catalog_sha" EXPECTED_REVISION="$revision" \
+      RANGLE_CANDIDATE_PROBE="$tag" bash "$script_dir/check-deployment.sh" "$app_origin"; then
+      return 0
+    fi
+    [[ $attempt != 5 ]] || return 1
+    check_deadline || return
+    sleep 2
+  done
+}
 cleanup() {
   local result=$?
   trap - EXIT
@@ -97,6 +120,7 @@ done
 # Verify actual served revisions before making changes. The desired service
 # template can already contain a different Terraform-selected catalog.
 python3 "$script_dir/release-receipt.py" plan "$work/before.json" "$media_origin" "$work/previous" > /dev/null
+expect_direct_rejected "$service_url"
 check_deadline
 # Let Cloud Run name the revision. A tag on this update makes gcloud persist an
 # explicit template revision, causing drift on the next Terraform runtime edit.
@@ -134,14 +158,15 @@ else:
 PY
 )
 [[ -n $candidate_url ]] || { echo 'Candidate URL missing.' >&2; exit 1; }
-EXPECTED_CATALOG_SHA256="$expected_catalog_sha" bash "$script_dir/check-deployment.sh" "$candidate_url"
+expect_direct_rejected "$candidate_url"
+probe_candidate
 check_deadline
 promotion_attempted=true
 cloud_run services update-traffic "$service" --to-revisions="$revision=100"
-EXPECTED_CATALOG_SHA256="$expected_catalog_sha" bash "$script_dir/check-deployment.sh" "$service_url"
-EXPECTED_CATALOG_SHA256="$expected_catalog_sha" bash "$script_dir/check-deployment.sh" "$app_origin"
+EXPECTED_CATALOG_SHA256="$expected_catalog_sha" EXPECTED_REVISION="$revision" \
+  RANGLE_CANDIDATE_PROBE='' bash "$script_dir/check-deployment.sh" "$app_origin"
 cloud_run services describe "$service" --format=json > "$work/after.json"
 cloud_run revisions describe "$revision" --format=json > "$work/verified-revision.json"
 python3 "$script_dir/release-receipt.py" write "$work/before.json" "$work/previous" \
   "$work/after.json" "$work/verified-revision.json" "$revision" "$media_origin" "$receipt_path"
-printf 'Verified stg revision %s at %s and %s\n' "$revision" "$service_url" "$app_origin"
+printf 'Verified stg revision %s through %s; public run.app ingress rejected.\n' "$revision" "$app_origin"

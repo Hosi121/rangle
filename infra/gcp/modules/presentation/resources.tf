@@ -20,6 +20,7 @@ resource "google_project_service" "required" {
     "artifactregistry.googleapis.com", "run.googleapis.com", "storage.googleapis.com",
     "iam.googleapis.com", "iamcredentials.googleapis.com", "sts.googleapis.com",
     "compute.googleapis.com", "pubsub.googleapis.com",
+    "logging.googleapis.com", "monitoring.googleapis.com",
     "workflows.googleapis.com", "workflowexecutions.googleapis.com", "cloudscheduler.googleapis.com", "billingbudgets.googleapis.com"
   ])
   project            = var.project_id
@@ -116,13 +117,15 @@ resource "google_service_account_iam_member" "runtime_act_as" {
   }
 }
 
+# Keep the URI available to Google-managed callers; ingress rejects public
+# run.app requests, including revision-tag URLs. CI probes through the LB.
 resource "google_cloud_run_v2_service" "app" {
   count                = local.app_enabled ? 1 : 0
   project              = var.project_id
   name                 = local.prefix
   location             = var.region
   deletion_protection  = false # The scheduled guard deletes this owned service.
-  ingress              = "INGRESS_TRAFFIC_ALL"
+  ingress              = "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER"
   default_uri_disabled = false
   invoker_iam_disabled = true
   labels               = local.labels

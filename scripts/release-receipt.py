@@ -130,6 +130,9 @@ def traffic(document):
 def plan(before, expected_origin):
     if origin(expected_origin) != expected_origin:
         raise ValueError("Invalid approved media origin.")
+    ingress = before.get("metadata", {}).get("annotations", {}).get("run.googleapis.com/ingress")
+    if ingress != "internal-and-cloud-load-balancing":
+        raise ValueError("Apply the LB-only ingress and candidate route before deploying.")
     service_url = before.get("status", {}).get("url", "")
     parsed = urlsplit(service_url)
     if origin(service_url) != service_url or not parsed.hostname.endswith(".run.app"):

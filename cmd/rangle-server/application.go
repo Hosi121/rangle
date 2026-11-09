@@ -35,6 +35,7 @@ type config struct {
 	GenerationSyncAudience string
 	LiveIndex              string
 	LiveAssetsRoot         string
+	ServingRevision        string
 }
 
 type application struct {
@@ -83,6 +84,13 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	}
 	mux := http.NewServeMux()
 	app = &application{Handler: limitAPIRequests(mux, logger)}
+	if cfg.ServingRevision != "" {
+		next := app.Handler
+		app.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Rangle-Revision", cfg.ServingRevision)
+			next.ServeHTTP(w, r)
+		})
+	}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, app.Close())

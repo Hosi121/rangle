@@ -102,6 +102,29 @@ func TestApplicationExternalOriginNeedsNoLocalAssets(t *testing.T) {
 	}
 }
 
+func TestServingRevisionIsReportedOnEveryPath(t *testing.T) {
+	for _, revision := range []string{"", "rangle-stg-00003-abc"} {
+		t.Run(revision, func(t *testing.T) {
+			cfg, _, _ := publishedFixture(t)
+			cfg.ServingRevision = revision
+			app, err := newApplication(cfg, slog.New(slog.NewJSONHandler(io.Discard, nil)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer app.Close()
+			for _, path := range []string{"/health", "/api/v1/clips", "/api/v1/live", "/missing"} {
+				request := httptest.NewRequest(http.MethodGet, path, nil)
+				request.Header.Set("X-Rangle-Revision", "spoofed-revision")
+				response := httptest.NewRecorder()
+				app.ServeHTTP(response, request)
+				if got := response.Header().Get("X-Rangle-Revision"); got != revision {
+					t.Fatalf("%s revision = %q, want %q", path, got, revision)
+				}
+			}
+		})
+	}
+}
+
 func TestApplicationRejectsIncompleteConfiguration(t *testing.T) {
 	cfg, _, _ := publishedFixture(t)
 	for _, invalid := range []config{

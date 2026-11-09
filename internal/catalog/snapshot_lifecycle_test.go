@@ -90,7 +90,7 @@ func startSnapshotProcess(t *testing.T, binary, catalogPath, origin string) snap
 		scanner := bufio.NewScanner(logs)
 		for scanner.Scan() {
 			var event struct {
-				Message string `json:"msg"`
+				Message string `json:"message"`
 				Address string `json:"listen_addr"`
 			}
 			if json.Unmarshal(scanner.Bytes(), &event) == nil && event.Message == "server started" {

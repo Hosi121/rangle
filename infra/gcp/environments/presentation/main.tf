@@ -23,3 +23,4 @@ module "presentation" {
 }
 output "deployment" { value = module.presentation.deployment }
 output "budget_guard" { value = module.presentation.budget_guard }
+output "observability" { value = module.presentation.observability }

@@ -16,14 +16,16 @@ Go＋Flutter Webをマルチステージで1つの非root imageにまとめ、di
 
 1. 実行元・設定・期限を確認し、共通の検証を通す。
 2. imageをbuild/pushし、通常trafficを流さず候補revisionを作る。
-3. 候補のtag付き `run.app` でhealth・UI・APIと公開メディアURLを確認する。
-4. 候補へtrafficを100%切り替え、通常の `run.app` と `https://app.<domain>` をHTTPSで再確認する。
+3. 既定 `run.app` と候補tag付きURLの外部直通拒否を確認する。固定tag `ci-candidate` を使い、`https://app.<domain>` に `X-Rangle-Candidate: ci-candidate` を付け、LB経由で候補のhealth・UI・APIと公開メディアURLを確認する。
+4. 候補へtrafficを100%切り替え、候補指定headerなしで `https://app.<domain>` をHTTPSで再確認する。
 
 昇格時・昇格後の確認に失敗したら、以前のrevisionとtraffic比率へ戻す。正常終了・エラー時とも、その実行で作った候補タグの削除を試みる。
 
 フィード先頭は通常catalogのクリップと、掲載済みの生成結果の両方を受け付ける。生成結果はtransport codec/manifestを持たない契約のまま、ID・revision・固定scene pathとmedia originを照合する。不完全なtransport情報や別jobのsceneは昇格を止める。この確認はHTTPの接続・metadata検査で、ブラウザ描画や実機性能の検証とは別。
 
-CI deployはruntime argsの `/mnt/catalog/snapshots/<64hex>.json` から期待する静的catalog SHAを取り、候補・通常service・公開appの3つのprobeへ必ず渡す。APIの `X-Rangle-Catalog-SHA256` が一致しなければ、候補では昇格を止め、公開確認では元のtraffic配分へ戻す。生成結果が先頭でも、このheaderはbase static catalogの元JSON bytesを識別する。`check-deployment.sh` 単体では `EXPECTED_CATALOG_SHA256` の指定を任意とし、既存の呼出しも使える。
+CI deployはruntime argsの `/mnt/catalog/snapshots/<64hex>.json` から期待する静的catalog SHAを取り、LB経由の候補・公開appのprobeへ必ず渡す。APIの `X-Rangle-Catalog-SHA256` に加え、全probeの `X-Rangle-Revision` が候補revisionと一致することを確認する。revisionはCloud Runの `K_REVISION` から取得し、request headerを信用しない。候補ルートの反映遅延で旧版が応答しても合格にしない。候補では昇格を止め、公開確認では元のtraffic配分へ戻す。生成結果が先頭でもcatalog headerはbase static catalogの元JSON bytesを識別する。`check-deployment.sh` 単体では `EXPECTED_CATALOG_SHA256`・`EXPECTED_REVISION` を任意とする。
+
+TerraformがLB用の候補NEG/backend・header routeとingressを所有し、CIは専用固定tagとimage/trafficだけを操作する。候補headerはrouting selectorであり、操作認可を省略しない。直列deployを維持し、専用tagを別のworkflowや手動配備と共有しない。切替手順と未実施のクラウド検証は[配備手順](stg-deployment.md#lb入口制限への切替)を参照する。
 
 ## release receipt
 
@@ -43,7 +45,7 @@ CI deployはruntime argsの `/mnt/catalog/snapshots/<64hex>.json` から期待�
 
 guard・期限・候補no-traffic・実instance設定・元trafficの厳密復帰・自分の候補tagだけを消す契約は維持する。receiptの保存やartifact uploadにGCP/IAM設定を追加しない。artifact保持期限後の長期保存や、mainへのdigest昇格は別の判断であり、この記録だけで完了したとは扱わない。
 
-ローカルの `python3 scripts/deploy-stg.test.py` はgcloud/curl/dateをstubに置き換え、Cloud APIへ接続しない。desired templateと実配信revisionが異なるケース、未知の旧版field、秘密の非export、候補/公開catalog SHA不一致、候補100%・image/args不一致、receipt/Summary書込失敗、partial promotionのrollbackを確認する。通常catalog・generated-firstの両方を維持する。100k性能や少量trafficの合否、実ブラウザ描画を測るテストではない。
+ローカルの `python3 scripts/deploy-stg.test.py` はgcloud/curl/date/sleepをstubに置き換え、Cloud APIへ接続しない。desired templateと実配信revisionが異なるケース、未知の旧版field、秘密の非export、候補/公開catalog SHA不一致、候補100%・image/args不一致、receipt/Summary書込失敗、partial promotionのrollbackを確認する。通常catalog・generated-firstの両方を維持する。100k性能や少量trafficの合否、実ブラウザ描画を測るテストではない。
 
 ## 初期設定
 
