@@ -97,7 +97,15 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			clipIDs[m.ClipID] = true
 		}
 	}
-	interactions := community.NewHandler(community.Config{Store: store, ClipIDs: clipIDs, SecureCookies: cfg.SecureCookies, Logger: logger})
+	generationService := cfg.GenerationService
+	interactions := community.NewHandler(community.Config{Store: store, ClipIDs: clipIDs, SecureCookies: cfg.SecureCookies, Logger: logger,
+		ClipExists: func(ctx context.Context, id string) (bool, error) {
+			if generationService == nil {
+				return false, nil
+			}
+			return generationService.PublishedClipExists(ctx, id)
+		},
+	})
 	for _, pattern := range []string{"/api/v1/auth/", "/api/v1/clips/{clip}/engagement", "/api/v1/clips/{clip}/likes", "/api/v1/clips/{clip}/comments", "/api/v1/clips/{clip}/comments/{comment}"} {
 		mux.Handle(pattern, interactions)
 	}
@@ -126,7 +134,6 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	if err != nil {
 		return app, err
 	}
-	generationService := cfg.GenerationService
 	if cfg.GenerationFile != "" {
 		file, err := os.Open(cfg.GenerationFile)
 		if err != nil {
@@ -154,6 +161,11 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		generationService = &generation.Service{Config: settings, Store: database, Provider: provider, Logger: logger}
 	}
 	if generationService != nil {
+		generationService.ReservedClipID = func(id string) bool { return clipIDs[id] }
+		api, err = catalog.WithPublicClips(api, generationService.PublicClips)
+		if err != nil {
+			return app, err
+		}
 		jobs, err := generation.NewHandler(generationService, func(r *http.Request) (string, error) {
 			user, err := interactions.SessionUser(r)
 			if err != nil || user == nil {

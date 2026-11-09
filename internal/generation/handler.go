@@ -37,6 +37,7 @@ func NewHandler(service *Service, user func(*http.Request) (string, error)) (*Ha
 	mux.HandleFunc("GET /api/v1/generation/jobs", h.list)
 	mux.HandleFunc("GET /api/v1/generation/jobs/{job}", h.get)
 	mux.HandleFunc("DELETE /api/v1/generation/jobs/{job}", h.cancel)
+	mux.HandleFunc("PUT /api/v1/generation/jobs/{job}/publication", h.publication)
 	protected := http.NewCrossOriginProtection().Handler(mux)
 	h.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -60,6 +61,8 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	switch {
 	case errors.Is(err, ErrNotFound):
 		code, message = 404, "not_found"
+	case errors.Is(err, ErrArtifacts):
+		code, message = 409, "artifacts_not_ready"
 	case errors.Is(err, ErrInvalid):
 		code, message = 400, "invalid_request"
 	case errors.Is(err, ErrBusy):
@@ -105,6 +108,7 @@ func (h *Handler) presets(w http.ResponseWriter, r *http.Request) {
 }
 
 type jobView struct {
+	Published bool      `json:"published"`
 	ID        string    `json:"id"`
 	Preset    string    `json:"preset"`
 	Mode      string    `json:"mode"`
@@ -115,7 +119,7 @@ type jobView struct {
 
 func viewJob(j Job) jobView {
 	return jobView{
-		ID: j.ID, Preset: j.Preset, Mode: j.Snapshot.ModeName(), State: j.State,
+		Published: j.Published, ID: j.ID, Preset: j.Preset, Mode: j.Snapshot.ModeName(), State: j.State,
 		CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
 	}
 }
@@ -254,15 +258,50 @@ func (h *Handler) ClipHandler(fallback http.Handler) http.Handler {
 			h.fail(w, r, ErrNotFound)
 			return
 		}
-		model := "3DGS"
-		if preset.ModeName() == "dynamic" {
-			model = "4DGS"
-		}
-		h.write(w, r, 200, map[string]any{
-			"id": "generated-" + id, "revision": id, "title": preset.Title + "（生成した" + model + "）", "sport": preset.Sport,
-			"description": preset.Description + "\n" + preset.Source + " / " + preset.License,
-			"tags":        []string{preset.Sport, model}, "preview_url": preset.PreviewURL,
-			"scene_url": h.service.Config.MediaOrigin + "/generated/" + id + "/scene.json",
-		})
+		h.write(w, r, 200, publicClip(job, h.service.Config.MediaOrigin))
 	})
+}
+
+func (h *Handler) publication(w http.ResponseWriter, r *http.Request) {
+	owner, ok := h.owner(w, r)
+	if !ok {
+		return
+	}
+	if !requestID.MatchString(r.PathValue("job")) || r.URL.RawQuery != "" {
+		h.fail(w, r, ErrNotFound)
+		return
+	}
+	contentType, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || contentType != "application/json" {
+		h.fail(w, r, ErrInvalid)
+		return
+	}
+	var input struct {
+		Published *bool `json:"published"`
+	}
+	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF || input.Published == nil {
+		h.fail(w, r, ErrInvalid)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
+	defer cancel()
+	job, err := h.service.SetPublication(ctx, owner, r.PathValue("job"), *input.Published)
+	if err != nil {
+		if errors.Is(err, ErrArtifacts) {
+			h.write(w, r, 409, map[string]string{"error": "publication_unavailable"})
+			return
+		}
+		if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrInvalid) && !errors.Is(err, ErrConflict) && !errors.Is(err, ErrBusy) && !errors.Is(err, ErrBudget) && !errors.Is(err, ErrExpired) {
+			if h.service.Logger != nil {
+				h.service.Logger.ErrorContext(ctx, "generation publication failed", "job_id", r.PathValue("job"), "error", err)
+			}
+			h.write(w, r, 503, map[string]string{"error": "publication_unavailable"})
+			return
+		}
+		h.fail(w, r, err)
+		return
+	}
+	h.write(w, r, 200, h.response(job))
 }

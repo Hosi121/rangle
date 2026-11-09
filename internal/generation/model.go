@@ -34,6 +34,7 @@ const (
 func (s State) Terminal() bool { return s == Succeeded || s == Failed || s == Cancelled }
 
 type Job struct {
+	Published    bool      `firestore:"published" json:"published"`
 	ID           string    `firestore:"id" json:"id"`
 	Owner        string    `firestore:"owner" json:"-"`
 	Preset       string    `firestore:"preset" json:"preset"`

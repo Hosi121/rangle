@@ -27,33 +27,37 @@ func newSearchEntry(view clipView) searchEntry {
 
 // Search uses the whole startup catalog, before pagination. Its cursor is bound
 // to the normalized filter so it cannot silently skip results of another search.
-func (h *handler) selectClips(query url.Values) ([]jsonDocument, string, error) {
+func (h *handler) selectClips(query url.Values) (clipSelection, string, error) {
 	q, tag := query.Get("q"), query.Get("tag")
 	if len(q) > 256 || !utf8.ValidString(q) || len(strings.Fields(q)) > 8 ||
 		(tag != "" && !validTag(tag)) {
-		return nil, "", fmt.Errorf("invalid search")
+		return clipSelection{}, "", fmt.Errorf("invalid search")
 	}
 	terms := strings.Fields(strings.ToLower(q))
 	tag = strings.ToLower(tag)
 	if len(terms) == 0 && tag == "" {
-		return h.clips, h.snapshot, nil
+		return clipSelection{first: h.extra, second: h.clips}, h.snapshot, nil
 	}
 	sum := sha256.Sum256([]byte(h.snapshot + "\n" + strings.Join(terms, " ") + "\n" + tag))
 	selected := make([]jsonDocument, 0)
-	for i, entry := range h.search {
-		if tag != "" && !entry.tags[tag] {
-			continue
-		}
-		matches := true
-		for _, term := range terms {
-			if !strings.Contains(entry.text, term) {
-				matches = false
-				break
+	collect := func(search []searchEntry, clips []jsonDocument) {
+		for i, entry := range search {
+			if tag != "" && !entry.tags[tag] {
+				continue
+			}
+			matches := true
+			for _, term := range terms {
+				if !strings.Contains(entry.text, term) {
+					matches = false
+					break
+				}
+			}
+			if matches {
+				selected = append(selected, clips[i])
 			}
 		}
-		if matches {
-			selected = append(selected, h.clips[i])
-		}
 	}
-	return selected, hex.EncodeToString(sum[:]), nil
+	collect(h.extraSearch, h.extra)
+	collect(h.search, h.clips)
+	return clipSelection{first: selected}, hex.EncodeToString(sum[:]), nil
 }

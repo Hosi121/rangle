@@ -4,15 +4,18 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/http"
 	"time"
 )
 
 type Service struct {
-	Config   Config
-	Store    Store
-	Provider Provider
-	Logger   *slog.Logger
-	Now      func() time.Time
+	MediaClient    *http.Client
+	ReservedClipID func(string) bool
+	Config         Config
+	Store          Store
+	Provider       Provider
+	Logger         *slog.Logger
+	Now            func() time.Time
 }
 
 func (s *Service) now() time.Time {
