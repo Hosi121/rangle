@@ -191,3 +191,85 @@ func (s *FirestoreStore) Transition(ctx context.Context, id, name string, state 
 	})
 	return
 }
+
+// One aggregate document bounds every public feed revalidation to one read.
+// The admission ledger caps the entire release at MaxAttempts jobs.
+type publicRegistry struct {
+	Entries []Publication `firestore:"entries"`
+}
+
+func (s *FirestoreStore) registry() *firestore.DocumentRef {
+	return s.client.Collection("generation_control").Doc("public_feed")
+}
+func decodeRegistry(snapshot *firestore.DocumentSnapshot, err error) (publicRegistry, error) {
+	if status.Code(err) == codes.NotFound {
+		return publicRegistry{}, nil
+	}
+	if err != nil {
+		return publicRegistry{}, err
+	}
+	var registry publicRegistry
+	if err := snapshot.DataTo(&registry); err != nil {
+		return registry, err
+	}
+	if len(registry.Entries) > MaxAttempts {
+		return publicRegistry{}, ErrBudget
+	}
+	seen := map[string]bool{}
+	for _, entry := range registry.Entries {
+		if !requestID.MatchString(entry.JobID) || seen[entry.JobID] || entry.Clip.ID != "generated-"+entry.JobID || entry.Clip.ValidateGenerated() != nil || !entry.validProofs() {
+			return publicRegistry{}, fmt.Errorf("invalid publication registry")
+		}
+		seen[entry.JobID] = true
+	}
+	return registry, nil
+}
+func (s *FirestoreStore) Publications(ctx context.Context) ([]Publication, error) {
+	registry, err := decodeRegistry(s.registry().Get(ctx))
+	return registry.Entries, err
+}
+func (s *FirestoreStore) SetPublication(ctx context.Context, owner, id string, publication *Publication, now time.Time) (result Job, err error) {
+	err = s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
+		job, err := decodeJob(tx.Get(s.jobs().Doc(id)))
+		if err != nil {
+			return err
+		}
+		if job.Owner != owner {
+			return ErrNotFound
+		}
+		if job.State != Succeeded {
+			return ErrConflict
+		}
+		registry, err := decodeRegistry(tx.Get(s.registry()))
+		if err != nil {
+			return err
+		}
+		result = job
+		if job.Published == (publication != nil) {
+			return nil
+		}
+		entries := make([]Publication, 0, len(registry.Entries)+1)
+		for _, entry := range registry.Entries {
+			if entry.JobID != id {
+				entries = append(entries, entry)
+			}
+		}
+		if publication != nil {
+			if publication.JobID != id || publication.Clip.ID != "generated-"+id || publication.Clip.ValidateGenerated() != nil || !publication.validProofs() {
+				return ErrInvalid
+			}
+			if len(entries) >= MaxAttempts {
+				return ErrBudget
+			}
+			entries = append(entries, *publication)
+		}
+		sort.Slice(entries, func(i, j int) bool { return entries[i].JobID < entries[j].JobID })
+		result.Published = publication != nil
+		result.UpdatedAt = now
+		if err := tx.Update(s.jobs().Doc(id), []firestore.Update{{Path: "published", Value: result.Published}, {Path: "updated_at", Value: now}}); err != nil {
+			return err
+		}
+		return tx.Set(s.registry(), publicRegistry{Entries: entries})
+	})
+	return
+}

@@ -1,0 +1,326 @@
+package generation
+
+import (
+	"bytes"
+	"compress/gzip"
+	"context"
+	"crypto/sha256"
+	"encoding/binary"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"net/http"
+	"strings"
+	"time"
+
+	"github.com/Hosi121/rangle/internal/catalog"
+)
+
+// Publication is separate from the transport catalog. These are validated,
+// immutable viewer outputs, not synthetic stream.Manifest representations.
+type Publication struct {
+	JobID     string             `firestore:"job_id"`
+	Clip      catalog.PublicClip `firestore:"clip"`
+	Scene     ArtifactProof      `firestore:"scene"`
+	Metrics   ArtifactProof      `firestore:"metrics"`
+	Model     ArtifactProof      `firestore:"model"`
+	ModelName string             `firestore:"model_name"`
+}
+type ArtifactProof struct {
+	Bytes  int64  `firestore:"bytes"`
+	SHA256 string `firestore:"sha256"`
+}
+
+type PublicationStore interface {
+	Publications(context.Context) ([]Publication, error)
+	SetPublication(context.Context, string, string, *Publication, time.Time) (Job, error)
+}
+
+var ErrArtifacts = errors.New("generated artifacts are not ready for publication")
+
+func publicClip(job Job, origin string) catalog.PublicClip {
+	p := job.Snapshot
+	model := "3DGS"
+	if p.ModeName() == "dynamic" {
+		model = "4DGS"
+	}
+	return catalog.PublicClip{
+		ID: "generated-" + job.ID, Revision: job.ID, Title: p.Title + "（生成した" + model + "）", Sport: p.Sport,
+		Description: p.Description + "\n" + p.Source + " / " + p.License,
+		Tags:        catalog.GeneratedTags(p.Sport, model), PreviewURL: p.PreviewURL,
+		SceneURL: origin + "/generated/" + job.ID + "/scene.json",
+	}
+}
+
+func (s *Service) SetPublication(ctx context.Context, owner, id string, published bool) (Job, error) {
+	if owner == "" || !requestID.MatchString(id) {
+		return Job{}, ErrNotFound
+	}
+	job, err := s.Store.Get(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	if job.Owner != owner {
+		return Job{}, ErrNotFound
+	}
+	if job.State != Succeeded || published && s.ReservedClipID != nil && s.ReservedClipID("generated-"+id) {
+		return Job{}, ErrConflict
+	}
+	store, ok := s.Store.(PublicationStore)
+	if !ok {
+		return Job{}, fmt.Errorf("publication storage unavailable")
+	}
+	if job.Published == published {
+		return job, nil
+	}
+	var publication *Publication
+	if published {
+		validated, err := s.validatePublication(ctx, job)
+		if err != nil {
+			return Job{}, fmt.Errorf("%w: %v", ErrArtifacts, err)
+		}
+		publication = &validated
+	}
+	result, err := store.SetPublication(ctx, owner, id, publication, s.now())
+	if err == nil && s.Logger != nil {
+		s.Logger.InfoContext(ctx, "generation publication changed", "job_id", id, "published", result.Published)
+	}
+	return result, err
+}
+
+func (s *Service) PublicClips(ctx context.Context) ([]catalog.PublicClip, error) {
+	store, ok := s.Store.(PublicationStore)
+	if !ok {
+		return nil, fmt.Errorf("publication storage unavailable")
+	}
+	publications, err := store.Publications(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(publications) > MaxAttempts {
+		return nil, ErrBudget
+	}
+	clips := make([]catalog.PublicClip, 0, len(publications))
+	for _, publication := range publications {
+		if !requestID.MatchString(publication.JobID) || publication.Clip.ID != "generated-"+publication.JobID ||
+			publication.Clip.SceneURL != s.Config.MediaOrigin+"/generated/"+publication.JobID+"/scene.json" ||
+			publication.Clip.ValidateGenerated() != nil || !publication.validProofs() {
+			return nil, fmt.Errorf("invalid generated publication registry")
+		}
+		clips = append(clips, publication.Clip)
+	}
+	return clips, nil
+}
+
+func (s *Service) PublishedClipExists(ctx context.Context, id string) (bool, error) {
+	raw, ok := strings.CutPrefix(id, "generated-")
+	if !ok || !requestID.MatchString(raw) {
+		return false, nil
+	}
+	clips, err := s.PublicClips(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, clip := range clips {
+		if clip.ID == id {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (p Publication) validProofs() bool {
+	if p.ModelName != "model.splat" && p.ModelName != "model.rgs" {
+		return false
+	}
+	for index, proof := range []ArtifactProof{p.Scene, p.Metrics, p.Model} {
+		maximum := int64(32 << 20)
+		if index == 0 {
+			maximum = 64 << 10
+		}
+		if index == 1 {
+			maximum = 256 << 10
+		}
+		if proof.Bytes <= 0 || proof.Bytes > maximum || !checksum.MatchString(proof.SHA256) {
+			return false
+		}
+	}
+	return true
+}
+
+func proof(data []byte) ArtifactProof {
+	sum := sha256.Sum256(data)
+	return ArtifactProof{int64(len(data)), hex.EncodeToString(sum[:])}
+}
+
+func (s *Service) validatePublication(ctx context.Context, job Job) (Publication, error) {
+	if !requestID.MatchString(job.ID) || job.Snapshot.ID != job.Preset {
+		return Publication{}, ErrInvalid
+	}
+	cfg := s.Config
+	cfg.Presets = []Preset{job.Snapshot}
+	if err := cfg.Validate(); err != nil {
+		return Publication{}, err
+	}
+	clip := publicClip(job, cfg.MediaOrigin)
+	if err := clip.ValidateGenerated(); err != nil {
+		return Publication{}, err
+	}
+	client := http.Client{Timeout: 25 * time.Second}
+	if s.MediaClient != nil {
+		client = *s.MediaClient
+	}
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	client.Timeout = 25 * time.Second
+	prefix := cfg.MediaOrigin + "/generated/" + job.ID + "/"
+	get := func(name, encoding string, maximum int64) ([]byte, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, prefix+name, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept-Encoding", encoding)
+		response, err := client.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer response.Body.Close()
+		cache := strings.ToLower(response.Header.Get("Cache-Control"))
+		if response.StatusCode != 200 || !strings.Contains(cache, "immutable") || !strings.Contains(cache, "public") ||
+			strings.Contains(cache, "private") || strings.Contains(cache, "no-store") || response.ContentLength > maximum ||
+			(response.Header.Get("Content-Encoding") != "" && response.Header.Get("Content-Encoding") != encoding) {
+			return nil, fmt.Errorf("invalid immutable generated %s response", name)
+		}
+		data, err := io.ReadAll(io.LimitReader(response.Body, maximum+1))
+		if err != nil || len(data) == 0 || int64(len(data)) > maximum {
+			return nil, fmt.Errorf("invalid generated %s size", name)
+		}
+		return data, nil
+	}
+	sceneBytes, err := get("scene.json", "identity", 64<<10)
+	if err != nil {
+		return Publication{}, err
+	}
+	var scene struct {
+		Version    int      `json:"version"`
+		Frames     []string `json:"frames"`
+		FrameCount int      `json:"frameCount"`
+		FrameRate  float64  `json:"frameRate"`
+		Temporal   *struct {
+			URL string `json:"url"`
+		} `json:"temporal"`
+		Attribution struct{ Label, Source, License string } `json:"attribution"`
+	}
+	if json.Unmarshal(sceneBytes, &scene) != nil || scene.Version != 1 || scene.FrameRate <= 0 || scene.FrameRate > 240 ||
+		scene.Attribution.Label != job.Snapshot.Title || scene.Attribution.Source != job.Snapshot.Source || scene.Attribution.License != job.Snapshot.License {
+		return Publication{}, fmt.Errorf("invalid generated scene")
+	}
+	name, encoding := "model.splat", "gzip"
+	if job.Snapshot.ModeName() == "dynamic" {
+		name, encoding = "model.rgs", "identity"
+		if scene.Temporal == nil || scene.Temporal.URL != name || len(scene.Frames) != 0 || scene.FrameCount < 2 || scene.FrameCount > 300 {
+			return Publication{}, fmt.Errorf("invalid generated temporal scene")
+		}
+	} else if scene.Temporal != nil || len(scene.Frames) != 1 || scene.Frames[0] != name || scene.FrameCount != 0 {
+		return Publication{}, fmt.Errorf("invalid generated static scene")
+	}
+	metricsBytes, err := get("metrics.json", "identity", 256<<10)
+	if err != nil {
+		return Publication{}, err
+	}
+	var metrics struct {
+		JobID           string `json:"job_id"`
+		Mode            string `json:"mode"`
+		QualityProfile  string `json:"quality_profile"`
+		InputSHA256     string `json:"input_sha256"`
+		ModelBytes      int64  `json:"model_bytes"`
+		ModelSHA256     string `json:"model_sha256"`
+		SplatBytes      int64  `json:"splat_bytes"`
+		SplatSHA256     string `json:"splat_sha256"`
+		Source, License string
+	}
+	if json.Unmarshal(metricsBytes, &metrics) != nil || metrics.JobID != job.ID || metrics.Mode != job.Snapshot.ModeName() ||
+		metrics.InputSHA256 != job.Snapshot.InputSHA256 || metrics.Source != job.Snapshot.Source || metrics.License != job.Snapshot.License ||
+		metrics.ModelBytes <= 0 || metrics.ModelBytes > 32<<20 || !checksum.MatchString(metrics.ModelSHA256) {
+		return Publication{}, fmt.Errorf("invalid generated metrics")
+	}
+	profile := job.Snapshot.QualityProfile
+	if profile == "" {
+		profile = "baseline"
+	}
+	measuredProfile := metrics.QualityProfile
+	if measuredProfile == "" {
+		measuredProfile = "baseline"
+	}
+	if profile != measuredProfile {
+		return Publication{}, fmt.Errorf("generated quality profile mismatch")
+	}
+	model, err := get(name, encoding, metrics.ModelBytes)
+	if err != nil {
+		return Publication{}, err
+	}
+	modelProof := proof(model)
+	if modelProof.Bytes != metrics.ModelBytes || modelProof.SHA256 != metrics.ModelSHA256 {
+		return Publication{}, fmt.Errorf("generated model checksum mismatch")
+	}
+	if name == "model.rgs" {
+		if err := validateTemporalOutput(model, scene.FrameCount, scene.FrameRate); err != nil {
+			return Publication{}, err
+		}
+	}
+	if name == "model.splat" {
+		if metrics.SplatBytes <= 0 || metrics.SplatBytes > 32<<20 || metrics.SplatBytes%32 != 0 || !checksum.MatchString(metrics.SplatSHA256) {
+			return Publication{}, fmt.Errorf("invalid generated splat size")
+		}
+		reader, err := gzip.NewReader(bytes.NewReader(model))
+		if err != nil {
+			return Publication{}, err
+		}
+		defer reader.Close()
+		hash := sha256.New()
+		size, err := io.Copy(hash, io.LimitReader(reader, metrics.SplatBytes+1))
+		if err != nil || size != metrics.SplatBytes || hex.EncodeToString(hash.Sum(nil)) != metrics.SplatSHA256 {
+			return Publication{}, fmt.Errorf("generated splat checksum mismatch")
+		}
+	}
+	return Publication{JobID: job.ID, Clip: clip, Scene: proof(sceneBytes), Metrics: proof(metricsBytes), Model: modelProof, ModelName: name}, nil
+}
+
+// Validate the pinned RGS1 container without rendering or proxying it. The
+// compressed payload is bounded by the declared Gaussian count before hashing.
+func validateTemporalOutput(data []byte, frames int, fps float64) error {
+	const header = 32
+	const stride = 56
+	if len(data) < header {
+		return fmt.Errorf("invalid temporal model header")
+	}
+	magic := string(data[:8])
+	count := int64(binary.LittleEndian.Uint32(data[8:12]))
+	declaredStride := binary.LittleEndian.Uint32(data[12:16])
+	declaredFrames := int(binary.LittleEndian.Uint32(data[16:20]))
+	declaredFPS := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[20:24])))
+	duration := float64(math.Float32frombits(binary.LittleEndian.Uint32(data[24:28])))
+	if (magic != "RANGL4D1" && magic != "RANGL4Z1") || count < 1 || count > 500000 || declaredStride != stride ||
+		declaredFrames != frames || frames < 2 || frames > 32 || math.IsNaN(declaredFPS) || math.Abs(declaredFPS-fps) > 1e-5 ||
+		math.IsNaN(duration) || math.Abs(duration-float64(frames-1)/fps) > 1e-5 || binary.LittleEndian.Uint32(data[28:32]) != 0 || count*stride+header > 32<<20 {
+		return fmt.Errorf("invalid temporal model header")
+	}
+	if magic == "RANGL4D1" {
+		if int64(len(data)) != header+count*stride {
+			return fmt.Errorf("invalid temporal model size")
+		}
+		return nil
+	}
+	reader, err := gzip.NewReader(bytes.NewReader(data[header:]))
+	if err != nil {
+		return err
+	}
+	defer reader.Close()
+	size, err := io.Copy(io.Discard, io.LimitReader(reader, count*stride+1))
+	if err != nil || size != count*stride {
+		return fmt.Errorf("invalid temporal model payload size")
+	}
+	return nil
+}

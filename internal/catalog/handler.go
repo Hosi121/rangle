@@ -16,24 +16,28 @@ import (
 
 const feedPath = "/api/v1/clips"
 
-type clipView struct {
+type PublicClip struct {
 	ID          string   `json:"id"`
 	Revision    string   `json:"revision"`
 	Title       string   `json:"title"`
 	Sport       string   `json:"sport"`
 	Description string   `json:"description"`
 	Tags        []string `json:"tags,omitempty"`
-	Codec       string   `json:"codec"`
-	ManifestURL string   `json:"manifest_url"`
+	Codec       string   `json:"codec,omitempty"`
+	ManifestURL string   `json:"manifest_url,omitempty"`
 	PreviewURL  string   `json:"preview_url,omitempty"`
 	SceneURL    string   `json:"scene_url,omitempty"`
 }
 
+type clipView = PublicClip
+
 type handler struct {
-	clips    []jsonDocument
-	byID     map[string]int
-	snapshot string
-	search   []searchEntry
+	extra       []jsonDocument
+	extraSearch []searchEntry
+	clips       []jsonDocument
+	byID        map[string]int
+	snapshot    string
+	search      []searchEntry
 }
 
 type jsonDocument struct {
@@ -109,12 +113,12 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			writeError(w, r, http.StatusBadRequest, "invalid_query")
 			return
 		}
-		limit, start, err := h.page(query, snapshot, len(selection))
+		limit, start, err := h.page(query, snapshot, selection.len())
 		if err != nil {
 			writeError(w, r, http.StatusBadRequest, "invalid_pagination")
 			return
 		}
-		end := min(start+limit, len(selection))
+		end := min(start+limit, selection.len())
 		writeDocument(w, r, h.feed(selection, snapshot, start, end))
 	case strings.HasPrefix(r.URL.EscapedPath(), feedPath+"/"):
 		id := strings.TrimPrefix(r.URL.EscapedPath(), feedPath+"/")
@@ -135,33 +139,43 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // Reuse the startup JSON without caching arbitrary page/limit combinations.
 // Memory stays proportional to catalog metadata, rather than request history.
-func (h *handler) feed(clips []jsonDocument, snapshot string, start, end int) jsonDocument {
+func (h *handler) feed(clips clipSelection, snapshot string, start, end int) jsonDocument {
 	cursor := ""
 	size := len(`{"clips":[]}`) + max(0, end-start-1)
-	for _, clip := range clips[start:end] {
-		size += len(clip.data)
+	for index := start; index < end; index++ {
+		size += len(clips.at(index).data)
 	}
-	if end < len(clips) {
+	if end < clips.len() {
 		cursor = base64.RawURLEncoding.EncodeToString([]byte(snapshot + ":" + strconv.Itoa(end)))
 		size += len(`,"next_cursor":""`) + len(cursor)
 	}
 	data := make([]byte, 0, size)
 	data = append(data, `{"clips":[`...)
-	for i, clip := range clips[start:end] {
-		if i > 0 {
+	for index := start; index < end; index++ {
+		if index > start {
 			data = append(data, ',')
 		}
-		data = append(data, clip.data...)
+		data = append(data, clips.at(index).data...)
 	}
 	data = append(data, ']')
 	if cursor != "" {
 		data = append(data, `,"next_cursor":"`...)
-		// RawURL base64 contains no characters that require JSON escaping.
 		data = append(data, cursor...)
 		data = append(data, '"')
 	}
 	data = append(data, '}')
 	return newJSONDocument(data)
+}
+
+// Two shared spans avoid copying the static catalog per generated-feed request.
+type clipSelection struct{ first, second []jsonDocument }
+
+func (s clipSelection) len() int { return len(s.first) + len(s.second) }
+func (s clipSelection) at(index int) jsonDocument {
+	if index < len(s.first) {
+		return s.first[index]
+	}
+	return s.second[index-len(s.first)]
 }
 
 func (h *handler) page(query url.Values, snapshot string, count int) (limit, start int, err error) {

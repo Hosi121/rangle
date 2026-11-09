@@ -27,6 +27,7 @@ const cookieName = "rangle_session"
 type Config struct {
 	Store         Store
 	ClipIDs       map[string]bool
+	ClipExists    func(context.Context, string) (bool, error)
 	SecureCookies bool
 	Logger        *slog.Logger
 }
@@ -307,7 +308,16 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 }
 func (h *Handler) clip(w http.ResponseWriter, r *http.Request) string {
 	id := r.PathValue("clip")
-	if !h.cfg.ClipIDs[id] {
+	exists := h.cfg.ClipIDs[id]
+	if !exists && h.cfg.ClipExists != nil {
+		var err error
+		exists, err = h.cfg.ClipExists(r.Context(), id)
+		if err != nil {
+			h.unavailable(w, r, "clip", err)
+			return ""
+		}
+	}
+	if !exists {
 		h.fail(w, r, 404, "clip_not_found")
 		return ""
 	}
