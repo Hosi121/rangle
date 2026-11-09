@@ -83,4 +83,18 @@ jobs:
           GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
           CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.deploy-auth.outputs.access_token }}
           RANGLE_STG_DOMAIN: ${{ vars.RANGLE_STG_DOMAIN }}
+          RELEASE_RECEIPT_PATH: ${{ runner.temp }}/rangle-release-receipt.json
         run: bash scripts/deploy-stg.sh deploy
+      - name: Save verified release receipt
+        id: receipt-upload
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stg-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rangle-release-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: false
+      - name: Report receipt storage failure
+        if: ${{ steps.receipt-upload.outcome == 'failure' }}
+        run: echo 'Release receipt artifact upload failed. Recover the verified JSON from this run summary.' >> "$GITHUB_STEP_SUMMARY"

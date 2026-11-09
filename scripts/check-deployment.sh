@@ -39,12 +39,17 @@ readonly media_origin=${origins#*$'\n'}
 base=${1:?Usage: check-deployment.sh https://service.run.app}
 base=${base%/}
 python3 - "$base" <<'PY'
+import os
+import re
 import sys
 from urllib.parse import urlsplit
 u = urlsplit(sys.argv[1])
 local = u.scheme == 'http' and u.hostname in {'127.0.0.1', 'localhost'}
 if not (u.scheme == 'https' or local) or not u.hostname or u.username or u.password or u.query or u.fragment or u.path:
     raise SystemExit('Expected an HTTPS origin (HTTP loopback is allowed for local tests).')
+expected = os.environ.get('EXPECTED_CATALOG_SHA256', '')
+if expected and not re.fullmatch(r'[0-9a-f]{64}', expected):
+    raise SystemExit('EXPECTED_CATALOG_SHA256 must be a complete lowercase SHA256.')
 PY
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -52,7 +57,7 @@ fetch() {
   curl --silent --show-error --fail-with-body --proto '=https,http' \
     --connect-timeout 5 --max-time 20 --max-filesize 1048576 \
     --retry 2 --retry-delay 1 --retry-all-errors \
-    --output "$work/$2" "$base$1"
+    --dump-header "$work/$2.headers" --output "$work/$2" "$base$1"
 }
 fetch /health health
 fetch / landing
@@ -60,6 +65,7 @@ fetch /demo/ demo
 fetch '/api/v1/clips?limit=1' api
 python3 - "$work" "$media_origin" <<'PY'
 import json
+import os
 import re
 import sys
 from html.parser import HTMLParser
@@ -68,6 +74,17 @@ from urllib.parse import urlsplit
 
 work = Path(sys.argv[1])
 expected_media = urlsplit(sys.argv[2])
+expected_catalog = os.environ.get('EXPECTED_CATALOG_SHA256', '')
+if expected_catalog:
+    headers = {}
+    for line in work.joinpath('api.headers').read_text().splitlines():
+        if line.startswith('HTTP/'):
+            headers = {}
+        elif ':' in line:
+            key, value = line.split(':', 1)
+            headers.setdefault(key.lower().strip(), []).append(value.strip())
+    if headers.get('x-rangle-catalog-sha256') != [expected_catalog]:
+        raise SystemExit('API did not serve the selected static catalog SHA256.')
 if work.joinpath('health').read_bytes() != b'ok\n':
     raise SystemExit('health did not return the application health contract.')
 if 'rangle' not in work.joinpath('landing').read_text().lower():

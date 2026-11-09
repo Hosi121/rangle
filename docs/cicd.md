@@ -23,6 +23,28 @@ Go＋Flutter Webをマルチステージで1つの非root imageにまとめ、di
 
 フィード先頭は通常catalogのクリップと、掲載済みの生成結果の両方を受け付ける。生成結果はtransport codec/manifestを持たない契約のまま、ID・revision・固定scene pathとmedia originを照合する。不完全なtransport情報や別jobのsceneは昇格を止める。この確認はHTTPの接続・metadata検査で、ブラウザ描画や実機性能の検証とは別。
 
+CI deployはruntime argsの `/mnt/catalog/snapshots/<64hex>.json` から期待する静的catalog SHAを取り、候補・通常service・公開appの3つのprobeへ必ず渡す。APIの `X-Rangle-Catalog-SHA256` が一致しなければ、候補では昇格を止め、公開確認では元のtraffic配分へ戻す。生成結果が先頭でも、このheaderはbase static catalogの元JSON bytesを識別する。`check-deployment.sh` 単体では `EXPECTED_CATALOG_SHA256` の指定を任意とし、既存の呼出しも使える。
+
+## release receipt
+
+正常な公開確認の後、sourceの40桁commit SHA、run ID/attempt、候補revision・immutable image digest、静的catalogファイルSHA、generation config SHA（設定時）、asset origin、元のtraffic配分と各復帰先revisionの実configを、小さいJSONへ記録する。`schema_version` は1、最大64KiBとする。
+
+前版は `services describe.spec.template` から取らない。Terraformによるruntime変更後、このdesired templateはまだ通常trafficを受けていない新configを指すことがある。配備前の `status.traffic` で実際に配信するrevisionを確定し、各revisionをread-onlyの `revisions describe` で取得して、`revision.spec.containers` の既知fieldだけを記録する。前版のimageがtagならその実値を残し、`image_digest` はnullとする。古いcatalog pathなどからSHAを確認できない場合もnullとし、desired templateの値で埋めない。
+
+候補のtarget argsとしてのみ配備前のdesired templateを使う。公開確認後、trafficが候補100%であることと、実際の候補revisionのimmutable image・argsが要求と一致することを照合してからreceiptを生成する。新targetのcatalog SHAは必須で、旧版の未知値とは区別する。sourceのremote origin、args全量、env、credentials、GCS input URI、巨大なservice JSONはreceiptやSummaryへ含めない。
+
+必須のローカル処理と外部保存を分ける。
+
+| 処理 | 保存先・失敗時の扱い |
+| --- | --- |
+| JSON生成・検証とSummary追記 | `${RUNNER_TEMP}/rangle-release-receipt.json` とGitHub Step Summaryへ同じJSONを残す。上書きせず、途中ファイルを公開しない。公開後の生成・検証・Summary書込失敗は既存trapで元trafficへrollbackする |
+| artifact保存 | `stg-release-<run_id>-<attempt>`、retention 7日、overwrite false。upload対象は上記の単一明示pathだけ。隠しdirectoryやrunner temp全体を渡さず、ファイル不在はupload errorにする |
+| artifactサービス等のupload失敗 | 検証済み配備は維持し、Summaryへ保存失敗を表示する。JSONは既にSummaryへ記録してあるため、そこから回収する。外部保存障害だけでは正常配備をrollbackしない |
+
+guard・期限・候補no-traffic・実instance設定・元trafficの厳密復帰・自分の候補tagだけを消す契約は維持する。receiptの保存やartifact uploadにGCP/IAM設定を追加しない。artifact保持期限後の長期保存や、mainへのdigest昇格は別の判断であり、この記録だけで完了したとは扱わない。
+
+ローカルの `python3 scripts/deploy-stg.test.py` はgcloud/curl/dateをstubに置き換え、Cloud APIへ接続しない。desired templateと実配信revisionが異なるケース、未知の旧版field、秘密の非export、候補/公開catalog SHA不一致、候補100%・image/args不一致、receipt/Summary書込失敗、partial promotionのrollbackを確認する。通常catalog・generated-firstの両方を維持する。100k性能や少量trafficの合否、実ブラウザ描画を測るテストではない。
+
 ## 初期設定
 
 正常に動くCloud Run、公開catalog・メディア、app/mediaのDNS・HTTPSを先に用意し、GitHub repository variablesを設定する。
