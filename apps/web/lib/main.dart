@@ -6,6 +6,7 @@ import 'config/app_config.dart';
 import 'data/clip_repository.dart';
 import 'community/community_api.dart';
 import 'generation/generation_api.dart';
+import 'live/live_api.dart';
 import 'sharing/share_clip.dart';
 import 'viewer/free_view_adapter.dart';
 
@@ -17,6 +18,8 @@ void main() {
       community: communityEndpoint == null
           ? null
           : CommunityApi(endpoint: communityEndpoint),
+      live: config.createLiveApi(),
+      initialLiveId: Uri.base.queryParameters['live'],
       initialClipId: Uri.base.queryParameters['clip'],
       initialGeneration: Uri.base.queryParameters['generate'] == '1',
       repository: config.createClipRepository(),
@@ -34,6 +37,9 @@ class RangleApp extends StatelessWidget {
     this.generation,
     this.initialGeneration = false,
     this.initialClipId,
+    this.live,
+    this.liveFactory,
+    this.initialLiveId,
     this.shareAction = shareClip,
   });
 
@@ -44,6 +50,9 @@ class RangleApp extends StatelessWidget {
   final GenerationApi? generation;
   final bool initialGeneration;
   final String? initialClipId;
+  final LiveApi? live;
+  final ViewerFactory? liveFactory;
+  final String? initialLiveId;
   final ClipShareAction shareAction;
 
   @override
@@ -84,6 +93,9 @@ class RangleApp extends StatelessWidget {
         generation: generation,
         initialGeneration: initialGeneration,
         initialClipId: initialClipId,
+        live: live,
+        liveFactory: liveFactory,
+        initialLiveId: initialLiveId,
         shareAction: shareAction,
         repository: repository,
         viewerFactory: viewerFactory ?? VideoPreviewAdapter.new,

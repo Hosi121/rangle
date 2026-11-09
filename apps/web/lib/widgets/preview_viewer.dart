@@ -17,6 +17,10 @@ class PreviewViewer extends StatefulWidget {
     this.visible = true,
     this.onReady,
     this.onStatusChanged,
+    this.onSourceReady,
+    this.onSourceError,
+    this.sha256,
+    this.sourceRevision = 0,
     super.key,
   });
 
@@ -30,6 +34,10 @@ class PreviewViewer extends StatefulWidget {
   final bool visible;
   final VoidCallback? onReady;
   final ValueChanged<ViewerStatus>? onStatusChanged;
+  final ValueChanged<Uri>? onSourceReady;
+  final VoidCallback? onSourceError;
+  final String? sha256;
+  final int sourceRevision;
 
   @override
   State<PreviewViewer> createState() => _PreviewViewerState();
@@ -45,11 +53,17 @@ class _PreviewViewerState extends State<PreviewViewer>
   bool _showBuffering = false;
   Timer? _bufferingTimer;
   ViewerStatus? _lastStatus;
+  Uri? _lastReportedSource;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    _appVisible =
+        lifecycle == null ||
+        lifecycle == AppLifecycleState.resumed ||
+        (widget.freeView && lifecycle == AppLifecycleState.inactive);
     _create();
   }
 
@@ -58,6 +72,7 @@ class _PreviewViewerState extends State<PreviewViewer>
     _hasReadyFrame = false;
     _readyNotified = false;
     _lastStatus = null;
+    _lastReportedSource = null;
     _adapter = widget.factory(widget.source);
     _adapter.addListener(_reportStatus);
     if (!widget.visible || !_appVisible) unawaited(_adapter.pause());
@@ -70,6 +85,19 @@ class _PreviewViewerState extends State<PreviewViewer>
     _updateBufferingFeedback();
     final status = adapter.value.status;
     if (status == ViewerStatus.ready) _hasReadyFrame = true;
+    final source = adapter.value.source;
+    if (status == ViewerStatus.ready &&
+        source != null &&
+        source != _lastReportedSource) {
+      _lastReportedSource = source;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            identical(adapter, _adapter) &&
+            adapter.value.source == source) {
+          widget.onSourceReady?.call(source);
+        }
+      });
+    }
     if (status == _lastStatus) return;
     _lastStatus = status;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -82,6 +110,9 @@ class _PreviewViewerState extends State<PreviewViewer>
       if (status == ViewerStatus.ready && !_readyNotified) {
         _readyNotified = true;
         widget.onReady?.call();
+        if (adapter.value.source == null) {
+          widget.onSourceReady?.call(widget.source);
+        }
       }
     });
   }
@@ -116,6 +147,24 @@ class _PreviewViewerState extends State<PreviewViewer>
   void didUpdateWidget(PreviewViewer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.visible != oldWidget.visible) _applyVisibility();
+    if (widget.freeView &&
+        (widget.source != oldWidget.source ||
+            widget.sourceRevision != oldWidget.sourceRevision)) {
+      unawaited(_replace(widget.source));
+    }
+  }
+
+  Future<void> _replace(Uri source) async {
+    final adapter = _adapter;
+    final ready = await adapter.updateSource(source, sha256: widget.sha256);
+    if (!mounted || !identical(adapter, _adapter) || widget.source != source) {
+      return;
+    }
+    if (ready) {
+      if (adapter.value.source == null) widget.onSourceReady?.call(source);
+    } else {
+      widget.onSourceError?.call();
+    }
   }
 
   void _applyVisibility() {

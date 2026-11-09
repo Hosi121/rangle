@@ -3,6 +3,11 @@ import 'package:flutter/widgets.dart';
 import 'viewer_adapter.dart';
 
 ViewerAdapter createAdapter(Uri source) => _UnsupportedAdapter();
+ViewerAdapter createLiveAdapter(
+  Uri source, {
+  required List<String> origins,
+  String? sha256,
+}) => _UnsupportedAdapter();
 
 class _UnsupportedAdapter extends ViewerAdapter {
   @override

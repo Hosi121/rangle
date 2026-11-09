@@ -16,6 +16,7 @@ class ViewerValue {
     this.canPlay = true,
     this.muted = false,
     this.buffering = false,
+    this.source,
   });
 
   final ViewerStatus status;
@@ -25,6 +26,7 @@ class ViewerValue {
   final bool canPlay;
   final bool muted;
   final bool buffering;
+  final Uri? source;
 }
 
 /// Shared lifecycle and time controls for ordinary video and free-view scenes.
@@ -36,6 +38,7 @@ abstract class ViewerAdapter extends ChangeNotifier {
   Future<void> toggleMute();
   Future<void> pause();
   Future<void> resume() async {}
+  Future<bool> updateSource(Uri source, {String? sha256}) async => false;
   Widget buildView();
 }
 

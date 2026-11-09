@@ -1,5 +1,6 @@
 import { validIntrinsics } from './camera-intrinsics.js';
 import { TemporalSession } from './temporal-session.js';
+import { liveSceneUrl } from './live-model.js';
 
 export const CHANNEL = 'rangle-scene-v1';
 
@@ -59,17 +60,60 @@ export class SceneSession {
     this.release = null;
   }
 
-  async load(source) {
+  load(source, options = {}) {
+    this.liveOptions = options;
+    this.source = source;
+    return this.initialLoad = this.loadInitial(source);
+  }
+
+  async manifestFrom(source, signal) {
+    let options = { signal };
+    if (this.liveOptions.live) {
+      const checked = liveSceneUrl(source, this.liveOptions.origins, this.liveSession);
+      this.liveSession = checked.session;
+      options = { ...options, redirect: 'error', credentials: 'omit' };
+    }
+    const response = await this.fetchManifest(httpUrl(source).href, options);
+    if (!response.ok) throw new Error('Manifest request failed');
+    let json;
+    if (this.liveOptions.live) {
+      if (Number(response.headers.get('Content-Length')) > 1048576) throw new Error('Manifest too large');
+      const reader = response.body.getReader(), chunks = [];
+      let size = 0;
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          size += value.byteLength;
+          if (size > 1048576) throw new Error('Manifest too large');
+          chunks.push(value);
+        }
+      } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+      const bytes = new Uint8Array(size);
+      let offset = 0;
+      for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+      json = JSON.parse(new TextDecoder().decode(bytes));
+    } else json = await response.json();
+    const manifest = parseManifest(json, response.url || source);
+    if (this.liveOptions.live) {
+      const model = new URL(manifest.temporal?.url ?? '');
+      const expected = new URL('model.rgs', source);
+      if (model.href !== expected.href) throw new Error('Untrusted live model');
+    }
+    return manifest;
+  }
+
+  async loadInitial(source) {
     const timeout = setTimeout(() => this.abort.abort(), 15000);
     try {
-      const response = await this.fetchManifest(httpUrl(source).href, { signal: this.abort.signal });
-      if (!response.ok) throw new Error('Manifest request failed');
-      this.manifest = parseManifest(await response.json(), response.url || source);
+      this.manifest = await this.manifestFrom(source, this.abort.signal);
+      clearTimeout(timeout);
       if (this.disposed) return;
       if (this.manifest.temporal) {
         this.temporal = new TemporalSession({ createViewer: this.createViewer, notify: this.notify });
         this.temporal.pause(this.paused);
-        await this.temporal.load(this.manifest);
+        await this.temporal.load(this.manifest, { autoplay: this.liveOptions.live,
+          strict: this.liveOptions.live, sha256: this.liveOptions.sha256 });
         return;
       }
       this.viewer = this.createViewer(this.manifest.camera);
@@ -82,6 +126,37 @@ export class SceneSession {
     } finally {
       clearTimeout(timeout);
     }
+  }
+
+  async replace(source, sha256) {
+    if (!this.liveOptions?.live || this.disposed || this.paused) return false;
+    this.replacementAbort?.abort();
+    this.temporal?.cancelReplacement();
+    const abort = this.replacementAbort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), 15000);
+    abort.signal.addEventListener('abort', () => {
+      if (this.replacementAbort === abort) this.temporal?.cancelReplacement();
+    });
+    try {
+      await this.initialLoad;
+      if (abort.signal.aborted || this.disposed || !this.temporal) return false;
+      const manifest = await this.manifestFrom(source, abort.signal);
+      if (abort.signal.aborted || this.disposed) return false;
+      clearTimeout(timeout);
+      const ready = await this.temporal.replace(manifest, { sha256 });
+      if (!ready || abort.signal.aborted || this.disposed) return false;
+      this.source = source;
+      this.manifest = manifest;
+      return true;
+    } catch { return false; }
+    finally { clearTimeout(timeout); }
+  }
+
+  cancelReplacement() { this.replacementAbort?.abort(); this.temporal?.cancelReplacement(); }
+
+  readyMessage() {
+    return { frame: 0, frameCount: this.manifest.frameCount, frameRate: this.manifest.frameRate,
+      canPlay: true, playing: this.temporal.clock.playing && !this.temporal.clock.ended && !this.paused };
   }
 
   seek(frame) {
@@ -164,6 +239,7 @@ export class SceneSession {
   pause(paused) {
     if (this.disposed || this.paused === paused) return;
     this.paused = paused;
+    if (paused && this.liveOptions?.live) this.cancelReplacement();
     if (this.temporal) return this.temporal.pause(paused);
     if (!this.viewer) return;
     if (paused) this.viewer.stop();
@@ -175,6 +251,7 @@ export class SceneSession {
     this.disposed = true;
     this.pending = null;
     this.abort.abort();
+    this.replacementAbort?.abort();
     this.frameLoader.dispose();
     this.viewer?.stop();
     this.release = Promise.resolve().then(() => this.temporal ? this.temporal.dispose() : this.viewer?.dispose()).catch(() => {});

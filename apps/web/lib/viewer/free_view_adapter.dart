@@ -5,3 +5,9 @@ import 'free_view_adapter_stub.dart'
 
 ViewerAdapter createFreeViewAdapter(Uri source) =>
     platform.createAdapter(source);
+
+ViewerAdapter createLiveFreeViewAdapter(
+  Uri source, {
+  required List<String> origins,
+  String? sha256,
+}) => platform.createLiveAdapter(source, origins: origins, sha256: sha256);
