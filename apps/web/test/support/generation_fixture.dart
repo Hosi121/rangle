@@ -36,7 +36,11 @@ Map<String, Object?> generationResult(
 };
 
 class GenerationFixture {
-  Map<String, String>? user = {'id': 'viewer', 'name': 'テストユーザー'};
+  GenerationFixture({this.admin = true}) {
+    user!['is_admin'] = admin;
+  }
+  bool admin;
+  Map<String, Object?>? user = {'id': 'viewer', 'name': 'テストユーザー'};
   String? state;
   String mode = 'static';
   bool published = false, dropFirstPublication = false;
@@ -64,7 +68,7 @@ class GenerationFixture {
       return reply({'user': user, 'available': true});
     }
     if (path.endsWith('/auth/login')) {
-      user = {'id': 'viewer', 'name': 'テストユーザー'};
+      user = {'id': 'viewer', 'name': 'テストユーザー', 'is_admin': admin};
       return reply({'user': user});
     }
     if (path.endsWith('/auth/logout')) {

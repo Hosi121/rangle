@@ -244,11 +244,13 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('管理'), findsOneWidget);
+      await _tap(tester, 'LIVEを見る');
       expect(find.text('LIVE用GPUの準備を待っています'), findsOneWidget);
       expect(find.text('LIVEを停止'), findsOneWidget);
       expect(
         fixture.requests.any((r) => r.url.path.endsWith('/generation/presets')),
-        isFalse,
+        isTrue,
       );
       expect(fixture.creates, isEmpty);
       tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
@@ -364,7 +366,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(changes, 0);
     expect(find.text('フィードに掲載中'), findsNothing);
-    expect(find.text('ログインして生成する'), findsOneWidget);
+    expect(find.text('ログイン'), findsOneWidget);
   });
 
   testWidgets(
@@ -577,7 +579,7 @@ void main() {
     (tester) async {
       final fixture = GenerationFixture()..user = null;
       final account = await _show(tester, fixture);
-      await _tap(tester, 'ログインして生成する');
+      await _tap(tester, 'ログイン');
       await tester.enterText(
         find.byKey(const Key('account-username')),
         'viewer',
@@ -598,7 +600,7 @@ void main() {
       account.expired();
       await tester.pumpAndSettle();
       expect(find.text('順番を待っています'), findsNothing);
-      expect(find.text('ログインして生成する'), findsOneWidget);
+      expect(find.text('ログイン'), findsOneWidget);
     },
   );
 
@@ -646,7 +648,7 @@ void main() {
         fixture.reply(generationResult('queued'), 202),
       );
       await tester.pumpAndSettle();
-      expect(find.text('ログインして生成する'), findsOneWidget);
+      expect(find.text('ログイン'), findsOneWidget);
       expect(find.text('順番を待っています'), findsNothing);
       expect(find.text('同じ依頼で再試行'), findsNothing);
     },
@@ -670,7 +672,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(account.user, isNull);
       expect(find.text('3DGSを生成しています'), findsNothing);
-      expect(find.text('ログインして生成する'), findsOneWidget);
+      expect(find.text('ログイン'), findsOneWidget);
     },
   );
 
@@ -697,7 +699,7 @@ void main() {
   testWidgets(
     'feed LIVE entry releases media while open and reuses the existing account session',
     (tester) async {
-      final fixture = GenerationFixture();
+      final fixture = GenerationFixture(admin: false);
       final viewers = <FakeViewer>[];
       final scene = FakeViewer(surfaceKey: 'live-entry-scene');
       await tester.pumpWidget(

@@ -187,7 +187,7 @@ func TestCommentPaginationAndCursorBinding(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	for i := 0; i < 25; i++ {
 		id := strings.Repeat("0", 30) + string("0123456789abcdef"[i/16]) + string("0123456789abcdef"[i%16])
-		_, err := store.AddComment(context.Background(), "basketball", Comment{ID: id, Author: User{"owner", "Owner"}, Text: "hello", CreatedAt: now.Add(time.Duration(i) * time.Microsecond)})
+		_, err := store.AddComment(context.Background(), "basketball", Comment{ID: id, Author: User{ID: "owner", Name: "Owner"}, Text: "hello", CreatedAt: now.Add(time.Duration(i) * time.Microsecond)})
 		if err != nil {
 			t.Fatal(err)
 		}

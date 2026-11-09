@@ -77,7 +77,7 @@ func TestDynamicJobModeAndResultsUseImmutablePresetSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := call(t, h, "GET", "/api/v1/generation/presets", "", "", "")
+	result := call(t, h, "GET", "/api/v1/generation/presets", "", "viewer", "")
 	raw := decode(t, result)
 	if !strings.Contains(string(raw["presets"]), `"mode":"dynamic"`) {
 		t.Fatal("missing reviewed mode")

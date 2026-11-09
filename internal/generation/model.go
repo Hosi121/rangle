@@ -11,12 +11,13 @@ import (
 )
 
 var (
-	ErrNotFound = errors.New("generation job not found")
-	ErrBusy     = errors.New("a generation job is already active")
-	ErrBudget   = errors.New("generation attempt budget exhausted")
-	ErrConflict = errors.New("generation request conflicts with existing job")
-	ErrExpired  = errors.New("generation authorization window ended")
-	ErrInvalid  = errors.New("invalid generation request")
+	ErrNotFound  = errors.New("generation job not found")
+	ErrBusy      = errors.New("a generation job is already active")
+	ErrBudget    = errors.New("generation attempt budget exhausted")
+	ErrConflict  = errors.New("generation request conflicts with existing job")
+	ErrExpired   = errors.New("generation authorization window ended")
+	ErrInvalid   = errors.New("invalid generation request")
+	ErrForbidden = errors.New("generation requires an administrator")
 )
 
 type State string

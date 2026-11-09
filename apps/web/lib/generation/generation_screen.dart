@@ -10,6 +10,7 @@ import '../live/live_screen.dart';
 import '../viewer/viewer_adapter.dart';
 import '../widgets/viewer_modal.dart';
 import '../widgets/rangle_header.dart';
+import '../widgets/preview_viewer.dart';
 import 'generation_api.dart';
 
 class GenerationScreen extends StatefulWidget {
@@ -22,6 +23,7 @@ class GenerationScreen extends StatefulWidget {
     this.liveFactory,
     this.liveViewer = false,
     this.initialLiveId,
+    this.managementHome = false,
     super.key,
   });
   final AccountController? account;
@@ -29,6 +31,7 @@ class GenerationScreen extends StatefulWidget {
   final LiveApi? live;
   final ViewerFactory? liveFactory;
   final bool liveViewer;
+  final bool managementHome;
   final String? initialLiveId;
   final ValueChanged<Uri> onOpenResult;
   final VoidCallback? onPublicationChanged;
@@ -52,6 +55,7 @@ class _GenerationScreenState extends State<GenerationScreen>
   final _jobErrors = <String, String>{};
   bool _loading = true, _submitting = false, _accepted = false;
   bool _foreground = true, _covered = false;
+  bool _lastAdmin = false;
   late bool _showLive;
   String? _liveId;
   int _epoch = 0;
@@ -59,6 +63,7 @@ class _GenerationScreenState extends State<GenerationScreen>
 
   bool get _visible => _foreground && !_covered;
   bool get _signedIn => widget.account?.user != null;
+  bool get _canGenerate => widget.account?.user?.isAdmin == true;
   bool get _active => _jobs.any((job) => job.active);
   bool get _busy => _submitting || _busyJob != null;
 
@@ -74,6 +79,7 @@ class _GenerationScreenState extends State<GenerationScreen>
               widget.account?.api.endpoint ?? Uri.base.resolve('/api/v1/'),
         );
     _owner = widget.account?.user?.id;
+    _lastAdmin = _canGenerate;
     widget.account?.addListener(_accountChanged);
     WidgetsBinding.instance.addObserver(this);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
@@ -87,8 +93,9 @@ class _GenerationScreenState extends State<GenerationScreen>
   void _accountChanged() {
     if (!mounted) return;
     final owner = widget.account?.user?.id;
-    if (owner != _owner) {
+    if (owner != _owner || _canGenerate != _lastAdmin) {
       _owner = owner;
+      _lastAdmin = _canGenerate;
       _pause();
       setState(() {
         _jobs = [];
@@ -126,6 +133,10 @@ class _GenerationScreenState extends State<GenerationScreen>
       _error = null;
     });
     try {
+      if (!_canGenerate) {
+        _jobs = [];
+        return;
+      }
       if (!_showLive) {
         final catalog = await _api.presets();
         if (!mounted || epoch != _epoch) return;
@@ -420,8 +431,14 @@ class _GenerationScreenState extends State<GenerationScreen>
 
   Widget _generationForm(BuildContext context) => Scaffold(
     appBar: RangleHeader(
-      title: '生成',
+      title: widget.managementHome ? '管理' : 'GS生成',
       actions: [
+        if (widget.managementHome)
+          IconButton(
+            tooltip: 'アカウント',
+            onPressed: () => showAccountDialog(context, widget.account),
+            icon: const Icon(Icons.account_circle_outlined),
+          ),
         IconButton(
           tooltip: '状態を再読み込み',
           onPressed: _loading || _busy ? null : _load,
@@ -429,184 +446,216 @@ class _GenerationScreenState extends State<GenerationScreen>
         ),
       ],
     ),
-    body: SafeArea(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 600),
-          child: ListView(
-            padding: const EdgeInsets.all(20),
-            children: [
-              Text(
-                'スポーツの一瞬と動きを3Dに',
-                style: Theme.of(context).textTheme.titleLarge,
+    body: !_canGenerate
+        ? SafeArea(
+            child: ViewerMessage(
+              icon: Icons.admin_panel_settings_outlined,
+              title: _signedIn ? '管理者専用のページです' : '管理者ログイン',
+              description: 'GS生成とLIVE配信の管理は管理者アカウントで利用できます。',
+              action: FilledButton(
+                onPressed: widget.account == null || widget.account!.loading
+                    ? null
+                    : _signIn,
+                child: Text(_signedIn ? 'アカウントを開く' : 'ログイン'),
               ),
-              const SizedBox(height: 8),
-              const Text('確認済みの複数視点データから、自由視点で見返せるシーンを生成します。'),
-              const SizedBox(height: 24),
-              if (_loading) const Text('生成の受付状況を確認しています'),
-              if (_error != null) ...[
-                _errorText(_error!),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: OutlinedButton(
-                    onPressed: _loading || _busy ? null : _load,
-                    child: const Text('再読み込み'),
-                  ),
-                ),
-              ],
-              if (_catalog?.available == true &&
-                  _catalog!.presets.isNotEmpty) ...[
-                DropdownButtonFormField<String>(
-                  key: ValueKey(_preset),
-                  initialValue: _preset,
-                  isExpanded: true,
-                  decoration: const InputDecoration(labelText: '生成に使うデータ'),
-                  items: _catalog!.presets
-                      .map(
-                        (preset) => DropdownMenuItem(
-                          value: preset.id,
+            ),
+          )
+        : SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: ListView(
+                  padding: const EdgeInsets.all(20),
+                  children: [
+                    Text(
+                      'スポーツの一瞬と動きを3Dに',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    const Text('確認済みの複数視点データから、自由視点で見返せるシーンを生成します。'),
+                    const SizedBox(height: 24),
+                    if (_loading) const Text('生成の受付状況を確認しています'),
+                    if (_error != null) ...[
+                      _errorText(_error!),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: OutlinedButton(
+                          onPressed: _loading || _busy ? null : _load,
+                          child: const Text('再読み込み'),
+                        ),
+                      ),
+                    ],
+                    if (_catalog?.available == true &&
+                        _catalog!.presets.isNotEmpty) ...[
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(_preset),
+                        initialValue: _preset,
+                        isExpanded: true,
+                        decoration: const InputDecoration(
+                          labelText: '生成に使うデータ',
+                        ),
+                        items: _catalog!.presets
+                            .map(
+                              (preset) => DropdownMenuItem(
+                                value: preset.id,
+                                child: Text(
+                                  preset.title,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            )
+                            .toList(),
+                        onChanged:
+                            _busy ||
+                                _active ||
+                                (_requestId != null && !_accepted)
+                            ? null
+                            : (value) => setState(() => _preset = value),
+                      ),
+                      if (_preset != null) ...[
+                        const SizedBox(height: 12),
+                        for (final preset in _catalog!.presets.where(
+                          (item) => item.id == _preset,
+                        )) ...[
+                          Text(preset.formatLabel),
+                          const SizedBox(height: 4),
+                          Text(preset.sport),
+                          const SizedBox(height: 4),
+                          Text(preset.description),
+                          const SizedBox(height: 8),
+                          Text(
+                            '出典：${preset.source}\n${preset.license}',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
+                        ],
+                      ],
+                      const SizedBox(height: 20),
+                      if (!_signedIn) ...[
+                        const Text('生成するにはログインしてください。'),
+                        const SizedBox(height: 8),
+                        FilledButton(
+                          onPressed:
+                              widget.account == null || widget.account!.loading
+                              ? null
+                              : _signIn,
+                          child: const Text('ログインして生成する'),
+                        ),
+                      ] else ...[
+                        FilledButton(
+                          onPressed: _loading || _busy || _active
+                              ? null
+                              : _submit,
                           child: Text(
-                            preset.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
+                            _submitting
+                                ? '依頼を送信しています'
+                                : _requestId != null && !_accepted
+                                ? '同じ依頼で再試行'
+                                : _livePreset
+                                ? 'LIVEを開始'
+                                : '生成を開始',
                           ),
                         ),
-                      )
-                      .toList(),
-                  onChanged:
-                      _busy || _active || (_requestId != null && !_accepted)
-                      ? null
-                      : (value) => setState(() => _preset = value),
-                ),
-                if (_preset != null) ...[
-                  const SizedBox(height: 12),
-                  for (final preset in _catalog!.presets.where(
-                    (item) => item.id == _preset,
-                  )) ...[
-                    Text(preset.formatLabel),
-                    const SizedBox(height: 4),
-                    Text(preset.sport),
-                    const SizedBox(height: 4),
-                    Text(preset.description),
-                    const SizedBox(height: 8),
-                    Text(
-                      '出典：${preset.source}\n${preset.license}',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
-                  ],
-                ],
-                const SizedBox(height: 20),
-                if (!_signedIn) ...[
-                  const Text('生成するにはログインしてください。'),
-                  const SizedBox(height: 8),
-                  FilledButton(
-                    onPressed: widget.account == null || widget.account!.loading
-                        ? null
-                        : _signIn,
-                    child: const Text('ログインして生成する'),
-                  ),
-                ] else ...[
-                  FilledButton(
-                    onPressed: _loading || _busy || _active ? null : _submit,
-                    child: Text(
-                      _submitting
-                          ? '依頼を送信しています'
-                          : _requestId != null && !_accepted
-                          ? '同じ依頼で再試行'
-                          : _livePreset
-                          ? 'LIVEを開始'
-                          : '生成を開始',
-                    ),
-                  ),
-                  if (_submitError != null) _errorText(_submitError!),
-                  if (_active)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 8),
-                      child: Text('画面を閉じても生成は続きます。状態はこの画面で確認できます。'),
-                    ),
-                ],
-              ],
-              if (_signedIn) ...[
-                const SizedBox(height: 28),
-                Text('自分の生成', style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                if (!_loading && _jobs.isEmpty) const Text('まだ生成の依頼はありません。'),
-                for (final job in _jobs.take(10))
-                  Card(
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          Text(
-                            _catalog?.presets
-                                    .where((preset) => preset.id == job.preset)
-                                    .firstOrNull
-                                    ?.title ??
-                                'GSの生成',
-                            style: Theme.of(context).textTheme.titleSmall,
+                        if (_submitError != null) _errorText(_submitError!),
+                        if (_active)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 8),
+                            child: Text('画面を閉じても生成は続きます。状態はこの画面で確認できます。'),
                           ),
-                          const SizedBox(height: 4),
-                          Semantics(
-                            liveRegion: true,
-                            child: Text(job.stateLabel),
-                          ),
-                          if (job.active && job.state != 'cancelling')
-                            Align(
-                              alignment: Alignment.centerLeft,
-                              child: TextButton(
-                                onPressed: _busy || _loading
-                                    ? null
-                                    : () => _cancel(job),
-                                child: Text(job.isLive ? 'LIVEを停止' : '生成を中止'),
-                              ),
-                            ),
-                          if (job.isLive)
-                            FilledButton.tonal(
-                              onPressed: _busy || _loading
-                                  ? null
-                                  : () => _open(job),
-                              child: const Text('LIVEを見る'),
-                            ),
-                          if (!job.isLive && job.state == 'succeeded') ...[
-                            if (job.published)
-                              const Padding(
-                                padding: EdgeInsets.symmetric(vertical: 8),
-                                child: Text('フィードに掲載中'),
-                              ),
-                            FilledButton.tonal(
-                              onPressed: _busy || _loading
-                                  ? null
-                                  : () => _open(job),
-                              child: const Text('結果を見る'),
-                            ),
-                            const SizedBox(height: 8),
-                            OutlinedButton(
-                              onPressed: _busy || _loading
-                                  ? null
-                                  : () => _setPublished(job),
-                              child: Text(
-                                _busyJob == job.id
-                                    ? '状態を確認しています'
-                                    : job.published
-                                    ? '掲載を取り下げる'
-                                    : 'フィードに掲載',
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            const Text('リンクを知っている人は、掲載前や取り下げ後も結果を開けます。'),
-                          ],
-                          if (_jobErrors[job.id] != null)
-                            _errorText(_jobErrors[job.id]!),
-                        ],
+                      ],
+                    ],
+                    if (_signedIn) ...[
+                      const SizedBox(height: 28),
+                      Text(
+                        '自分の生成',
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
-                    ),
-                  ),
-              ],
-            ],
+                      const SizedBox(height: 8),
+                      if (!_loading && _jobs.isEmpty)
+                        const Text('まだ生成の依頼はありません。'),
+                      for (final job in _jobs.take(10))
+                        Card(
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                Text(
+                                  _catalog?.presets
+                                          .where(
+                                            (preset) => preset.id == job.preset,
+                                          )
+                                          .firstOrNull
+                                          ?.title ??
+                                      'GSの生成',
+                                  style: Theme.of(context).textTheme.titleSmall,
+                                ),
+                                const SizedBox(height: 4),
+                                Semantics(
+                                  liveRegion: true,
+                                  child: Text(job.stateLabel),
+                                ),
+                                if (job.active && job.state != 'cancelling')
+                                  Align(
+                                    alignment: Alignment.centerLeft,
+                                    child: TextButton(
+                                      onPressed: _busy || _loading
+                                          ? null
+                                          : () => _cancel(job),
+                                      child: Text(
+                                        job.isLive ? 'LIVEを停止' : '生成を中止',
+                                      ),
+                                    ),
+                                  ),
+                                if (job.isLive)
+                                  FilledButton.tonal(
+                                    onPressed: _busy || _loading
+                                        ? null
+                                        : () => _open(job),
+                                    child: const Text('LIVEを見る'),
+                                  ),
+                                if (!job.isLive &&
+                                    job.state == 'succeeded') ...[
+                                  if (job.published)
+                                    const Padding(
+                                      padding: EdgeInsets.symmetric(
+                                        vertical: 8,
+                                      ),
+                                      child: Text('フィードに掲載中'),
+                                    ),
+                                  FilledButton.tonal(
+                                    onPressed: _busy || _loading
+                                        ? null
+                                        : () => _open(job),
+                                    child: const Text('結果を見る'),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  OutlinedButton(
+                                    onPressed: _busy || _loading
+                                        ? null
+                                        : () => _setPublished(job),
+                                    child: Text(
+                                      _busyJob == job.id
+                                          ? '状態を確認しています'
+                                          : job.published
+                                          ? '掲載を取り下げる'
+                                          : 'フィードに掲載',
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  const Text('リンクを知っている人は、掲載前や取り下げ後も結果を開けます。'),
+                                ],
+                                if (_jobErrors[job.id] != null)
+                                  _errorText(_jobErrors[job.id]!),
+                              ],
+                            ),
+                          ),
+                        ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
-      ),
-    ),
   );
 }

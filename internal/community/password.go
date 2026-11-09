@@ -3,6 +3,7 @@ package community
 import (
 	"crypto/rand"
 	"crypto/subtle"
+	"errors"
 	"strings"
 	"unicode/utf8"
 
@@ -19,7 +20,18 @@ func passwordKey(password string, salt []byte) []byte {
 func newAccount(id, name, password string) Account {
 	salt := make([]byte, 16)
 	_, _ = rand.Read(salt)
-	return Account{User: User{id, name}, Salt: salt, Hash: passwordKey(password, salt), HashVersion: 1}
+	return Account{User: User{ID: id, Name: name}, Salt: salt, Hash: passwordKey(password, salt), HashVersion: 1}
+}
+
+// NewAdministrator is for trusted provisioning tools, never public registration.
+// The bootstrap password may be shorter than the public registration minimum.
+func NewAdministrator(password string) (Account, error) {
+	if !utf8.ValidString(password) || utf8.RuneCountInString(password) < 8 || utf8.RuneCountInString(password) > 128 || len(password) > 512 {
+		return Account{}, errors.New("administrator password must contain 8 to 128 characters")
+	}
+	a := newAccount("admin", "管理者", password)
+	a.User.Admin = true
+	return a, nil
 }
 func checkPassword(a Account, password string) bool {
 	if a.HashVersion != 1 || len(a.Salt) != 16 || len(a.Hash) != 32 {

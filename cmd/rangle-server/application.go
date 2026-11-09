@@ -206,7 +206,10 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			return app, err
 		}
 		jobs, err := generation.NewHandler(generationService, func(r *http.Request) (string, error) {
-			user, err := interactions.SessionUser(r)
+			user, err := interactions.AdminUser(r)
+			if errors.Is(err, community.ErrForbidden) {
+				return "", generation.ErrForbidden
+			}
 			if err != nil || user == nil {
 				return "", err
 			}

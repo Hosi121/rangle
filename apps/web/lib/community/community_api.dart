@@ -4,10 +4,18 @@ import 'dart:math';
 import 'package:http/http.dart' as http;
 
 class AccountUser {
-  const AccountUser(this.id, this.name);
+  const AccountUser(this.id, this.name) : isAdmin = false;
+  const AccountUser._fromResponse(this.id, this.name, this.isAdmin);
   final String id, name;
+  // A server-provided display hint. Authorization is enforced by the API;
+  // browser state, including this value, must never grant management access.
+  final bool isAdmin;
   factory AccountUser.fromJson(Map<String, dynamic> data) =>
-      AccountUser(data['id'] as String, data['name'] as String);
+      AccountUser._fromResponse(
+        data['id'] as String,
+        data['name'] as String,
+        data['is_admin'] == true,
+      );
 }
 
 class Engagement {

@@ -60,6 +60,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   late ClipPagingController _paging;
   String? _clipId;
   AccountController? _account;
+  Future<void>? _accountReady;
   String _query = '', _tag = '';
   bool _generationOpen = false;
 
@@ -71,16 +72,28 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
     unawaited(_paging.reset(clipId: _clipId));
     if (widget.community != null) {
       _account = AccountController(widget.community!);
-      unawaited(_account!.initialize());
+      _account!.addListener(_accountChanged);
+      _accountReady = _account!.initialize();
+      unawaited(_accountReady!);
     }
+    if (widget.initialLiveId != null || widget.initialGeneration) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_openRequestedPage());
+      });
+    }
+  }
+
+  void _accountChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _openRequestedPage() async {
+    await _accountReady;
+    if (!mounted || _account?.user?.isAdmin == true) return;
     if (widget.initialLiveId != null) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) unawaited(_openLive(widget.initialLiveId));
-      });
-    } else if (widget.initialGeneration) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) unawaited(_openGeneration());
-      });
+      await _openLive(widget.initialLiveId);
+    } else {
+      await _openGeneration();
     }
   }
 
@@ -129,6 +142,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   @override
   void dispose() {
     _paging.dispose();
+    _account?.removeListener(_accountChanged);
     _account?.dispose();
     super.dispose();
   }
@@ -191,6 +205,22 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   @override
   Widget build(BuildContext context) => _generationOpen
       ? const SizedBox.expand()
+      : _account?.user?.isAdmin == true
+      ? GenerationScreen(
+          account: _account,
+          api: widget.generation,
+          live: widget.live,
+          liveFactory: widget.liveFactory,
+          managementHome: true,
+          onPublicationChanged: () {
+            if (widget.repository is RefreshableClipRepository) {
+              (widget.repository as RefreshableClipRepository)
+                  .invalidateCache();
+            }
+            _reload();
+          },
+          onOpenResult: openGeneratedViewer,
+        )
       : Scaffold(
           backgroundColor: Colors.black,
           floatingActionButton: ListenableBuilder(
