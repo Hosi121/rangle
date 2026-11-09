@@ -2,6 +2,8 @@
 
 発表用環境の期限 `2026-11-14T15:00:00Z`、総額 USD300、Cloud Run の min=0 / max=1 と停止 guard を維持する。ここで追加する設定は `infra/gcp/modules/presentation` が管理し、通常の共有 IAM grant を置き換えない。
 
+実環境での指摘・対応・検証結果は [調査記録](security-review.md) を参照する。
+
 ## Cloud Armor
 
 `matches()` の選択肢は capture を作らない `(?:...)` でまとめる。Cloud Armor API は capture group を拒否するが、Terraform mock plan はこのコンパイルを行わない。`python3 infra/gcp/modules/presentation/tests/security_policy_regex_test.py` は現在の HCL の全 `matches()` 正規表現で capture 数ゼロを検査する。CEL 全体やサービス側の受理は検証しない。[公式の noncapture を使う host 判定例](https://docs.cloud.google.com/armor/docs/create-security-policy-rules#allow_or_deny_traffic_based_on_host_header)
@@ -23,6 +25,8 @@ backend service の get/setSecurityPolicy 権限は owned app/candidate の `res
 ## Firestore の復旧
 
 既存の named database `rangle-stg` で PITR を有効にし、毎日の backup を7日間保持する。削除保護と `PREVENT` は維持する。PITR の履歴は有効化以後から蓄積され、過去7日分が即座に作られるわけではない。daily backup の時刻は指定できず、初回 backup 完了まで backup による復旧はできない。[PITR](https://docs.cloud.google.com/firestore/native/docs/pitr)、[scheduled backup](https://docs.cloud.google.com/firestore/native/docs/backups)
+
+分離した生成 DB `rangle-stg-generation` も同じ PITR・日次7日保持・削除保護を持つ。期限・予算停止時、guard は両 owned DB の日次7日保持 schedule を列挙し、対象を確認して削除する。保存済み backup、PITR、DB 本体は保持する。失敗時には他の停止を継続し、失敗を receipt に残す。schedule の list/delete は database 名で IAM 条件を絞れる権限ではないため、guard 専用 custom role と固定の DB 一覧・名前・retention・recurrence 検査で実行対象を制限する。
 
 PITR/backup storage と実際の restore は従量課金。小さい database 向けの短い retention に限定する。backup は同じ location に置かれ、元 DB を削除しても保持期限まで残る。これは別リージョンの災害復旧ではない。既存データを上書きせず、新しい named database へ復元して検証後に接続先を切り替える。backup に含まれない TTL policy と必要な IAM は Terraform から戻す。定期 backup の停止、PITR、保持データの発表後の扱いも、データ保持の判断と一緒に確認する。
 
