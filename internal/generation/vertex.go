@@ -37,7 +37,22 @@ func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, er
 		"--job-id", job.ID, "--deadline", job.CreatedAt.Add(MaxRuntime).Format(time.RFC3339Nano),
 		"--title", preset.Title, "--source", preset.Source, "--license", preset.License,
 	}
+	image, serviceAccount := v.config.Image, v.config.ServiceAccount
 	switch preset.ModeName() {
+	case "live":
+		if v.config.Live == nil {
+			return "", &Rejected{Err: ErrInvalid}
+		}
+		image, serviceAccount = v.config.Live.Image, v.config.Live.ServiceAccount
+		args = []string{
+			"--input-uri", preset.InputURI, "--input-sha256", preset.InputSHA256,
+			"--output-prefix", "gs://" + v.config.OutputBucket + "/live/" + job.ID + "/",
+			"--catalog-bucket", v.config.Live.CatalogBucket, "--media-origin", v.config.MediaOrigin,
+			"--session-id", job.ID, "--deadline", job.CreatedAt.Add(MaxRuntime).Format(time.RFC3339Nano),
+			"--title", preset.Title, "--source", preset.Source, "--license", preset.License,
+			"--source-seconds", "10", "--seed-available-after", "0.8",
+			"--bootstrap-steps", "300", "--steps-per-update", "300", "--decode-workers", "4",
+		}
 	case "dynamic":
 		args = append(args, "--mode", "dynamic", "--steps", "12000")
 		if preset.EvaluateCompression {
@@ -55,7 +70,7 @@ func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, er
 		DisplayName: "rangle-" + job.ID,
 		Labels:      map[string]string{"application": "rangle", "environment": "presentation-stg", "rangle_job": job.ID},
 		JobSpec: &aiplatform.GoogleCloudAiplatformV1CustomJobSpec{
-			ServiceAccount: v.config.ServiceAccount,
+			ServiceAccount: serviceAccount,
 			Scheduling: &aiplatform.GoogleCloudAiplatformV1Scheduling{
 				Strategy: "SPOT", Timeout: "1800s", DisableRetries: true,
 			},
@@ -66,7 +81,7 @@ func (v *Vertex) Submit(ctx context.Context, job Job, preset Preset) (string, er
 				},
 				DiskSpec: &aiplatform.GoogleCloudAiplatformV1DiskSpec{BootDiskType: "pd-standard", BootDiskSizeGb: 100},
 				ContainerSpec: &aiplatform.GoogleCloudAiplatformV1ContainerSpec{
-					ImageUri: v.config.Image,
+					ImageUri: image,
 					Args:     args,
 				},
 			}},

@@ -126,7 +126,9 @@ func viewJob(j Job) jobView {
 
 func (h *Handler) response(job Job) map[string]any {
 	v := map[string]any{"job": viewJob(job)}
-	if job.State == Succeeded {
+	if job.Snapshot.ModeName() == "live" {
+		v["viewer_url"] = "/demo/?live=" + job.ID
+	} else if job.State == Succeeded {
 		v["viewer_url"] = "/demo/?clip=generated-" + job.ID
 		v["scene_url"] = h.service.Config.MediaOrigin + "/generated/" + job.ID + "/scene.json"
 	}
@@ -249,7 +251,7 @@ func (h *Handler) ClipHandler(fallback http.Handler) http.Handler {
 			h.fail(w, r, err)
 			return
 		}
-		if job.State != Succeeded {
+		if job.State != Succeeded || job.Snapshot.ModeName() == "live" {
 			h.fail(w, r, ErrNotFound)
 			return
 		}

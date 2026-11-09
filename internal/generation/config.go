@@ -43,16 +43,25 @@ func (p Preset) ModeName() string {
 }
 
 type Config struct {
-	Project        string    `json:"project"`
-	ProjectNumber  string    `json:"project_number"`
-	Database       string    `json:"database"`
-	Image          string    `json:"image"`
-	ServiceAccount string    `json:"service_account"`
-	OutputBucket   string    `json:"output_bucket"`
-	MediaOrigin    string    `json:"media_origin"`
-	Deadline       time.Time `json:"deadline"`
-	Attempts       int       `json:"attempts"`
-	Presets        []Preset  `json:"presets"`
+	Project        string      `json:"project"`
+	ProjectNumber  string      `json:"project_number"`
+	Database       string      `json:"database"`
+	Image          string      `json:"image"`
+	ServiceAccount string      `json:"service_account"`
+	OutputBucket   string      `json:"output_bucket"`
+	MediaOrigin    string      `json:"media_origin"`
+	Deadline       time.Time   `json:"deadline"`
+	Attempts       int         `json:"attempts"`
+	Presets        []Preset    `json:"presets"`
+	Live           *LiveConfig `json:"live,omitempty"`
+}
+
+// LiveConfig isolates the streaming publisher's identity and image from offline
+// trainers. Admission, deadlines and attempt reservations are shared by all modes.
+type LiveConfig struct {
+	Image          string `json:"image"`
+	ServiceAccount string `json:"service_account"`
+	CatalogBucket  string `json:"catalog_bucket"`
 }
 
 var identifier = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
@@ -84,13 +93,16 @@ func (c Config) Validate() error {
 	if !identifier.MatchString(c.Project) || !projectNumber.MatchString(c.ProjectNumber) || !identifier.MatchString(c.Database) || !identifier.MatchString(c.OutputBucket) {
 		return fmt.Errorf("generation project, database and output bucket are required")
 	}
-	prefix := Location + "-docker.pkg.dev/" + c.Project + "/rangle-stg/"
-	image := strings.Split(c.Image, "@sha256:")
-	if len(image) != 2 || !strings.HasPrefix(image[0], prefix) || !checksum.MatchString(image[1]) {
+	if !pinnedImage(c.Image, c.Project) {
 		return fmt.Errorf("generation image must be pinned to a digest in the Tokyo project repository")
 	}
 	if c.ServiceAccount != "rangle-stg-trainer@"+c.Project+".iam.gserviceaccount.com" || c.Attempts < 1 || c.Attempts > MaxAttempts || c.Deadline.IsZero() {
 		return fmt.Errorf("generation requires a dedicated trainer identity, deadline and at most ten attempts")
+	}
+	if c.Live != nil && (!pinnedImage(c.Live.Image, c.Project) ||
+		c.Live.ServiceAccount != "rangle-stg-live-trainer@"+c.Project+".iam.gserviceaccount.com" ||
+		c.Live.CatalogBucket != "rangle-stg-"+c.ProjectNumber+"-catalog") {
+		return fmt.Errorf("live generation requires a pinned Tokyo image, dedicated identity and project catalog")
 	}
 	if !httpsURL(c.MediaOrigin) {
 		return fmt.Errorf("generation media origin must use HTTPS")
@@ -107,16 +119,30 @@ func (c Config) Validate() error {
 		if !p.validProfile() || p.EvaluateCompression && p.ModeName() != "dynamic" {
 			return fmt.Errorf("generation preset %q has an unsupported quality profile", p.ID)
 		}
-		if p.ModeName() != "static" && p.ModeName() != "dynamic" {
+		if p.ModeName() != "static" && p.ModeName() != "dynamic" && (p.ModeName() != "live" || c.Live == nil) {
 			return fmt.Errorf("generation preset %q has an unsupported mode", p.ID)
 		}
 		u, err := url.Parse(p.InputURI)
-		if !identifier.MatchString(p.ID) || seen[p.ID] || p.Title == "" || p.Sport == "" || p.Description == "" || p.License != "CC BY 4.0" || !httpsURL(p.Source) || !httpsURL(p.PreviewURL) || !checksum.MatchString(p.InputSHA256) || err != nil || u.Scheme != "gs" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || !strings.HasPrefix(u.Path, "/datasets/") || !strings.HasSuffix(u.Path, ".npz") || strings.Contains(u.Path, "..") {
+		validInput := err == nil && u.Scheme == "gs" && u.Host != "" && u.User == nil && u.RawQuery == "" && u.Fragment == "" && !strings.Contains(u.Path, "..")
+		if validInput {
+			if p.ModeName() == "live" {
+				validInput = strings.HasPrefix(u.Path, "/datasets/live/") && strings.HasSuffix(u.Path, ".zip")
+			} else {
+				validInput = strings.HasPrefix(u.Path, "/datasets/") && strings.HasSuffix(u.Path, ".npz")
+			}
+		}
+		if !identifier.MatchString(p.ID) || seen[p.ID] || p.Title == "" || p.Sport == "" || p.Description == "" || p.License != "CC BY 4.0" || !httpsURL(p.Source) || !httpsURL(p.PreviewURL) || !checksum.MatchString(p.InputSHA256) || !validInput {
 			return fmt.Errorf("generation preset %q must have reviewed CC BY 4.0 provenance and a checksummed dataset bundle", p.ID)
 		}
 		seen[p.ID] = true
 	}
 	return nil
+}
+
+func pinnedImage(value, project string) bool {
+	prefix := Location + "-docker.pkg.dev/" + project + "/rangle-stg/"
+	image := strings.Split(value, "@sha256:")
+	return len(image) == 2 && strings.HasPrefix(image[0], prefix) && len(image[0]) > len(prefix) && checksum.MatchString(image[1])
 }
 
 func httpsURL(value string) bool {
