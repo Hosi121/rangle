@@ -13,7 +13,7 @@ export function temporalHeader(data) {
   const count = header.getUint32(8, true), frameCount = header.getUint32(16, true);
   const frameRate = header.getFloat32(20, true), duration = header.getFloat32(24, true);
   const rawSize = HEADER_BYTES + count * STRIDE;
-  if (!count || header.getUint32(12, true) !== STRIDE || header.getUint32(28, true) !== 0 ||
+  if (!count || count > 500000 || header.getUint32(12, true) !== STRIDE || header.getUint32(28, true) !== 0 ||
       rawSize > MAX_TEMPORAL_BYTES || (!compressed && data.byteLength !== rawSize) ||
       (compressed && data.byteLength <= HEADER_BYTES) || frameCount < 2 || frameCount > 15000 ||
       !Number.isFinite(frameRate) || frameRate <= 0 || frameRate > 240 ||
@@ -21,6 +21,13 @@ export function temporalHeader(data) {
     throw new Error('Invalid temporal model header');
   }
   return { count, frameCount, frameRate, duration, compressed, rawSize };
+}
+
+/** Bind the float32 wire clock to the scene before installing any GPU resource. */
+export function checkTemporalTimeline(model, manifest) {
+  if (model.frameCount !== manifest.frameCount || model.frameRate !== Math.fround(manifest.frameRate)) {
+    throw new Error('Temporal model timeline mismatch');
+  }
 }
 
 /** Rearrange bytes, never values or canonical primitive IDs. gzip is supplied by the offline packer. */

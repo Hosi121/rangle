@@ -4,6 +4,7 @@ import { attachTemporalMaterial } from './temporal-material.js';
 import { PlaybackClock } from './playback-clock.js';
 import { attachPlaybackGestures } from './playback-gestures.js';
 import { prepareLiveMesh } from './live-model.js';
+import { checkTemporalTimeline } from './temporal-codec.js';
 
 const noSort = Promise.resolve(false);
 
@@ -53,9 +54,7 @@ export class TemporalSession {
   }
 
   async install(model) {
-    if (model.frameCount !== this.manifest.frameCount || model.frameRate !== Math.fround(this.manifest.frameRate)) {
-      throw new Error('Temporal model timeline mismatch');
-    }
+    checkTemporalTimeline(model, this.manifest);
     this.viewer = this.createViewer(this.manifest.camera);
     await this.viewer.addSplatBuffers([new SplatBuffer(model.buffer)],
       [{ splatAlphaRemovalThreshold: 1 }], false, false, false);
@@ -187,9 +186,7 @@ export class TemporalSession {
         try {
           if (data.type === 'error') return finish(false);
           if (data.type === 'model') {
-            if (data.frameCount !== manifest.frameCount || data.frameRate !== Math.fround(manifest.frameRate)) {
-              return finish(false);
-            }
+            checkTemporalTimeline(data, manifest);
             candidate = this.prepareReplacement(this.viewer, data);
             camera = this.viewer.camera.clone();
             camera.updateMatrixWorld();

@@ -11,9 +11,10 @@ func TestSharedGeneratedWireContract(t *testing.T) {
 	root := filepath.Join("..", "..", "testdata", "contracts", "v1")
 	var corpus struct {
 		Cases []struct {
-			ID, Profile, File string
-			Accept            bool
-			Context           struct {
+			ID, Profile, File, Model string
+			Accept                   bool
+			WireBinding              bool `json:"wire_binding"`
+			Context                  struct {
 				FrameCount int
 				FrameRate  float64
 			}
@@ -27,13 +28,13 @@ func TestSharedGeneratedWireContract(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, c := range corpus.Cases {
-		if c.Profile != "rgs" && c.ID != "S13" {
+		if c.Profile != "rgs" && !c.WireBinding {
 			continue
 		}
 		t.Run(c.ID, func(t *testing.T) {
 			path, frames, fps := c.File, c.Context.FrameCount, c.Context.FrameRate
-			if c.ID == "S13" {
-				path, frames, fps = "rgs/fps-mismatch.rgs", 3, 25
+			if c.WireBinding {
+				path = "rgs/" + c.Model + ".rgs"
 			}
 			data, err := os.ReadFile(filepath.Join(root, path))
 			if err != nil {

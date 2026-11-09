@@ -21,7 +21,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "有効なraw RGS1、canonical rowとSHAを保持"
     },
     {
       "id": "R02",
@@ -36,7 +37,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "有効なZ1を全byte可逆復元"
     },
     {
       "id": "R03",
@@ -51,7 +53,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 29.97002997002997
-      }
+      },
+      "description": "30000/1001 FPSをwire float32へ正規化"
     },
     {
       "id": "R04",
@@ -61,7 +64,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "未知のmagicを拒否"
     },
     {
       "id": "R05",
@@ -71,7 +75,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "未定義flagsを拒否"
     },
     {
       "id": "R06",
@@ -81,7 +86,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "primitive countゼロを拒否"
     },
     {
       "id": "R07",
@@ -91,7 +97,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "primitive count 500000超を拒否"
     },
     {
       "id": "R08",
@@ -101,7 +108,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "56byte宣言に対する112byte展開を拒否"
     },
     {
       "id": "R09",
@@ -111,7 +119,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "切れたgzip trailerを拒否"
     },
     {
       "id": "R10",
@@ -121,7 +130,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "gzip後方の非gzip余剰byteを拒否"
     },
     {
       "id": "R11",
@@ -131,7 +141,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "duration sigmaゼロを拒否"
     },
     {
       "id": "R12",
@@ -141,7 +152,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "peak opacityが1を超えるprimitiveを拒否"
     },
     {
       "id": "R13",
@@ -151,7 +163,8 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "positionのNaNを拒否"
     },
     {
       "id": "R14",
@@ -161,159 +174,183 @@
       "context": {
         "frameCount": 3,
         "frameRate": 25
-      }
+      },
+      "description": "sample終端と異なるheader durationを拒否"
     },
     {
       "id": "S01",
       "profile": "scene",
       "file": "scene/S01.json",
       "accept": true,
-      "model": "R01"
+      "model": "R01",
+      "description": "有効なcanonical temporal scene"
     },
     {
       "id": "S02",
       "profile": "scene",
       "file": "scene/S02.json",
       "accept": true,
-      "model": "R01"
+      "model": "R01",
+      "description": "負のup・校正intrinsics・reference heightも有効"
     },
     {
       "id": "S03",
       "profile": "scene",
       "file": "scene/S03.json",
       "accept": true,
-      "model": "R03"
+      "model": "R03",
+      "description": "fractional scene FPSとwire float32 FPSを対応"
     },
     {
       "id": "S04",
       "profile": "scene",
       "file": "scene/S04.json",
       "accept": true,
-      "model": "R01"
+      "model": "R01",
+      "description": "任意timelineの有限・非負anchorsは有効"
     },
     {
       "id": "S05",
       "profile": "scene",
       "file": "scene/S05.json",
       "accept": false,
-      "model": "R01"
+      "model": "R01",
+      "description": "任意intrinsicsの明示nullを拒否"
     },
     {
       "id": "S06",
       "profile": "scene",
       "file": "scene/S06.json",
       "accept": false,
-      "model": "R01"
+      "model": "R01",
+      "description": "sceneの未知fieldを拒否"
     },
     {
       "id": "S07",
       "profile": "scene",
       "file": "scene/S07.json",
       "accept": false,
-      "model": "R01"
+      "model": "R01",
+      "description": "同一点のcamera position/lookAtを拒否"
     },
     {
       "id": "S08",
       "profile": "scene",
       "file": "scene/S08.json",
       "accept": false,
-      "model": "R01"
+      "model": "R01",
+      "description": "float32で不安定なintrinsicsを拒否"
     },
     {
       "id": "S09",
       "profile": "scene",
       "file": "scene/S09.json",
       "accept": false,
-      "model": "R01"
+      "model": "R01",
+      "description": "Unicode escape aliasを含む重複JSON keyを拒否"
     },
     {
       "id": "S10",
       "profile": "scene",
       "file": "scene/S10.json",
       "accept": false,
-      "model": "R01"
+      "model": "R01",
+      "description": "canonical model.rgsから外れるmodel URLを拒否"
     },
     {
       "id": "S11",
       "profile": "scene",
       "file": "scene/S11.json",
       "accept": false,
-      "model": "R01"
+      "model": "R01",
+      "description": "任意timelineの明示nullを拒否"
     },
     {
       "id": "S12",
       "profile": "scene",
       "file": "scene/S12.json",
       "accept": false,
-      "model": "R01"
+      "model": "R01",
+      "description": "負のscene timeline anchorを拒否"
     },
     {
       "id": "L01",
       "profile": "live",
       "file": "live/L01.json",
-      "accept": true
+      "accept": true,
+      "description": "有効なlocal immutable scene path"
     },
     {
       "id": "L02",
       "profile": "live",
       "file": "live/L02.json",
-      "accept": true
+      "accept": true,
+      "description": "configured HTTPS media originのremote sceneも有効"
     },
     {
       "id": "L03",
       "profile": "live",
       "file": "live/L03.json",
-      "accept": true
+      "accept": true,
+      "description": "空のLIVE session indexは有効"
     },
     {
       "id": "L04",
       "profile": "live",
       "file": "live/L04.json",
-      "accept": false
+      "accept": false,
+      "description": "LIVE sessionの未知fieldを拒否"
     },
     {
       "id": "L05",
       "profile": "live",
       "file": "live/L05.json",
       "accept": false,
-      "producer_object": false
+      "producer_object": false,
+      "description": "raw indexのescaped duplicate keyを拒否"
     },
     {
       "id": "L06",
       "profile": "live",
       "file": "live/L06.json",
-      "accept": false
+      "accept": false,
+      "description": "LIVE sourceの明示nullを拒否"
     },
     {
       "id": "L07",
       "profile": "live",
       "file": "live/L07.json",
-      "accept": false
+      "accept": false,
+      "description": "後続segmentの終端が逆行するtimelineを拒否"
     },
     {
       "id": "L08",
       "profile": "live",
       "file": "live/L08.json",
-      "accept": false
+      "accept": false,
+      "description": "captureより早いavailable timestampを拒否"
     },
     {
       "id": "L09",
       "profile": "live",
       "file": "live/L09.json",
-      "accept": false
+      "accept": false,
+      "description": "model SHAとrevision URLの不一致を拒否"
     },
     {
       "id": "L10",
       "profile": "live",
       "file": "live/L10.json",
-      "accept": false
+      "accept": false,
+      "description": "model_bytes 32MiB超を拒否"
     },
     {
       "id": "L11",
       "profile": "live",
       "file": "live/L11.json",
       "accept": false,
-      "origin": "https://media.example.test/path"
+      "origin": "https://media.example.test/path",
+      "description": "pathを持つconfigured media originを拒否"
     },
     {
       "id": "L12",
@@ -323,43 +360,50 @@
         "bytes": 524289
       },
       "accept": false,
-      "producer_object": false
+      "producer_object": false,
+      "description": "raw LIVE JSON 512KiB超をdecode前に拒否"
     },
     {
       "id": "M01",
       "profile": "manifest",
       "file": "manifest/M01.json",
-      "accept": true
+      "accept": true,
+      "description": "有効なcatalog内transport manifest"
     },
     {
       "id": "M02",
       "profile": "manifest",
       "file": "manifest/M02.json",
-      "accept": false
+      "accept": false,
+      "description": "catalog raw JSONのescaped duplicate keyを拒否"
     },
     {
       "id": "M03",
       "profile": "manifest",
       "file": "manifest/M03.json",
-      "accept": false
+      "accept": false,
+      "description": "transport manifestの未知fieldを拒否"
     },
     {
       "id": "M04",
       "profile": "manifest",
       "file": "manifest/M04.json",
-      "accept": false
+      "accept": false,
+      "description": "開始ゼロから外れるsegment timelineを拒否"
     },
     {
       "id": "M05",
       "profile": "manifest",
       "file": "manifest/M05.json",
-      "accept": false
+      "accept": false,
+      "description": "不正なSHA256文字列を拒否"
     },
     {
       "id": "M06",
       "profile": "manifest",
       "file": "manifest/M06.json",
-      "accept": false
+      "accept": false,
+      "description": "decode_time_ms nullをゼロへ暗黙変換しない"
     },
     {
       "id": "B01",
@@ -367,7 +411,8 @@
       "file": "bundle/B01.json",
       "accept": true,
       "model": "R01",
-      "scene": "S01"
+      "scene": "S01",
+      "description": "実Go/Python gateとJS workerで有効なmodel proofを採用"
     },
     {
       "id": "B02",
@@ -375,19 +420,22 @@
       "file": "bundle/B02.json",
       "accept": false,
       "model": "R01",
-      "scene": "S01"
+      "scene": "S01",
+      "description": "整合したrevision URLでも実asset SHAが違えば拒否"
     },
     {
       "id": "C01",
       "profile": "clock",
       "file": "clock/C01.json",
-      "accept": true
+      "accept": true,
+      "description": "preview .8sでもsample終端.76sへclamp、同じpreview URLのmappingを採用"
     },
     {
       "id": "C02",
       "profile": "clock",
       "file": "clock/C02.json",
-      "accept": true
+      "accept": true,
+      "description": "fractional source FPSでsample化、異なるpreview URLではmapping null"
     },
     {
       "id": "S13",
@@ -395,7 +443,21 @@
       "file": "scene/S13.json",
       "model": "fps-mismatch",
       "accept": false,
-      "reason": "wire fps must equal float32(scene frameRate), not epsilon-near"
+      "reason": "wire fps must equal float32(scene frameRate), not epsilon-near",
+      "wire_binding": true,
+      "context": {
+        "frameCount": 3,
+        "frameRate": 25
+      },
+      "description": "wire FPSがfloat32(scene FPS)から1ULP異なる場合を拒否"
+    },
+    {
+      "id": "L13",
+      "profile": "live",
+      "file": "live/L13.json",
+      "accept": false,
+      "reason": "dropped_windows exceeds JSON safe integer",
+      "description": "dropped_windowsがJSON safe integerを超える場合を拒否"
     }
   ]
 }

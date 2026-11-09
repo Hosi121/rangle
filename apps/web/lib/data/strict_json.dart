@@ -1,7 +1,11 @@
 import 'dart:convert';
 
 /// Check decoded key aliases before native jsonDecode discards duplicate fields.
-Object? strictJsonDecode(String text, {int maxBytes = 524288, int maxDepth = 16}) {
+Object? strictJsonDecode(
+  String text, {
+  int maxBytes = 524288,
+  int maxDepth = 16,
+}) {
   if (utf8.encode(text).length > maxBytes) {
     throw const FormatException('JSON exceeds limit.');
   }
@@ -43,7 +47,9 @@ class _KeyScanner {
   }
 
   void value(int depth) {
-    if (depth > maxDepth) throw const FormatException('JSON nesting exceeds limit.');
+    if (depth > maxDepth) {
+      throw const FormatException('JSON nesting exceeds limit.');
+    }
     space();
     if (next == '{') {
       at++;
@@ -52,7 +58,9 @@ class _KeyScanner {
       if (next != '}') {
         while (true) {
           if (next != '"') throw const FormatException('Invalid JSON key.');
-          if (!keys.add(string())) throw const FormatException('Duplicate JSON key.');
+          if (!keys.add(string())) {
+            throw const FormatException('Duplicate JSON key.');
+          }
           space();
           expect(':');
           value(depth + 1);
@@ -82,7 +90,9 @@ class _KeyScanner {
       while (next.isNotEmpty && !' \r\n\t,}]'.contains(next)) {
         at++;
       }
-      if (!RegExp(r'^(?:null|true|false|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$').hasMatch(text.substring(start, at))) {
+      if (!RegExp(
+        r'^(?:null|true|false|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$',
+      ).hasMatch(text.substring(start, at))) {
         throw const FormatException('Invalid JSON value.');
       }
     }

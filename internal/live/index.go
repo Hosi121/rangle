@@ -127,7 +127,7 @@ func (index Index) Validate(assetOrigin string) error {
 		default:
 			return fmt.Errorf("invalid live session state")
 		}
-		if !finite(session.TargetLatencySeconds) || session.TargetLatencySeconds <= 0 || !finite(session.LatestInputTimeSeconds) || session.LatestInputTimeSeconds < 0 || session.DroppedWindows < 0 {
+		if !finite(session.TargetLatencySeconds) || session.TargetLatencySeconds <= 0 || !finite(session.LatestInputTimeSeconds) || session.LatestInputTimeSeconds < 0 || session.DroppedWindows < 0 || session.DroppedWindows > 1<<53-1 {
 			return fmt.Errorf("invalid live session temporal metadata")
 		}
 		source := session.Source
