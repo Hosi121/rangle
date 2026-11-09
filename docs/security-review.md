@@ -29,7 +29,7 @@
 ## 残る制約
 
 - 公開runtime侵害時はcommunity accessとowner偽装による残枠内の正規操作が可能。managerは固定spec・同時1・最大10 attempts・30分・期限を守るが、公開RCEを防止しない。
-- 公開媒体の大量取得費用とBudget通知遅延は残り、guardは厳密なhard capではない。現Google accountにBudget一覧権限がなく再読取できなかったため、既存USD300・期限・Run capを変更していない。
+- 公開媒体の大量取得費用とBudget通知遅延は残り、guardは厳密なhard capではない。現Google accountにBudget一覧権限がなく再読取できなかったため、承認予算USD300と既存期限・Run capを維持した。
 - PITR/scheduleの設定確認はrestore成功を示さない。別DB restore・実削除停止試験は未実施。
 - 実IAM宣言と通信は確認したが、Troubleshooterは `SERVICE_DISABLED`。対象SAの拒否証拠でも、全service/将来workload/project外の無権限証明でもない。
 - Storage/Firestore `DATA_READ` は無効で、読取持ち出しの全面監査は提供しない。

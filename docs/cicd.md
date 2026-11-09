@@ -17,7 +17,7 @@ Go＋Flutter Webを非rootの単一imageにまとめ、cacheを再利用してbu
 1. 実行元・設定・期限と共通検証を確認し、imageをbuild/pushする。
 2. desired templateに `-generation-manager-url` があれば、既存managerのSA/IAM/固定args/config・catalog SHA path/pinned image、両serviceの**実trafficと復帰先revision**を取得する。欠落・不一致なら更新前に失敗させる。
 3. 同じimageでmanagerをno-traffic更新する。`ci-manager-candidate` に新しいID tokenで `/health` を呼び、200・本文・`K_REVISION`由来headerを照合する。100%へ昇格後、実image/args/trafficを再確認する。
-4. 公開appをno-traffic更新する。既定 `run.app` とcandidate-tag URLの外部直通拒否を確認し、`https://app.<domain>` に `X-Rangle-Candidate: ci-candidate` を付けて候補のhealth/UI/API/公開mediaを検証する。
+4. 公開appをno-traffic更新する。既定 `run.app` とcandidate-tag URLの外部直通拒否を確認し、`https://app.<domain>` に `X-Rangle-Candidate: ci-candidate` を付けて候補のhealth/UI/API/LIVE APIとmedia URLを検証する。
 5. 公開候補へ100%切り替え、候補headerなしのHTTPS経路を再検証し、receiptを保存する。
 
 manager昇格後に公開候補・公開後検証・receipt保存・tag cleanupが失敗したら、**両serviceをそれぞれ元の明示revision/traffic比率へ戻す**。一方が失敗しても他方の復帰を試す。成功・失敗とも自分が作った2 tagだけを削除し、失敗releaseのreceiptは残さない。DB/IAM/attempt counterは巻き戻さない。外部artifact保存の失敗だけは下表の例外とする。
