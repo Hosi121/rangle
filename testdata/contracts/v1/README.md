@@ -30,7 +30,7 @@ PythonのLIVE入力は既に構築済みobject。raw構文だけのL05（escaped
 
 RGSの共通profileは学習出力window（2–32 frames）。汎用Go publication/JS viewerは15000 framesまで扱うが、Python trainer/generationの入力・出力制限を緩めない。このcorpusは未列挙の全JSON/全形式について完全な等価性を証明するものではない。
 
-既知の未カバー差分: 正しいZ1の後ろに空のgzip memberを追加すると、Python gzipとnative JS DecompressionStreamは受理し、Goのsingle-member検証は拒否する。合成1 primitiveの単発oracleで確認済み。R10の非gzip余剰byte拒否とは別であり、RGS wire全体の採否一致は未達。既存の展開長上限・CRC・primitive検証は維持する。将来canonical gzip container policyを固定する候補とし、今回は独自Deflate parserを追加しない。
+既知の未カバー差分: 正しいZ1の後ろに空のgzip memberを追加すると、Python gzipとnative JS DecompressionStreamは受理し、Goのsingle-member検証は拒否する。合成1 primitiveの単発oracleで確認済み。R10の非gzip余剰byte拒否とは別であり、RGS wire全体の採否一致は未達。既存の展開長上限・CRC・primitive検証は維持する。canonical gzip container policyの統一は[Issue #101](https://github.com/Hosi121/rangle/issues/101)で追跡し、今回は独自Deflate parserを追加しない。
 
 ## 実行と変更
 
