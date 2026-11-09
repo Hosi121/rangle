@@ -46,6 +46,9 @@ func Load(source io.Reader) (*Catalog, error) {
 	if len(data) > maxCatalogBytes {
 		return nil, fmt.Errorf("catalog exceeds %d bytes", maxCatalogBytes)
 	}
+	if err := catalogJSON(data); err != nil {
+		return nil, err
+	}
 	var document struct {
 		Version int    `json:"version"`
 		Clips   []clip `json:"clips"`

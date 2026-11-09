@@ -1,5 +1,7 @@
 # rangle Web
 
+[製品概要](../../README.md) · [ドキュメント一覧](../../docs/README.md)
+
 スポーツのハイライトを切り替える、Flutter / DartのWebフロントエンドです。日本語UIとMaterial 3を使います。
 
 既定では同一originの `/api/v1/clips` から動画・sceneのURLを読み込みます。`RANGLE_DEMO=true` を明示したビルドだけ内蔵の3件のデモを使います。API URLの未指定・空文字でもデモへ切り替えません。デモ先頭の **VRU Basketball** は、実験で再構成した480×270・25fps・0.8秒の通常動画サンプルです。出典はAVS-VRU / Jiahao Wuほか（CC BY 4.0）。詳細は [assets/samples/ATTRIBUTION.md](assets/samples/ATTRIBUTION.md) に記載しています。
@@ -66,7 +68,7 @@ flutter --suppress-analytics build web --release --no-web-resources-cdn \
   --dart-define=RANGLE_SCENE_URL=http://127.0.0.1:4174/samples/basketball/scene.json
 ```
 
-通常のビルドは `build/web/index.html`（`/demo/` のWeb UI）と `build/web/landing.html`（製品入口）を生成します。リポジトリのrootから、利用が許可されたsceneのディレクトリを指定して起動します。
+通常のビルドは `build/web/index.html`（`/demo/` のWeb UI）と `build/web/landing.html`（製品入口）を生成します。リポジトリのrootから、利用が許可されたsceneのディレクトリを指定して起動します。以下の `-scene-dir` は `.splat` フレーム列用です。RGS1時間モデルは[APIと版付き資産](../../docs/api-delivery.md)から配信します。ローカル配信の公開範囲とキャッシュは[専用手順](../../docs/local-server.md)を参照してください。
 
 ```bash
 go run ./cmd/rangle-server -ui-root apps/web/build/web \

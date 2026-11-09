@@ -1,6 +1,6 @@
 # rangle のクラウド構成
 
-2026-11-08 時点の発表用 stg。正本は [Terraform](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。CI の変更は [PR #42](https://github.com/Hosi121/rangle/pull/42)。
+2026-11-08に構築した発表用stgの配信・配備経路を示す。正本は [Terraform](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。逐次GPU生成の拡張と実測は[クラウドLIVE](cloud-live.md)を参照。CI の変更は [PR #42](https://github.com/Hosi121/rangle/pull/42)。
 
 ![rangle: Cloudflare DNSからGoogle HTTPS LBへ接続し、Cloud RunのUI/APIとCloud CDN・private GCSのmediaへ分岐する構成。下段はWIFによる配備と予算・期限停止。](diagrams/cloud-architecture.svg)
 
@@ -30,7 +30,7 @@ GitHub Actions の `stg` workflow は OIDC / Workload Identity Federation を経
 
 ## 検証の到達点
 
-Cloud Run / NEG / LB / Cloud CDN / private GCS は作成済み。Cloud Run URL の UI・API と、media の HTTPS・Range・CORS・ETag・実ファイルのハッシュ一致を確認済み。app の Google-managed certificate 発行と GitHub WIF 経由の初回配備は確認中。図は構成を表し、配備状況の更新先は [配備手順](stg-deployment.md#検証と到達点)。
+Cloud Run / NEG / LB / Cloud CDN / private GCS は作成済み。app / mediaの独自ドメインでHTTPS接続、UI・API、mediaのRange・CORS・ETag・実ファイルのハッシュ一致と、GitHub WIF経由の配備を確認済み。図は配信・配備の構成を表し、配備状況の更新先は [配備手順](stg-deployment.md#検証と到達点)。
 
 guard は期限前の `stopped=false / reason=not_due`、Scheduler による起動、費用0円の検証通知の decode・閾値判定・ack を確認済み。予算・期限到達時に資源を削除する分岐と、その実 IAM は未検証。実際の到達点の更新先は [stg 配備手順](stg-deployment.md#検証と到達点)。
 

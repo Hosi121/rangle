@@ -4,6 +4,8 @@ import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
+import '../data/strict_json.dart';
+
 bool liveId(String value) => RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(value);
 
 Uri _http(Uri uri) {
@@ -19,7 +21,7 @@ Uri _http(Uri uri) {
 
 class LiveSegment {
   LiveSegment.fromJson(Map<String, dynamic> row, String session, LiveApi api)
-    : sequence = _integer(row['sequence'], 1, 9007199254740991),
+    : sequence = _integer(row['sequence'], 1, 999999),
       start = _number(row['start_seconds']),
       end = _number(row['end_seconds']),
       sha256 = _text(row['model_sha256'], 64),
@@ -27,8 +29,31 @@ class LiveSegment {
       capturedAt = _date(row['captured_at']),
       availableAt = _date(row['available_at']),
       scene = api.media(row['scene_url']) {
+    _fields(row, [
+      'sequence',
+      'start_seconds',
+      'end_seconds',
+      'scene_url',
+      'model_sha256',
+      'model_bytes',
+      'captured_at',
+      'available_at',
+      'training_seconds',
+      'mean_packed_psnr',
+      'mean_packed_ssim',
+    ]);
     if (end <= start || !RegExp(r'^[a-f0-9]{64}$').hasMatch(sha256)) {
       throw const FormatException('Invalid live segment.');
+    }
+    _number(row['training_seconds']);
+    _number(row['mean_packed_psnr']);
+    final ssim = row['mean_packed_ssim'];
+    if (ssim is! num ||
+        !ssim.isFinite ||
+        ssim < -1 ||
+        ssim > 1 ||
+        availableAt.isBefore(capturedAt)) {
+      throw const FormatException('Invalid live measurements or timestamps.');
     }
     final revision =
         '${sequence.toString().padLeft(6, '0')}-${sha256.substring(0, 16)}';
@@ -52,6 +77,23 @@ class LiveSession {
       updatedAt = _date(row['updated_at']),
       startedAt = _date(row['started_at']),
       latestInput = _number(row['latest_input_time_seconds']) {
+    _fields(row, [
+      'id',
+      'title',
+      'state',
+      'started_at',
+      'updated_at',
+      'target_latency_seconds',
+      'latest_input_time_seconds',
+      'dropped_windows',
+      'source',
+      'segments',
+    ]);
+    if (_number(row['target_latency_seconds']) <= 0 ||
+        updatedAt.isBefore(startedAt)) {
+      throw const FormatException('Invalid live session time.');
+    }
+    _integer(row['dropped_windows'], 0, 9007199254740991);
     if (!liveId(id) ||
         !{'starting', 'live', 'ended', 'failed'}.contains(state)) {
       throw const FormatException('Invalid live session.');
@@ -63,18 +105,32 @@ class LiveSession {
     segments = List.unmodifiable(
       raw.map((entry) => LiveSegment.fromJson(_map(entry), id, api)),
     );
-    for (var i = 1; i < segments.length; i++) {
-      if (segments[i].sequence <= segments[i - 1].sequence) {
-        throw const FormatException('Invalid live sequence.');
+    for (var i = 0; i < segments.length; i++) {
+      final current = segments[i];
+      if (current.end > latestInput + 1e-6 ||
+          current.availableAt.isBefore(startedAt) ||
+          current.availableAt.isAfter(updatedAt)) {
+        throw const FormatException('Invalid live segment time.');
+      }
+      if (i > 0) {
+        final previous = segments[i - 1];
+        if (current.sequence <= previous.sequence ||
+            current.start < previous.start ||
+            current.end <= previous.end ||
+            current.capturedAt.isBefore(previous.capturedAt) ||
+            current.availableAt.isBefore(previous.availableAt)) {
+          throw const FormatException('Invalid live sequence.');
+        }
       }
     }
     final source = _map(row['source']);
+    _fields(source, ['label', 'url', 'license', 'caveat']);
     attribution =
-        '${_text(source['label'], 512)} · ${_text(source['license'], 256)}';
+        '${_text(source['label'], 256)} · ${_text(source['license'], 256)}';
     sourceUrl = _http(Uri.parse(_text(source['url'], 4096)));
-    caveat = source['caveat'] == null ? '' : source['caveat'] as String;
-    if (caveat.length > 4096) {
-      throw const FormatException('Invalid source caveat.');
+    caveat = _text(source['caveat'], 4096);
+    if (sourceUrl.scheme != 'https' || sourceUrl.hasQuery) {
+      throw const FormatException('Invalid source URL.');
     }
   }
   final String id, title, state;
@@ -87,6 +143,13 @@ class LiveSession {
   bool get terminal => state == 'ended' || state == 'failed';
 }
 
+void _fields(Map<String, dynamic> value, List<String> names) {
+  if (value.length != names.length ||
+      names.any((name) => !value.containsKey(name) || value[name] == null)) {
+    throw const FormatException('Missing, unknown or null live field.');
+  }
+}
+
 Map<String, dynamic> _map(Object? value) {
   if (value is! Map<String, dynamic>) {
     throw const FormatException('Invalid live document.');
@@ -95,7 +158,9 @@ Map<String, dynamic> _map(Object? value) {
 }
 
 String _text(Object? value, int max) {
-  if (value is! String || value.isEmpty || value.length > max) {
+  if (value is! String ||
+      value.trim().isEmpty ||
+      utf8.encode(value).length > max) {
     throw const FormatException('Invalid live text.');
   }
   return value;
@@ -116,8 +181,24 @@ int _integer(Object? value, int min, int max) {
 }
 
 DateTime _date(Object? value) {
-  final date = DateTime.tryParse(_text(value, 64));
-  if (date == null || !date.isUtc) {
+  final text = _text(value, 64);
+  final match = RegExp(
+    r'^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d{1,9})?(?:Z|\+00:00)$',
+  ).firstMatch(text);
+  final date = DateTime.tryParse(text);
+  if (match == null ||
+      date == null ||
+      !date.isUtc ||
+      [
+        date.year,
+        date.month,
+        date.day,
+        date.hour,
+        date.minute,
+        date.second,
+      ].asMap().entries.any(
+        (entry) => entry.value != int.parse(match.group(entry.key + 1)!),
+      )) {
     throw const FormatException('Invalid live date.');
   }
   return date;
@@ -152,7 +233,10 @@ class LiveApi {
     if ({'http', 'https'}.contains(app.scheme)) origins.add(app.origin);
     if (mediaOrigin.isNotEmpty) {
       final media = _http(Uri.parse(mediaOrigin));
-      if ((media.path.isNotEmpty && media.path != '/') || media.hasQuery) {
+      if (media.scheme != 'https' ||
+          media.port != 443 ||
+          (media.path.isNotEmpty && media.path != '/') ||
+          media.hasQuery) {
         throw const FormatException('Media origin must not have a path.');
       }
       origins.add(media.origin);
@@ -219,7 +303,7 @@ class LiveApi {
         }
         body.add(chunk);
       }
-      final document = _map(jsonDecode(utf8.decode(body.takeBytes())));
+      final document = _map(strictJsonDecode(utf8.decode(body.takeBytes())));
       List<LiveSession> sessions;
       if (id != null) {
         final session = LiveSession.fromJson(document, this);
@@ -228,6 +312,7 @@ class LiveApi {
         }
         sessions = [session];
       } else {
+        _fields(document, ['version', 'sessions']);
         final rows = document['sessions'];
         if (document['version'] != 1 || rows is! List || rows.length > 8) {
           throw const FormatException('Invalid live index.');

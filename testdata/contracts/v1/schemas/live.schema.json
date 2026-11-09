@@ -1,0 +1,143 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:rangle:contracts:v1:live",
+  "type": "object",
+  "required": [
+    "version",
+    "sessions"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "sessions": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "state",
+          "started_at",
+          "updated_at",
+          "target_latency_seconds",
+          "latest_input_time_seconds",
+          "dropped_windows",
+          "source",
+          "segments"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string"
+          },
+          "target_latency_seconds": {
+            "type": "number"
+          },
+          "latest_input_time_seconds": {
+            "type": "number"
+          },
+          "dropped_windows": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "source": {
+            "type": "object",
+            "required": [
+              "label",
+              "url",
+              "license",
+              "caveat"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "label": {
+                "type": "string"
+              },
+              "url": {
+                "type": "string"
+              },
+              "license": {
+                "type": "string"
+              },
+              "caveat": {
+                "type": "string"
+              }
+            }
+          },
+          "segments": {
+            "type": "array",
+            "maxItems": 32,
+            "items": {
+              "type": "object",
+              "required": [
+                "sequence",
+                "start_seconds",
+                "end_seconds",
+                "scene_url",
+                "model_sha256",
+                "model_bytes",
+                "captured_at",
+                "available_at",
+                "training_seconds",
+                "mean_packed_psnr",
+                "mean_packed_ssim"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "sequence": {
+                  "type": "integer"
+                },
+                "start_seconds": {
+                  "type": "number"
+                },
+                "end_seconds": {
+                  "type": "number"
+                },
+                "scene_url": {
+                  "type": "string"
+                },
+                "model_sha256": {
+                  "type": "string"
+                },
+                "model_bytes": {
+                  "type": "integer"
+                },
+                "captured_at": {
+                  "type": "string"
+                },
+                "available_at": {
+                  "type": "string"
+                },
+                "training_seconds": {
+                  "type": "number"
+                },
+                "mean_packed_psnr": {
+                  "type": "number"
+                },
+                "mean_packed_ssim": {
+                  "type": "number"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
