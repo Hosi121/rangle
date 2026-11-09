@@ -20,7 +20,7 @@ Goが検証のために取得するURLは、設定済みmedia originの `/genera
 
 scene/metrics/modelそれぞれの実サイズ・SHA256を検証記録に保存する。workerのscene-last、GCS generation-match=0、固定job pathへの上書き不能な生成先がcontentの不変性の基盤となる。
 
-HTTPのimmutableは任意のcache hintで、この基盤とは区別する。CDNが応答を public,max-age=86400 へ書き換えてhintを省いても掲載でき、従来のpublic,max-age=31536000,immutableも受け入れる。CDN TTLやIACは変更しない。[shared TTLの優先順位](https://www.rfc-editor.org/rfc/rfc9111.html#section-4.2.1)に従う。
+HTTPのimmutableは任意のcache hintで、この基盤とは区別する。CDNが応答を public,max-age=86400 へ書き換えてhintを省いても掲載でき、従来のpublic,max-age=31536000,immutableも受け入れる。CDNのclient TTLとcontentの不変性を別に扱う。[shared TTLの優先順位](https://www.rfc-editor.org/rfc/rfc9111.html#section-4.2.1)に従う。
 
 検証失敗ではjobのpublishedとpublic registryを変更しない。HTTPの409を返す境界でjob_idと原因だけをWarnとして1回記録し、認証情報や応答本文は記録しない。これらは成果物・出典・サイズ・containerの整合性検証であり、GPU描画品質や実機性能の合否を保証するものではない。
 
@@ -38,11 +38,11 @@ static catalogは従来の厳格なtransport manifestを通して起動時に検
 
 communityの存在確認はstatic ID集合に加え、既知のgenerated IDのSucceeded jobを1件だけ確認する。public registryや掲載状態には依存せず、未成功・不明IDを拒否する。掲載前・取り下げ後も反応の閲覧とログイン済み利用者の投稿を続けられ、再掲載でも同じIDの反応を維持する。job一覧・job詳細・掲載管理の所有者制限は変えず、未掲載結果を列挙・探索するAPIを追加しない。
 
-## 検証と運用範囲
+## 検証
 
-CPU/API testsとloopback Firestore emulatorで、所有者・未完了・CSRF/入力制限、static/dynamic成果物、破損/欠損/別job/別出典/redirect拒否、冪等PUT、検索/paging/ETag/旧cursor、複数Firestore clientの同時掲載、再起動、コミュニティ操作と取り下げ後のdeep linkを検証する。
+CPU/API testsとloopback Firestore emulatorで、所有者・未完了・CSRF/入力制限、static/dynamic成果物、破損/欠損/別job/別出典/redirect拒否、冪等PUT、検索/paging/ETag/旧cursor、複数Firestore clientの同時掲載、再起動、未掲載・取り下げ後の第三者交流とdeep linkを検証する。
 
-この変更は外部cloud適用、GPU実行、デプロイ、実APIやブラウザの確認を実行しない。定期的なactive job同期は別の変更として扱い、この掲載処理へgoroutine timerを組み込まない。
+実配備先のIAM・OIDC疎通、停止完了、ブラウザ操作は、自動テストとは分けて確認する。
 
 ## リクエストに依存しない状態同期
 
@@ -56,4 +56,4 @@ IaCの `generation_sync_enabled` は既定false。明示enable時だけ専用SA�
 
 既存の期限・JPY予算guardの停止分岐は、所有するgeneration-sync Schedulerもpauseする。pause失敗は既存の失敗記録へ集約し、旧来のCloud Run/Vertex停止手順と台帳を維持する。pauseをTerraform applyで勝手に解除しない。IAMやquota・費用の厳密なhard capを新たに主張するものではない。
 
-適用はrootが新image/固定audience・plan・実Workflows compilerを確認してから行う。旧imageへ未対応flagを渡さず、既存の明示traffic固定と候補検証手順を守る。ローカルではGoのOIDC拒否・同期・上限・期限のテスト、Terraform validate/mock planとrender済みWorkflowの400文字制限を確認する。実Scheduler/token/Workflows compilerはこの変更では呼び出さない。
+有効化時は対応image・固定audience・planを照合し、旧imageへ未対応flagを渡さない。初回有効化時やimage/audienceの対応を変える際はSchedulerをpauseし、対象revisionの配備後にresumeして実OIDC疎通を確認する。既存の明示traffic固定と候補検証手順を守る。Goの認証・同期・上限・期限のテスト、Terraform validate/mock plan、Workflowの400文字制限と実compilerの確認を、実際の定期呼び出しの確認とは分けて行う。
