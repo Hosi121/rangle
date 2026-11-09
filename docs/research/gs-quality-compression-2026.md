@@ -64,7 +64,7 @@ HEVCにも可逆/非可逆の設定差があり、codec名だけでは無劣化�
 
 MoRGSから「photometric lossだけでは動きが画素残差を追う」という問題設定を取り出す。現`local-lifetime`と比較し、寿命式・warm shift・densification・初期化・optimizer/LR・bootstrap300/update300・decode workers4を固定したまま、**training view `[1,11]`の到着済み隣接frameによるflow項だけ**を追加する案とする。既存`motion-prior`の単なる静的速度罰則とは異なり、観測された動きの向きと大きさも拘束する。
 
-最小比較では、既存OpenCV 4.13の[DIS PRESET_MEDIUM](https://docs.opencv.org/4.10.0/de/d4f/classcv_1_1DISOpticalFlow.html)・CPU 1 threadを固定する案とする。forward/backward整合1px以内のsampleに限り、projected Gaussian displacementとflowのHuber誤差（δ=1px、幅480で正規化）を重み0.01で加える、という**rangle向け仮説**を事前固定する。これはMoRGS完全再現ではない。held-outからflow/mask/閾値を作らず、window外の将来frameを参照しない。補助flowのcode/パラメータ確定は実装前に別途レビューする。
+最小比較では、既存OpenCV 4.13の[DIS PRESET_MEDIUM](https://docs.opencv.org/4.13.0/de/d4f/classcv_1_1DISOpticalFlow.html)・CPU 1 threadを固定する案とする。forward/backward整合1px以内のsampleに限り、projected Gaussian displacementとflowのHuber誤差（δ=1px、幅480で正規化）を重み0.01で加える、という**rangle向け仮説**を事前固定する。これはMoRGS完全再現ではない。held-outからflow/mask/閾値を作らず、window外の将来frameを参照しない。補助flowのcode/パラメータ確定は実装前に別途レビューする。
 
 品質比較は、同じsource PTS/window列を同じ順序・step数で両条件に渡す。producerの速度差で学習windowまで変わる比較は混ぜず、ライブでのdrop/遅延は別に測る。最初は同一10秒traceでbaseline/候補各1回、追加探索なし。各windowの同じ80 held-out画像でfloat/packed PSNR・SSIM、`mean |(I[t+1]-I[t])-(GT[t+1]-GT[t])|`、境界直前/直後の誤差を報告する。前後render差が大きいだけでは動きが正しい証拠にしない。flow生成時間・学習時間・VRAM・点数・bytesも記録し、画質と費用を両方見て次を判断する。
 
@@ -76,7 +76,7 @@ SharpTimeGSのflat-top寿命や、PackUVの静的領域の完全freezeは、こ�
 
 canonical record順・全float bit・不可視primitiveを保持する。行の変更は圧縮効率を下げ得るが、差分を正しく戻せれば同一性は保てる。5windowごとを独立keyframe、差分がfullより大きい/対応できない場合もfullへfallback、参照chainは最大4差分で固定する。count変化時は独立keyframeへ戻す。元RGS1 rawの全byte/SHAを照合し、既存model SHA契約を保つ場合はpinしたencoderで再構成した`model.rgs`のSHAも一致させる。不一致を「見た目が同じ」で通さない。
 
-評価する量は、keyframe・codebook/参照metadata・fallback・再取得を含む**総bytes/ source秒**と**総bytes/実送信秒**、encoder/decoderのCPU時間、初回表示まで、途中参加/seek時の必要bytesと待ち時間、peak CPU/GPU memory、破損/参照欠落時の復旧である。Android/iPhoneの対象browserでcold/warm各3回の中央値・最大を測り、少数試行からp95を保証しない。全byte一致なら同じ時刻・readerへ渡すモデル値は同一で、新しい量子化誤差を持ち込まない。差分chainが通信量を減らしてもstartup/RAMを悪化させる可能性を残す。既存full RGS1へのfallbackとversionを持つ配信契約の検討は、結果が出た後の別作業とする。
+評価する量は、keyframe・codebook/参照metadata・fallback・再取得を含む**総bytes/ source秒**と**総bytes/実送信秒**、encoder/decoderのCPU時間、初回表示まで、途中参加/seek時の必要bytesと待ち時間、peak CPU/GPU memory、破損/参照欠落時の復旧である。端末browserの測定は将来の許可された利用者の手元での計画で、GUI自動操作を含めない。Android/iPhoneの対象browserでcold/warm各3回の中央値・最大を測り、少数試行からp95を保証しない。全byte一致なら同じ時刻・readerへ渡すモデル値は同一で、新しい量子化誤差を持ち込まない。差分chainが通信量を減らしてもstartup/RAMを悪化させる可能性を残す。既存full RGS1へのfallbackとversionを持つ配信契約の検討は、結果が出た後の別作業とする。
 
 ## 非可逆方式へ進む際の判断点
 
