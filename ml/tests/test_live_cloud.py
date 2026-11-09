@@ -13,12 +13,13 @@ import time
 import unittest
 import zipfile
 from datetime import datetime, timedelta, timezone
+from itertools import pairwise
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 from urllib.parse import parse_qs, unquote, urlsplit
 
-from rangle_live import bundle, cloud
+from rangle_live import bundle, cloud, publishing
 from rangle_live.output import json_bytes
 from rangle_live.publishing import ADCStorage, PublishError, protocol
 from test_preprocessing import source_fixture
@@ -196,6 +197,203 @@ class CloudTests(unittest.TestCase):
         return cloud.Deadline(
             (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()
         )
+
+    def test_429_backoff_waits_and_reuses_the_same_conditional_request(self):
+        session, instant, requests, responses, events = Session(), [0.0], [], [], []
+        original = session.request
+
+        class ClosedResponse(Response):
+            closed = False
+
+            def __exit__(self, *_args):
+                self.closed = True
+
+        def request(method, url, **options):
+            requests.append((method, url, options.get("data")))
+            if instant[0] < 1:
+                response = ClosedResponse(429, b"private HTTP body, never log")
+                responses.append(response)
+                return response
+            return original(method, url, **options)
+
+        def sleep(seconds):
+            self.assertTrue(all(response.closed for response in responses))
+            instant[0] += seconds
+
+        session.request = request
+        adapter = ADCStorage(session, self.deadline())
+        with (
+            patch.object(publishing, "time", SimpleNamespace(sleep=sleep)),
+            patch.object(
+                publishing, "log", side_effect=lambda *a, **kw: events.append((a, kw))
+            ),
+        ):
+            adapter.create(
+                "catalog",
+                "live/snapshots/ID/one.json",
+                b"{}",
+                "application/json",
+                "private,no-store",
+            )
+        self.assertEqual(instant[0], 1.25)
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(requests[0], requests[1])
+        self.assertEqual(
+            parse_qs(urlsplit(requests[0][1]).query)["ifGenerationMatch"], ["0"]
+        )
+        self.assertEqual(events[0][1]["status"], 429)
+        self.assertNotIn("private", repr(events))
+
+    def test_ambiguous_429_create_is_read_verified_and_pointer_keeps_its_cas(self):
+        session, requests = Session(), []
+        original = session.request
+        ambiguous = [False]
+
+        def request(method, url, **options):
+            response = original(method, url, **options)
+            if method == "POST":
+                requests.append((url, options["data"]))
+                if not ambiguous[0]:
+                    ambiguous[0] = True
+                    return Response(429, b"not logged")
+            return response
+
+        session.request = request
+        adapter = ADCStorage(session, self.deadline())
+        with patch.object(publishing.time, "sleep"), patch.object(publishing, "log"):
+            proof = adapter.create(
+                "catalog",
+                "live/snapshots/ID/one.json",
+                b"{}",
+                "application/json",
+                "private,no-store",
+            )
+            self.assertEqual(proof["generation"], "1")
+            self.assertEqual(requests[0], requests[1])
+            ambiguous[0] = False
+            document = {"version": 1, "sessions": []}
+            with self.assertRaisesRegex(PublishError, "changed concurrently"):
+                adapter.commit("catalog", document, "0")
+            self.assertEqual(requests[-2], requests[-1])
+            self.assertEqual(adapter.index("catalog")[0], document)
+        self.assertEqual(session.next_generation, 3)
+
+    def test_429_retries_are_bounded_conditional_and_deadline_limited(self):
+        calls, delays = [], []
+
+        def request(method, url, **_options):
+            calls.append((method, url))
+            return Response(429, b"private")
+
+        adapter = ADCStorage(SimpleNamespace(request=request), self.deadline())
+        base = "https://storage.googleapis.com/upload/storage/v1/b/catalog/o"
+        with (
+            patch.object(publishing.time, "sleep", side_effect=delays.append),
+            patch.object(publishing, "log"),
+        ):
+            with self.assertRaisesRegex(PublishError, "HTTP 429"):
+                adapter.request("GET", base)
+            self.assertEqual(len(calls), 4)
+            self.assertEqual(delays, [1.25, 2.5, 5])
+            for condition in (
+                "",
+                "?ifGenerationMatch=-1",
+                "?ifGenerationMatch=0&ifGenerationMatch=1",
+            ):
+                before = len(calls)
+                with self.assertRaisesRegex(PublishError, "HTTP 429"):
+                    adapter.request("POST", base + condition)
+                self.assertEqual(len(calls), before + 1)
+            adapter.deadline.end = time.monotonic() + 0.1
+            with self.assertRaises(TimeoutError):
+                adapter.request("GET", base)
+            self.assertEqual(delays, [1.25, 2.5, 5])
+
+    def test_producer_claim_rejects_restart_before_download_or_child_start(self):
+        adapter = ADCStorage(Session(), self.deadline())
+        args = SimpleNamespace(
+            catalog_bucket="catalog", session_id="ID", input_sha256="a" * 64
+        )
+        first = adapter.claim_producer("catalog", "ID", args.input_sha256)
+        key = "live/snapshots/ID/producer.json"
+        claimed = adapter.session.objects["catalog", key][1]
+        self.assertEqual(first["generation"], "1")
+        with (
+            tempfile.TemporaryDirectory() as temporary,
+            patch.object(cloud, "download") as download,
+            patch.object(cloud.subprocess, "Popen") as spawn,
+            self.assertRaisesRegex(PublishError, "already claimed"),
+        ):
+            cloud.supervise(args, None, adapter, self.deadline(), temporary)
+        download.assert_not_called()
+        spawn.assert_not_called()
+        # Even if another process wins after the initial GET, create-only and a
+        # fresh attempt nonce prevent adoption of that process's producer claim.
+        with (
+            patch.object(adapter, "read_document", return_value=(None, "0")),
+            self.assertRaisesRegex(PublishError, "already claimed"),
+        ):
+            adapter.claim_producer("catalog", "ID", args.input_sha256)
+        self.assertEqual(adapter.session.objects["catalog", key][1], claimed)
+        self.assertEqual(adapter.session.next_generation, 2)
+
+    def test_latest_publication_coalesces_progress_and_paces_terminal_update(self):
+        instant, published = [0.0], []
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "index.json"
+
+            def write(frame, state="live"):
+                cloud.atomic_index(path, json_bytes({"frame": frame, "state": state}))
+
+            def publish(_args, _path, _cloud, _deadline, document):
+                published.append((instant[0], document))
+                instant[0] += 0.1  # Successful publication itself takes time.
+                return {"state": document["state"]}
+
+            def sleep(seconds):
+                instant[0] += seconds
+
+            pump = cloud.LatestPublication(None, path, None, self.deadline())
+            with (
+                patch.object(
+                    cloud,
+                    "time",
+                    SimpleNamespace(monotonic=lambda: instant[0], sleep=sleep),
+                ),
+                patch.object(cloud, "publish", side_effect=publish),
+            ):
+                write(0)
+                self.assertIsNotNone(pump.poll())
+                for frame in range(1, 101):
+                    instant[0] = 0.1 + frame / 100
+                    write(frame)
+                    self.assertIsNone(pump.poll())
+                instant[0] = 1.35
+                self.assertIsNotNone(pump.poll())
+                write(101, "ended")
+                self.assertIsNotNone(pump.poll(wait=True))
+                self.assertIsNone(pump.poll(wait=True))
+            self.assertEqual([row[1]["frame"] for row in published], [0, 100, 101])
+            self.assertEqual(published[-1][1]["state"], "ended")
+            for earlier, later in pairwise(published):
+                self.assertGreaterEqual(later[0] - (earlier[0] + 0.1), 1.25 - 1e-9)
+
+    def test_terminal_pacing_never_sleeps_past_deadline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary) / "index.json"
+            path.write_bytes(json_bytes({"state": "failed"}))
+            deadline = self.deadline()
+            deadline.end = time.monotonic() + 0.1
+            pump = cloud.LatestPublication(None, path, None, deadline)
+            pump.next_at = time.monotonic() + 1.25
+            with (
+                patch.object(cloud.time, "sleep") as sleep,
+                patch.object(cloud, "publish") as publish,
+                self.assertRaises(TimeoutError),
+            ):
+                pump.poll(wait=True)
+            sleep.assert_not_called()
+            publish.assert_not_called()
 
     def test_adc_storage_create_only_metadata_and_pointer_cas(self):
         session = Session()
@@ -415,6 +613,8 @@ class CloudTests(unittest.TestCase):
             manifest = source_fixture_video(inputs)
             source = json.loads(manifest.read_bytes())["source"]
             args = SimpleNamespace(
+                catalog_bucket="catalog",
+                input_sha256="a" * 64,
                 source=source["url"],
                 license=source["license"],
                 session_id="ID",
@@ -460,7 +660,12 @@ class CloudTests(unittest.TestCase):
                     patch.object(cloud, "extract", return_value=manifest),
                     patch.object(cloud.subprocess, "Popen", side_effect=start),
                     patch.object(
-                        cloud, "publish", side_effect=PublishError("network failure")
+                        cloud,
+                        "publish",
+                        side_effect=[
+                            PublishError("network failure"),
+                            TimeoutError("Terminal publication budget expired"),
+                        ],
                     ) as publish,
                     patch.object(
                         cloud,
@@ -471,12 +676,16 @@ class CloudTests(unittest.TestCase):
                     ),
                     self.assertRaises(PublishError),
                 ):
-                    cloud.supervise(args, None, None, self.deadline(), work)
+                    adapter = SimpleNamespace(
+                        claim_producer=lambda *_args: {"generation": "1"}
+                    )
+                    cloud.supervise(args, None, adapter, self.deadline(), work)
                 self.assertIsNotNone(children[0].poll())
                 self.assertEqual(publish.call_count, 2)
                 report = json.loads((work / "cloud-summary.json").read_bytes())
                 self.assertEqual(report["outcome"], "failed")
                 self.assertTrue(report["termination"]["reaped"])
+                self.assertEqual(report["terminal_publication"], "failed")
                 self.assertFalse(report["first_public_http_before_source_completion"])
                 self.assertEqual([e for e, _ in logs].count("cloud_live_report"), 1)
                 self.assertEqual(
