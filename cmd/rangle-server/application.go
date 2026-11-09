@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/Hosi121/rangle/internal/appserver"
@@ -18,6 +19,7 @@ import (
 	"github.com/Hosi121/rangle/internal/live"
 	"github.com/Hosi121/rangle/internal/liveassets"
 	"github.com/Hosi121/rangle/internal/livesource"
+	"github.com/Hosi121/rangle/internal/privatepreview"
 )
 
 type config struct {
@@ -39,6 +41,7 @@ type config struct {
 	GenerationCaller       string
 	LiveIndex              string
 	LiveAssetsRoot         string
+	PrivateSceneRoot       string
 	ServingRevision        string
 }
 
@@ -102,7 +105,16 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		cfg.Web.PreviewPaths = clips.LocalPreviewPaths()
 	}
 	mux := http.NewServeMux()
-	app = &application{Handler: limitAPIRequests(mux, logger)}
+	var privateScenes http.Handler
+	routes := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Authorize private paths before ServeMux can clean or redirect them.
+		if privateScenes != nil && (r.URL.Path == strings.TrimSuffix(privatepreview.PathPrefix, "/") || strings.HasPrefix(r.URL.Path, privatepreview.PathPrefix)) {
+			privateScenes.ServeHTTP(w, r)
+			return
+		}
+		mux.ServeHTTP(w, r)
+	})
+	app = &application{Handler: limitAPIRequests(routes, logger)}
 	if cfg.ServingRevision != "" {
 		next := app.Handler
 		app.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,6 +169,24 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	})
 	for _, pattern := range []string{"/api/v1/auth/", "/api/v1/clips/{clip}/engagement", "/api/v1/clips/{clip}/likes", "/api/v1/clips/{clip}/comments", "/api/v1/clips/{clip}/comments/{comment}"} {
 		mux.Handle(pattern, interactions)
+	}
+	privateScenes, err = privatepreview.New(privatepreview.Config{Directory: cfg.PrivateSceneRoot, Logger: logger,
+		Authorize: func(r *http.Request) error {
+			user, err := interactions.AdminUser(r)
+			if errors.Is(err, community.ErrForbidden) {
+				return privatepreview.ErrForbidden
+			}
+			if err != nil {
+				return err
+			}
+			if user == nil {
+				return privatepreview.ErrUnauthenticated
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		return app, err
 	}
 	if cfg.Web.UIRoot != "" {
 		web, err := appserver.New(cfg.Web)

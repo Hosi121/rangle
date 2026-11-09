@@ -43,6 +43,7 @@ func main() {
 	generationCaller := flag.String("generation-caller-service-account", "", "manager mode: the one public runtime service account allowed to forward account IDs")
 	liveIndex := flag.String("live-index", os.Getenv("RANGLE_LIVE_INDEX"), "optional local live index or gs://bucket/live/index.json")
 	liveAssetsRoot := flag.String("live-assets-root", "", "optional local live-assets directory; production media uses the CDN")
+	privateSceneRoot := flag.String("private-scene-root", "/mnt/catalog/private-scenes", "administrator-only scene snapshots directory; empty disables assets")
 	flag.Parse()
 
 	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
@@ -68,6 +69,7 @@ func main() {
 		GenerationCaller:       *generationCaller,
 		LiveIndex:              *liveIndex,
 		LiveAssetsRoot:         *liveAssetsRoot,
+		PrivateSceneRoot:       *privateSceneRoot,
 		ServingRevision:        os.Getenv("K_REVISION"),
 	}
 
