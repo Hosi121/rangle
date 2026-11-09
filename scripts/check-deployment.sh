@@ -60,6 +60,7 @@ fetch /demo/ demo
 fetch '/api/v1/clips?limit=1' api
 python3 - "$work" "$media_origin" <<'PY'
 import json
+import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
@@ -89,11 +90,24 @@ clips = doc.get('clips') if isinstance(doc, dict) else None
 if not isinstance(clips, list) or len(clips) != 1 or not isinstance(clips[0], dict):
     raise SystemExit('API must return one published clip, not an empty/demo HTML response.')
 clip = clips[0]
-for key in ('id', 'revision', 'title', 'sport', 'codec', 'manifest_url'):
+for key in ('id', 'revision', 'title', 'sport'):
     if not isinstance(clip.get(key), str) or not clip[key].strip():
         raise SystemExit(f'API clip is missing {key}.')
-if 'synthetic' in clip['codec'].lower() or not (clip.get('preview_url') or clip.get('scene_url')):
+if not (clip.get('preview_url') or clip.get('scene_url')):
     raise SystemExit('Smoke requires published playable media, not a synthetic transport fixture.')
+if 'codec' in clip or 'manifest_url' in clip:
+    for key in ('codec', 'manifest_url'):
+        if not isinstance(clip.get(key), str) or not clip[key].strip():
+            raise SystemExit(f'Published transport clip is missing {key}.')
+    if 'synthetic' in clip['codec'].lower():
+        raise SystemExit('Smoke requires published playable media, not a synthetic transport fixture.')
+else:
+    # Successful generated results intentionally expose a scene without inventing
+    # a transport codec/manifest. Their identity and fixed scene path must agree.
+    match = re.fullmatch(r'generated-([0-9a-f]{32})', clip['id'])
+    scene = urlsplit(clip.get('scene_url', ''))
+    if not match or clip['revision'] != match[1] or scene.path != f'/generated/{match[1]}/scene.json':
+        raise SystemExit('Generated result identity, revision and scene must agree.')
 for key in ('manifest_url', 'preview_url', 'scene_url'):
     value = clip.get(key)
     if value is None:
