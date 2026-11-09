@@ -264,12 +264,16 @@ def parse_args(argv=None):
         choices=("baseline", "motion-prior", "local-lifetime"),
         default="baseline",
     )
+    parser.add_argument("--evaluate-compression", action="store_true")
     args = parser.parse_args(argv)
     if (
         not re.fullmatch(r"[a-f0-9]{32}", args.job_id)
         or not re.fullmatch(r"[a-f0-9]{64}", args.input_sha256)
         or not 1 <= args.steps <= (12000 if args.mode == "dynamic" else 6000)
-        or (args.mode != "dynamic" and args.quality_profile != "baseline")
+        or (
+            args.mode != "dynamic"
+            and (args.quality_profile != "baseline" or args.evaluate_compression)
+        )
     ):
         raise ValueError("Invalid job identity, checksum or iteration budget")
     return args
@@ -353,6 +357,8 @@ def main(*, storage_client_factory=None):
                     if quality_profile != "baseline"
                     else {}
                 )
+                if getattr(args, "evaluate_compression", False):
+                    quality_options["evaluate_compression"] = True
                 payload, metrics = optimize_dynamic(
                     dataset, args.steps, expires, directory, **quality_options
                 )

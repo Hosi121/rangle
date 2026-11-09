@@ -10,7 +10,7 @@ import time
 import numpy as np
 
 from .data import training_activity
-from .packing import compress_temporal, pack_temporal, unpack_temporal
+from .packing import TEMPORAL, compress_temporal, pack_temporal, unpack_temporal
 
 
 def temporal_values(params, time_seconds):
@@ -130,6 +130,49 @@ def motion_prior_loss(params, time_seconds, viewmat, K, activity, duration):
     return 0.01 * (displacement.square().sum(dim=1) * weights).mean()
 
 
+def compression_candidate_models(raw):
+    """Measure two float16 round-trip candidates without modifying the export.
+
+    This manipulates only RGS1 float fields, preserving RGBA/quaternion bytes,
+    header, primitive count, and canonical row order. Candidate bytes stay local
+    to evaluation and are never returned as the worker's published model.
+    """
+    candidates = []
+    for name, fields in (
+        (
+            "fp16-all-floats",
+            ("position", "scale", "velocity", "centre_time", "sigma", "peak"),
+        ),
+        (
+            "fp32-position-fp16-other",
+            ("scale", "velocity", "centre_time", "sigma", "peak"),
+        ),
+    ):
+        candidate = bytearray(raw)
+        rows = np.frombuffer(candidate, dtype=TEMPORAL, offset=32)
+        with np.errstate(over="ignore", under="ignore", invalid="ignore"):
+            for field in fields:
+                rows[field] = rows[field].astype(np.float16).astype(np.float32)
+        metadata = {
+            "name": name,
+            "float16_fields": list(fields),
+            "published": False,
+            "primitive_ids_preserved": True,
+            "raw_bytes": len(raw),
+        }
+        try:
+            arrays = unpack_temporal(bytes(candidate))
+            metadata.update(
+                status="evaluated",
+                compressed_bytes=len(compress_temporal(bytes(candidate))),
+            )
+        except ValueError as error:
+            metadata.update(status="rejected", reason=str(error))
+            arrays = None
+        candidates.append((metadata, arrays))
+    return candidates
+
+
 def _ssim_function(device):
     import torch
     import torch.nn.functional as F
@@ -156,7 +199,15 @@ def _ssim_function(device):
     return ssim
 
 
-def optimize_dynamic(data, steps, deadline, directory, *, quality_profile="baseline"):
+def optimize_dynamic(
+    data,
+    steps,
+    deadline,
+    directory,
+    *,
+    quality_profile="baseline",
+    evaluate_compression=False,
+):
     from importlib.metadata import version
 
     import torch
@@ -311,6 +362,17 @@ def optimize_dynamic(data, steps, deadline, directory, *, quality_profile="basel
         raw = pack_temporal(*arrays, frame_count=frames, frame_rate=fps)
         payload = compress_temporal(raw)
         stored = tuple(tensor(array) for array in unpack_temporal(payload))
+        compression_started = time.perf_counter()
+        compression_candidates = []
+        if evaluate_compression:
+            for metadata, candidate_arrays in compression_candidate_models(raw):
+                if candidate_arrays is not None:
+                    metadata["evaluations"] = []
+                    candidate_arrays = tuple(
+                        tensor(array) for array in candidate_arrays
+                    )
+                compression_candidates.append((metadata, candidate_arrays))
+        compression_seconds = time.perf_counter() - compression_started
         evaluations, first_renders, last_differences = [], {}, []
         diagnostics = {0, frames // 2, frames - 1}
         for frame in range(frames):
@@ -352,6 +414,48 @@ def optimize_dynamic(data, steps, deadline, directory, *, quality_profile="basel
                         ),
                     }
                 )
+                if evaluate_compression:
+                    compression_started = time.perf_counter()
+                    for metadata, candidate_arrays in compression_candidates:
+                        if candidate_arrays is None:
+                            continue
+                        candidate_image = render(frame, index, candidate_arrays)[
+                            0
+                        ].clamp(0, 1)
+                        difference = (candidate_image - exported).abs()
+                        metadata["evaluations"].append(
+                            {
+                                "frame": frame,
+                                "view": index,
+                                "psnr": -10
+                                * math.log10(
+                                    max(
+                                        float(
+                                            (candidate_image - truth).square().mean()
+                                        ),
+                                        1e-12,
+                                    )
+                                ),
+                                "ssim": float(ssim(candidate_image, truth)),
+                                "reference_wire_mae": float(difference.mean()),
+                                "reference_wire_max_difference": float(
+                                    difference.max()
+                                ),
+                            }
+                        )
+                        if frame in diagnostics:
+                            triptych = torch.cat(
+                                (truth[0], exported[0], candidate_image[0]), dim=1
+                            )
+                            pixels = (
+                                (triptych.cpu().numpy() * 255).round().astype(np.uint8)
+                            )
+                            Image.fromarray(pixels).save(
+                                directory
+                                / f"heldout-{index}-frame-{frame}-compression-{metadata['name']}.webp",
+                                quality=90,
+                            )
+                    compression_seconds += time.perf_counter() - compression_started
                 if frame == 0:
                     first_renders[index] = exported.clone()
                 if frame == frames - 1:
@@ -363,6 +467,20 @@ def optimize_dynamic(data, steps, deadline, directory, *, quality_profile="basel
                     Image.fromarray(pixels).save(
                         directory / f"heldout-{index}-frame-{frame}.webp", quality=90
                     )
+        for metadata, _ in compression_candidates:
+            if "evaluations" in metadata:
+                rows = metadata["evaluations"]
+                metadata.update(
+                    evaluated_images=len(rows),
+                    mean_psnr=float(np.mean([row["psnr"] for row in rows])),
+                    mean_ssim=float(np.mean([row["ssim"] for row in rows])),
+                    mean_reference_wire_mae=float(
+                        np.mean([row["reference_wire_mae"] for row in rows])
+                    ),
+                    max_reference_wire_difference=max(
+                        row["reference_wire_max_difference"] for row in rows
+                    ),
+                )
         speed = np.linalg.norm(arrays[5], axis=1)
         first_values = stored_values(stored, times[0])
         last_values = stored_values(stored, times[-1])
@@ -372,6 +490,13 @@ def optimize_dynamic(data, steps, deadline, directory, *, quality_profile="basel
     return payload, {
         "mode": "dynamic",
         "quality_profile": quality_profile,
+        "compression_evaluation": {
+            "enabled": evaluate_compression,
+            "seconds": compression_seconds,
+            "reference": "original exported wire; candidate quantization is evaluated, never adopted",
+            "diagnostic_columns": ["ground truth", "original wire", "candidate"],
+            "candidates": [metadata for metadata, _ in compression_candidates],
+        },
         "quality_setup_seconds": quality_setup_seconds,
         "quality_configuration": {
             "initial_count_multiplier": 1,
