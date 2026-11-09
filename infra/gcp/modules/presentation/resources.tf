@@ -20,7 +20,8 @@ resource "google_project_service" "required" {
     "artifactregistry.googleapis.com", "run.googleapis.com", "storage.googleapis.com",
     "iam.googleapis.com", "iamcredentials.googleapis.com", "sts.googleapis.com",
     "compute.googleapis.com", "pubsub.googleapis.com",
-    "workflows.googleapis.com", "workflowexecutions.googleapis.com", "cloudscheduler.googleapis.com", "billingbudgets.googleapis.com"
+    "workflows.googleapis.com", "workflowexecutions.googleapis.com", "cloudscheduler.googleapis.com", "billingbudgets.googleapis.com",
+    "logging.googleapis.com", "monitoring.googleapis.com"
   ])
   project            = var.project_id
   service            = each.key
