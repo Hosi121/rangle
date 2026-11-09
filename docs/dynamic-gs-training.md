@@ -71,7 +71,7 @@ PYTHONPATH=ml python3 -m unittest discover -s ml/tests -v
 
 The separate `ml/tests/full_ml` suite requires the complete Torch/gsplat runtime and verifies gradients through all temporal parameters, gsplat topology and optimizer alignment, and export opacity equations including ties-to-even rounding. It must be run explicitly as part of ML validation; missing dependencies fail this suite rather than skipping its tests. The directory is outside default contract discovery so a NumPy-only CI job does not pretend to validate training dependencies.
 
-Run both profiles with the existing local trainer image, without GPU access or networking:
+Build the trainer from the repository root, then run both test profiles without GPU access or networking:
 
 ```sh
 docker build --platform=linux/amd64 --target trainer -f ml/Dockerfile \
@@ -94,6 +94,8 @@ PYTHONPATH=ml:ml/tests python3 -m unittest test_temporal.TemporalPackingTests -v
 ## Verified GCP run — 2026-11-09
 
 The deployed creation API completed one dynamic job on a Tokyo Spot T4. The input was VRU Basketball gz, with 20 synchronized times from 0.00 to 0.76 seconds at 25 fps, 480×270 pixels, 30 training cameras, and 4 held-out cameras. The source bundle SHA256 is recorded in the public metrics. Its first time matches the previously validated static input pixel-for-pixel.
+
+The worker source was [e1228df](https://github.com/Hosi121/rangle/tree/e1228dff0014b9e2b92176f2993b7fdcf491c8fa/ml), deployed as trainer image digest `sha256:ab7f56fb8cf970226a553e6664df5f5fc92100ad63ca6246a1b3d80ef985c161`.
 
 | Measurement | Result |
 | --- | --- |
