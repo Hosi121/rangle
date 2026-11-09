@@ -48,7 +48,9 @@ func BenchmarkLiveHTTP(b *testing.B) {
 			if test.conditional {
 				w := httptest.NewRecorder()
 				h.ServeHTTP(w, r)
-				r.Header.Set("If-None-Match", w.Header().Get("ETag"))
+				response := w.Result()
+				r.Header.Set("If-None-Match", response.Header.Get("ETag"))
+				response.Body.Close()
 				wantStatus = http.StatusNotModified
 			}
 			b.ReportAllocs()
