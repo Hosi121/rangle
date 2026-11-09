@@ -74,7 +74,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		cfg.Web.PreviewPaths = clips.LocalPreviewPaths()
 	}
 	mux := http.NewServeMux()
-	app = &application{Handler: mux}
+	app = &application{Handler: limitAPIRequests(mux, logger)}
 	defer func() {
 		if err != nil {
 			err = errors.Join(err, app.Close())
