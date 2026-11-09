@@ -77,7 +77,7 @@ Only `model.rgs` and `scene.json` are publication assets. Metrics, provenance an
 
 ## Finite local measurement, 2026-11-09
 
-One 10-second VRU Basketball gz source, 250 frames at 25 fps, 34 cameras, 480×270 RGB, 30 training / 4 held-out views, 20-frame windows, seed 0, and 99,330 initial points. Hardware: local NVIDIA RTX PRO 500 Blackwell Generation Laptop GPU; Torch 2.10.0+cu128 / gsplat 1.5.3. No GCP GPU or B300 was used. Exactly three training configurations were run, with bootstrap 300 steps throughout. Final manifest generalization, structured logging and diagnostic plumbing were CPU-checked afterwards; the measured dimensions, fps, windows and optimizer equations were unchanged, and no further training trial was run.
+One 10-second VRU Basketball gz source, 250 frames at 25 fps, 34 cameras, 480×270 RGB, 30 training / 4 held-out views, 20-frame windows, seed 0, and 99,330 initial points. Hardware: local NVIDIA RTX PRO 500 Blackwell Generation Laptop GPU; Torch 2.10.0+cu128 / gsplat 1.5.3. No cloud GPU was used. Exactly three training configurations were run, with bootstrap 300 steps throughout. Final manifest generalization, structured logging and diagnostic plumbing were CPU-checked afterwards; the measured dimensions, fps, windows and optimizer equations were unchanged, and no further training trial was run.
 
 Frame 0 RGB bytes, normalized view matrices and target intrinsics exactly matched the existing validated VRU NPZ (SHA256 `f735fbbdfd9b17846941d7fdede7a2617999fc77a06cb0f6dc906000a7e55c53`). Each snapshot evaluates both float and actual packed output on all 20 times × 4 held-out views. The final window is source frames 230–249 for all three runs; earlier selected windows differ because pending work is replaced. Thus this is a streaming latency/quality tradeoff, not a controlled fixed-step quality benchmark or an improvement over the offline 12,000-step baseline.
 
@@ -97,7 +97,7 @@ Latency uses a session UTC/monotonic epoch plus original source PTS as the simul
 
 ### Verified cloud delivery, 2026-11-09
 
-Source `19085e206f67c37b65db86be86fa433e5114c2f8` was then tested with the same 10-second recorded rig, 8 decode workers, 300 bootstrap/update steps and the RLE encoding path. The local worker and an independent publisher ran concurrently. All training was local; no cloud GPU or B300 was used.
+Source `19085e206f67c37b65db86be86fa433e5114c2f8` was then tested with the same 10-second recorded rig, 8 decode workers, 300 bootstrap/update steps and the RLE encoding path. The local worker and an independent publisher ran concurrently. All training was local; no cloud GPU was used.
 
 Four distinct models reached the real GCS/Cloud CDN path, with the first visible through HTTP **before source decoding completed**. Nine pending windows were replaced. Capture timestamps below refer to the last source sample of each 0.76-second window.
 
