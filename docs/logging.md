@@ -4,7 +4,7 @@ GoのAPI・CLI・ワーカーで、実行ログは標準の `log/slog` に統一
 
 ## 出力形式
 
-入口で `slog.New(slog.NewJSONHandler(os.Stderr, nil))` を生成し、`With("service", サービス名)` を付ける。既定はINFO以上、1イベント1行のJSON。標準キー `time`・`level`・`msg` を維持する。CLIの計算結果はstdoutへ出す。
+入口で `slog.New(slog.NewJSONHandler(os.Stderr, nil))` を生成し、`With("service", サービス名)` を付ける。既定はINFO以上、1イベント1行のJSON。ローカルCLIは標準キー `time`・`level`・`msg` を使う。Cloud Runで動かす `rangle-server` は標準 `ReplaceAttr` でトップレベルの `level` → `severity`、`msg` → `message` に対応づけ、WARNは `WARNING` とする。既存のjob ID・属性と入れ子のキーは保持する。CLIの計算結果はstdoutへ出す。
 
 メッセージは `server started` のような短い固定文にする。IDや処理時間などの変動値は文字列に埋め込まず、属性として渡す。
 
@@ -46,6 +46,6 @@ VertexのPython workerは `service="rangle-trainer"`・`severity`・`event` を�
 
 ライブworkerは同じJSON方針で `service="rangle-live"` と `session_id` を使い、session IDをAPIのjob IDに揃える。`cloud_live_started`・`cloud_live_published`・`cloud_live_report`・終了/失敗を記録する。最終reportには起動準備、入力開始からCDN実HTTP確認までの秒数、source EOF前に公開できたか、snapshot数・size・held-out画質、子processの終了結果を分けて残す。秒数は `_seconds`、時刻はUTC、同一host内の順序判定はmonotonicを使う。Vertexの起動待ちやクライアント描画を含む値へ読み替えない。ADCの認証情報・HTTP例外本文・画像・モデル本体は記録しない。[クラウドLIVE](cloud-live.md)
 
-クラウドでの収集・保持期間・権限はIaCの運用設計で定める。Cloud Loggingへ接続する際は、JSONの収集とseverity・traceへの対応づけを確認する。現在のJSON出力だけで監視やトレース連携まで実装済みとは扱わない。
+presentation構成は専用Cloud Loggingバケット・sink・Cloud Monitoringダッシュボードを[observability.tf](../infra/gcp/modules/presentation/observability.tf)で管理する。Cloud Run、既存MLの構造化イベント、LB/CDN、Scheduler・予算停止Workflowを集約する。閲覧・30日保持を今回の範囲とし、通知/SLO、ブラウザのテレメトリー収集、分散トレースの自動対応づけは含めない。配備・検証状態と使い方は[ログ監視の運用](observability.md)を参照する。
 
 参照: [Go log/slog](https://pkg.go.dev/log/slog)、[Cloud Loggingの構造化ログ](https://docs.cloud.google.com/logging/docs/structured-logging)。

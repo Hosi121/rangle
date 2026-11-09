@@ -45,7 +45,9 @@ func main() {
 	liveAssetsRoot := flag.String("live-assets-root", "", "optional local live-assets directory; production media uses the CDN")
 	flag.Parse()
 
-	logger := slog.New(slog.NewJSONHandler(os.Stderr, nil)).With("service", "rangle-server")
+	logger := slog.New(slog.NewJSONHandler(os.Stderr, &slog.HandlerOptions{
+		ReplaceAttr: cloudLogAttribute,
+	})).With("service", "rangle-server")
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
