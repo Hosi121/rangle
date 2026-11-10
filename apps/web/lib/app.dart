@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -22,6 +21,7 @@ import 'viewer/viewer_adapter.dart';
 import 'widgets/clip_card.dart';
 import 'widgets/brand_art.dart';
 import 'widgets/preview_viewer.dart';
+import 'widgets/viewer_viewport.dart';
 
 export 'viewer/viewer_adapter.dart';
 
@@ -221,99 +221,101 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
           },
           onOpenResult: openGeneratedViewer,
         )
-      : Scaffold(
-          backgroundColor: Colors.black,
-          floatingActionButton: ListenableBuilder(
-            listenable: _paging,
-            builder: (context, _) => _paging.clips.isEmpty
-                ? FloatingActionButton.extended(
-                    onPressed: _openLive,
-                    icon: const Icon(Icons.live_tv),
-                    label: const Text('LIVE'),
-                  )
-                : const SizedBox.shrink(),
-          ),
-          body: SafeArea(
-            child: ListenableBuilder(
+      : ViewerViewport(
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            floatingActionButton: ListenableBuilder(
               listenable: _paging,
-              builder: (context, _) {
-                if (_paging.clips.isEmpty && _paging.loading) {
-                  return const ViewerMessage(
-                    icon: Icons.view_agenda_outlined,
-                    title: 'ハイライトを読み込んでいます',
-                    description: 'しばらくお待ちください。',
-                  );
-                }
-                if (_paging.clips.isEmpty && _paging.error != null) {
-                  return ViewerMessage(
-                    icon: Icons.cloud_off_outlined,
-                    title: 'ハイライトを読み込めませんでした',
-                    description: '接続状況をご確認のうえ、もう一度お試しください。',
-                    action: FilledButton.icon(
-                      onPressed: () => _paging.loadNext(retry: true),
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('再読み込み'),
-                    ),
-                  );
-                }
-                final clips = _paging.clips;
-                if (clips.isEmpty) {
-                  if (_paging.hasMore) {
-                    return ViewerMessage(
+              builder: (context, _) => _paging.clips.isEmpty
+                  ? FloatingActionButton.extended(
+                      onPressed: _openLive,
+                      icon: const Icon(Icons.live_tv),
+                      label: const Text('LIVE'),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+            body: SafeArea(
+              child: ListenableBuilder(
+                listenable: _paging,
+                builder: (context, _) {
+                  if (_paging.clips.isEmpty && _paging.loading) {
+                    return const ViewerMessage(
                       icon: Icons.view_agenda_outlined,
-                      title: '続きのハイライトを確認できます',
-                      description: '次のページを読み込んでください。',
-                      action: OutlinedButton(
-                        onPressed: () => _paging.loadNext(),
-                        child: const Text('続きを読み込む'),
-                      ),
+                      title: 'ハイライトを読み込んでいます',
+                      description: 'しばらくお待ちください。',
                     );
                   }
-                  if (_query.isNotEmpty || _tag.isNotEmpty) {
+                  if (_paging.clips.isEmpty && _paging.error != null) {
                     return ViewerMessage(
-                      icon: Icons.search_off,
-                      title: 'ハイライトが見つかりませんでした',
-                      description: '別のキーワードやハッシュタグで検索できます。',
-                      action: OutlinedButton(
-                        onPressed: _clearSearch,
-                        child: const Text('すべてのハイライトを見る'),
+                      icon: Icons.cloud_off_outlined,
+                      title: 'ハイライトを読み込めませんでした',
+                      description: '接続状況をご確認のうえ、もう一度お試しください。',
+                      action: FilledButton.icon(
+                        onPressed: () => _paging.loadNext(retry: true),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('再読み込み'),
                       ),
                     );
                   }
-                  return ViewerMessage(
-                    icon: Icons.video_library_outlined,
-                    title: '公開されたハイライトはまだありません',
-                    description: '新しい映像が公開されると、ここに表示されます。',
-                    action: OutlinedButton.icon(
-                      onPressed: _reload,
-                      icon: const Icon(Icons.refresh),
-                      label: const Text('更新する'),
-                    ),
+                  final clips = _paging.clips;
+                  if (clips.isEmpty) {
+                    if (_paging.hasMore) {
+                      return ViewerMessage(
+                        icon: Icons.view_agenda_outlined,
+                        title: '続きのハイライトを確認できます',
+                        description: '次のページを読み込んでください。',
+                        action: OutlinedButton(
+                          onPressed: () => _paging.loadNext(),
+                          child: const Text('続きを読み込む'),
+                        ),
+                      );
+                    }
+                    if (_query.isNotEmpty || _tag.isNotEmpty) {
+                      return ViewerMessage(
+                        icon: Icons.search_off,
+                        title: 'ハイライトが見つかりませんでした',
+                        description: '別のキーワードやハッシュタグで検索できます。',
+                        action: OutlinedButton(
+                          onPressed: _clearSearch,
+                          child: const Text('すべてのハイライトを見る'),
+                        ),
+                      );
+                    }
+                    return ViewerMessage(
+                      icon: Icons.video_library_outlined,
+                      title: '公開されたハイライトはまだありません',
+                      description: '新しい映像が公開されると、ここに表示されます。',
+                      action: OutlinedButton.icon(
+                        onPressed: _reload,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('更新する'),
+                      ),
+                    );
+                  }
+                  return _HighlightFeed(
+                    key: ValueKey((_paging, _paging.generation)),
+                    paging: _paging,
+                    clips: clips,
+                    viewerFactory: widget.viewerFactory,
+                    sceneFactory: widget.sceneFactory,
+                    account: _account,
+                    shareAction: widget.shareAction,
+                    onSearch: () =>
+                        _search(clips.expand((clip) => clip.tags).toSet()),
+                    onTag: _filterTag,
+                    onClearSearch: _clearSearch,
+                    filterLabel: _tag.isEmpty ? _query : '#$_tag',
+                    onLive: _openLive,
+                    initialFreeView:
+                        RegExp(r'^generated-[a-f0-9]{32}$')
+                            .hasMatch(_clipId ?? '') &&
+                        _query.isEmpty &&
+                        _tag.isEmpty &&
+                        clips.first.id == _clipId &&
+                        clips.first.sceneUrl != null,
                   );
-                }
-                return _HighlightFeed(
-                  key: ValueKey((_paging, _paging.generation)),
-                  paging: _paging,
-                  clips: clips,
-                  viewerFactory: widget.viewerFactory,
-                  sceneFactory: widget.sceneFactory,
-                  account: _account,
-                  shareAction: widget.shareAction,
-                  onSearch: () =>
-                      _search(clips.expand((clip) => clip.tags).toSet()),
-                  onTag: _filterTag,
-                  onClearSearch: _clearSearch,
-                  filterLabel: _tag.isEmpty ? _query : '#$_tag',
-                  onLive: _openLive,
-                  initialFreeView:
-                      RegExp(r'^generated-[a-f0-9]{32}$')
-                          .hasMatch(_clipId ?? '') &&
-                      _query.isEmpty &&
-                      _tag.isEmpty &&
-                      clips.first.id == _clipId &&
-                      clips.first.sceneUrl != null,
-                );
-              },
+                },
+              ),
             ),
           ),
         );
@@ -446,15 +448,10 @@ class _HighlightFeedState extends State<_HighlightFeed> {
         autofocus: true,
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final desktop =
-                constraints.maxWidth >= 700 && constraints.maxHeight >= 600;
-            final width = desktop
-                ? math.min(520.0, constraints.maxHeight * 9 / 16)
-                : constraints.maxWidth;
             return Center(
               child: SizedBox(
                 key: const Key('feed-player'),
-                width: width,
+                width: constraints.maxWidth,
                 height: constraints.maxHeight,
                 child: Stack(
                   fit: StackFit.expand,

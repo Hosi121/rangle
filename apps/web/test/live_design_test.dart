@@ -126,6 +126,9 @@ void main() {
         }
 
         await capture('feed');
+        final feedWidth = tester
+            .getSize(find.byKey(const Key('feed-player')))
+            .width;
         await tester.tap(find.byTooltip('LIVEを開く'));
         await tester.pumpAndSettle();
         await capture('list');
@@ -134,7 +137,7 @@ void main() {
         // Navigation reserves its own 64px instead of overlapping the viewer.
         expect(
           tester.getSize(find.byKey(const Key('live-surface'))),
-          Size(size.width, size.height - 64),
+          Size(feedWidth, size.height - 64),
         );
         expect(
           tester.getRect(find.byType(RangleHeader)).bottom,
