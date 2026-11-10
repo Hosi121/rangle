@@ -48,7 +48,7 @@ curl -i -H 'Range: bytes=0-15' http://127.0.0.1:8080/assets/demo/synthetic-v1/lo
 | [apps/web/](apps/web/README.md) | Flutter UI・JS viewer |
 | `ml/` | 前処理・学習・packing |
 | [infra/gcp/](infra/gcp/README.md) | Terraform |
-| [共有fixture](testdata/contracts/v1/README.md) | Go/Python/JS/Dartのmedia契約、50件の合成入力 |
+| [共有fixture](testdata/contracts/v1/README.md) | Go/Python/JS/Dartのmedia契約、74件の合成入力 |
 | [docs/](docs/README.md) | 構成、仕様、運用、実測・初期案 |
 
 開発正本は[Hosi121/rangle](https://github.com/Hosi121/rangle)（origin）。作業PR→stg→mainの手順は[開発ルール](CONTRIBUTING.md)、最終提出先と制約は[提出案内](docs/submission.md)を参照。実データ・重み・認証情報はGitへ追加しません。

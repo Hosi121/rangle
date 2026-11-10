@@ -20,7 +20,7 @@
 | Python packing | native `zlib.decompressobj(wbits=31)`を展開長+1で制限し、`eof`、`unused_data`、`unconsumed_tail`を確認。`GzipFile`の追加member・NUL padding許容に依存しない |
 | JS Worker | native gzipでCRC・ISIZE・FHCRCと展開総長を検証し、直接AoSへ戻す。次に同じdeflate bodyをzlib envelopeへ包み、native `deflate`で境界を再検証する |
 
-JSはgzip headerのoptional fieldをたどってbodyの範囲を求めるが、Deflate blockやHuffman符号を解析しない。第1pass中に[RFC 1950](https://www.rfc-editor.org/rfc/rfc1950#section-8) のAdler-32を計算し、`78 01`のzlib headerとchecksumをbodyへ付ける。単一memberなら有効なzlib streamになる。追加memberや余剰があれば、第1memberの終了後にgzip trailer等が残るため、native zlibのchecksumまたは末尾検証が失敗する。raw `deflate-raw`への置換は、Nodeで末尾を黙認したため使わない。
+JSはgzip headerのoptional fieldをたどってbodyの範囲を求めるが、Deflate blockやHuffman符号を解析しない。第1passのAoS書き戻しと同じループで[RFC 1950](https://www.rfc-editor.org/rfc/rfc1950#section-8) のAdler-32を計算し、`78 01`のzlib headerとchecksumをbodyへ付ける。和はlocal変数へ保持し、最大5552 bytesごとにmoduloを取る。単一memberなら有効なzlib streamになる。追加memberや余剰があれば、第1memberの終了後にgzip trailer等が残るため、native zlibのchecksumまたは末尾検証が失敗する。raw `deflate-raw`への置換は、Nodeで末尾を黙認したため使わない。
 
 第2passは出力を保存せずdrainし、同じ展開総長上限を適用する。全文の第2 decoded bufferは作らない。圧縮bodyには元Blobのsliceを再利用し、第2の全文Uint8Arrayを作らない。ただしnativeの内部copyやGCまで含むRAM上限を保証するものではない。
 
@@ -39,7 +39,7 @@ JSはgzip headerのoptional fieldをたどってbodyの範囲を求めるが、D
 
 ## 同じ実資産での局所比較
 
-既存の非公開RGS1-Z資産（259797 primitives、20 frames、wire 12106161 bytes、raw 14548664 bytes）を使い、同一端末・Node 24.13.0・別プロセスで旧/新を順に実行した。各方式を1回暖機して3回測定し、復号後SHAが同一であることを確認した。画像・GPU・ネットワークは使用していない。
+既存の非公開RGS1-Z資産（259797 primitives、20 frames、wire 12106161 bytes、raw 14548664 bytes）を使い、初期の2-pass実装を同一端末・Node 24.13.0・別プロセスで比較した。各方式を1回暖機して3回測定し、復号後SHAが同一であることを確認した。画像・GPU・ネットワークは使用していない。次のNode値はループ統合前の記録である。
 
 | 指標 | 旧native gzipのみ | 新native 2-pass |
 | --- | ---: | ---: |
@@ -50,10 +50,19 @@ JSはgzip headerのoptional fieldをたどってbodyの範囲を求めるが、D
 
 新方式はこの測定で中央値が約67%増えた。高速化や端末全体の省メモリ化を示す変更ではない。第2Blobへ渡す新しいBufferSourceはheader/checksumの6bytesだけだが、native chunkの確保とGCにより観測メモリも増えた。メモリ値は同じ入力量を読んだ後・GC後を基準に別の1回でsampleし、maxRSSはプロセス全体の記述値とした。完全なpeak測定ではない。
 
-この数値をブラウザ、スマートフォンや初回GPU表示時間へ外挿しない。実browserのnative経路・端末での性能は未検証で、既存のbrowser性能測定を新しい2-passの結果として再利用しない。
+2026-11-10の統合前確認では、Chrome 146.0.7680.76の独立したブラウザcontextで同じ実資産を比較した。各方式を1回暖機＋5回、旧→新→新→旧の順に測定し、方式ごとの10標本から中央値を取った。取得とbytes比較は計時外、ブラウザのmain threadでdecoderだけを測り、アプリ画面やGPUは操作していない。
+
+| Chrome 146の復号中央値 | gzipのみ | 2-pass |
+| --- | ---: | ---: |
+| ループ統合前 | 86.1ms | 225.3ms |
+| AoS書き戻し・Adler計算を統合後 | 84.3ms | 177.6ms |
+
+この局所測定では2-pass内の負荷を約21%減らしたが、従来のgzipだけの経路より重い。追加依存や独自Deflate parserを増やさず、単一memberの境界を検証するための負担として採用する。各回とも復号後全bytesを照合し、SHA-256は `b9a897915a613315734dc5483872641f0c4f4396b7668cb1ba3532f57fd2ce03` で一致した。
+
+Chrome 121.0.6167.85と146.0.7680.76で、RGS38ケースの採否と正例の復号bytesも一致した。121の実行は回帰テストと重なったため性能比較に使わない。これらの数値をスマートフォン、アプリ全体・本番Workerの待ち時間・初回GPU表示時間・端末のpeak memoryへ外挿しない。
 
 ## 共通fixtureと確認範囲
 
 [v1 corpus](../testdata/contracts/v1/README.md) のR01–R38を、Goのpublication/generation、Pythonの実packing、JSの`decodeTemporal → prepareTemporal`へ通す。R15–R19/R32は追加・分割・反復member、R20/R21はpadding、R22–R28/R34/R37はCRC/header/終端、R30/R36/R38はwire/展開上限を固定する。正しいoptional header、magicに見えるbody、primitive検証も含む。
 
-これは74個の列挙済み合成fixtureとNode native経路での確認である。すべてのDeflate表現・全browserに対する採否の完全等価性を証明するものではない。packerの通常出力と、その全byte可逆性は既存oracleでも継続して確認する。
+これは74個の列挙済み合成fixtureとNode native経路、およびChromeのRGS38ケースでの確認である。すべてのDeflate表現・全browserに対する採否の完全等価性を証明するものではない。packerの通常出力と、その全byte可逆性は既存oracleでも継続して確認する。

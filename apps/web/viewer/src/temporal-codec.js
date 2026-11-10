@@ -104,15 +104,6 @@ function gzipBody(bytes, expected) {
   return { start, end };
 }
 
-// RFC 1950 Adler-32, reduced every 5552 bytes to keep sums exact and bounded.
-function updateAdler(state, bytes) {
-  for (let start = 0; start < bytes.length; start += 5552) {
-    const end = Math.min(start + 5552, bytes.length);
-    for (let i = start; i < end; i++) { state.a += bytes[i]; state.b += state.a; }
-    state.a %= 65521; state.b %= 65521;
-  }
-}
-
 /** Decode into AoS once; a second bounded native pass enforces one gzip member. */
 export async function decodeTemporal(data, { signal } = {}) {
   signal?.throwIfAborted();
@@ -124,14 +115,21 @@ export async function decodeTemporal(data, { signal } = {}) {
   output.set(new Uint8Array(data, 0, HEADER_BYTES));
   output.set(new TextEncoder().encode(RAW_MAGIC));
   await inflateBounded(blob, 'gzip', rawSize - HEADER_BYTES, (value, written) => {
-    updateAdler(adler, value);
-    let offset = 0;
+    let offset = 0, a = adler.a, b = adler.b;
     while (offset < value.length) {
       const column = Math.floor(written / count), row = written % count;
-      const length = Math.min(value.length - offset, count - row);
-      for (let i = 0; i < length; i++) output[HEADER_BYTES + (row + i) * STRIDE + column] = value[offset + i];
+      // RFC 1950: reduce at most every 5552 bytes to keep sums exact.
+      // Compute in the same traversal as AoS restoration, using local sums.
+      const length = Math.min(value.length - offset, count - row, 5552);
+      for (let i = 0; i < length; i++) {
+        const byte = value[offset + i];
+        output[HEADER_BYTES + (row + i) * STRIDE + column] = byte;
+        a += byte; b += a;
+      }
+      a %= 65521; b %= 65521;
       offset += length; written += length;
     }
+    adler.a = a; adler.b = b;
   }, signal);
   // Native gzip verifies CRC/ISIZE/FHCRC but some runtimes accept extra members.
   // Rewrap the presumed single member's raw body in zlib: the native 'deflate'
