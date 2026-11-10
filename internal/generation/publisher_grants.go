@@ -85,6 +85,9 @@ func (s *Service) PresetsFor(ctx context.Context, p Principal) ([]Preset, error)
 	if !p.allows(publisher.ReadPresets) {
 		return nil, ErrPublisherForbidden
 	}
+	if err := s.principalAccess(ctx, p); err != nil {
+		return nil, err
+	}
 	var grants *PublisherGrants
 	if store, ok := s.Store.(PublisherGrantStore); ok && p.Kind == "staff" {
 		var err error

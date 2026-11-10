@@ -41,6 +41,7 @@ func main() {
 	generationManagerURL := flag.String("generation-manager-url", "", "HTTPS base URL of the private generation manager; excludes local generation config")
 	generationAudience := flag.String("generation-manager-audience", "", "manager mode: exact HTTPS service base URL for signed caller tokens")
 	generationCaller := flag.String("generation-caller-service-account", "", "manager mode: the one public runtime service account allowed to forward account IDs")
+	generationCleanupURLMap := flag.String("generation-cleanup-url-map", "", "manager mode: configured media URL map for owned artifact cleanup")
 	liveIndex := flag.String("live-index", os.Getenv("RANGLE_LIVE_INDEX"), "optional local live index or gs://bucket/live/index.json")
 	liveAssetsRoot := flag.String("live-assets-root", "", "optional local live-assets directory; production media uses the CDN")
 	privateSceneRoot := flag.String("private-scene-root", "/mnt/catalog/private-scenes", "administrator-only scene snapshots directory; empty disables assets")
@@ -53,24 +54,25 @@ func main() {
 	defer stop()
 
 	cfg := config{
-		Web:                    appserver.Config{UIRoot: *uiRoot, SceneDir: *sceneDir, SceneID: *sceneID},
-		CatalogFile:            *catalogFile,
-		AssetRoot:              *assetRoot,
-		AssetOrigin:            *assetOrigin,
-		CommunityMemory:        *communityMemory,
-		FirestoreProject:       *firestoreProject,
-		FirestoreDatabase:      *firestoreDatabase,
-		SecureCookies:          !*insecureCookies,
-		GenerationFile:         *generationFile,
-		GenerationSyncAudience: *generationSyncAudience,
-		GenerationManager:      *generationManager,
-		GenerationManagerURL:   *generationManagerURL,
-		GenerationAudience:     *generationAudience,
-		GenerationCaller:       *generationCaller,
-		LiveIndex:              *liveIndex,
-		LiveAssetsRoot:         *liveAssetsRoot,
-		PrivateSceneRoot:       *privateSceneRoot,
-		ServingRevision:        os.Getenv("K_REVISION"),
+		Web:                     appserver.Config{UIRoot: *uiRoot, SceneDir: *sceneDir, SceneID: *sceneID},
+		CatalogFile:             *catalogFile,
+		AssetRoot:               *assetRoot,
+		AssetOrigin:             *assetOrigin,
+		CommunityMemory:         *communityMemory,
+		FirestoreProject:        *firestoreProject,
+		FirestoreDatabase:       *firestoreDatabase,
+		SecureCookies:           !*insecureCookies,
+		GenerationFile:          *generationFile,
+		GenerationSyncAudience:  *generationSyncAudience,
+		GenerationManager:       *generationManager,
+		GenerationManagerURL:    *generationManagerURL,
+		GenerationAudience:      *generationAudience,
+		GenerationCaller:        *generationCaller,
+		GenerationCleanupURLMap: *generationCleanupURLMap,
+		LiveIndex:               *liveIndex,
+		LiveAssetsRoot:          *liveAssetsRoot,
+		PrivateSceneRoot:        *privateSceneRoot,
+		ServingRevision:         os.Getenv("K_REVISION"),
 	}
 
 	if err := run(ctx, *address, cfg, logger); err != nil {

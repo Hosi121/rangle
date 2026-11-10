@@ -12,6 +12,7 @@ import (
 )
 
 type Service struct {
+	Cleanup        AssetCleanup
 	MediaClient    *http.Client
 	ReservedClipID func(string) bool
 	Config         Config
@@ -37,6 +38,9 @@ func (s *Service) CreateFor(ctx context.Context, principal Principal, presetID, 
 		return Job{}, ErrInvalid
 	}
 	owner := principal.ownerKey()
+	if err := s.principalAccess(ctx, principal); err != nil {
+		return Job{}, err
+	}
 	id := requestJobID(owner, nonce)
 	if existing, err := s.Store.Get(ctx, id); err == nil {
 		if !principal.owns(existing) || existing.Preset != presetID {
@@ -122,6 +126,9 @@ func (s *Service) GetFor(ctx context.Context, p Principal, id string) (Job, erro
 	if !p.allows(publisher.ReadGeneration) {
 		return Job{}, ErrPublisherForbidden
 	}
+	if err := s.principalAccess(ctx, p); err != nil {
+		return Job{}, err
+	}
 	job, err := s.Store.Get(ctx, id)
 	if err != nil {
 		return Job{}, err
@@ -134,6 +141,9 @@ func (s *Service) GetFor(ctx context.Context, p Principal, id string) (Job, erro
 func (s *Service) ListFor(ctx context.Context, p Principal) ([]Job, error) {
 	if !p.allows(publisher.ReadGeneration) {
 		return nil, ErrPublisherForbidden
+	}
+	if err := s.principalAccess(ctx, p); err != nil {
+		return nil, err
 	}
 	rows, err := s.Store.List(ctx, p.ownerKey())
 	if err != nil {

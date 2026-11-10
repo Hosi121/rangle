@@ -24,26 +24,27 @@ import (
 )
 
 type config struct {
-	Web                    appserver.Config
-	CatalogFile            string
-	AssetRoot              string
-	AssetOrigin            string
-	CommunityStore         community.Store
-	CommunityMemory        bool
-	FirestoreProject       string
-	FirestoreDatabase      string
-	SecureCookies          bool
-	GenerationFile         string
-	GenerationService      *generation.Service
-	GenerationSyncAudience string
-	GenerationManager      bool
-	GenerationManagerURL   string
-	GenerationAudience     string
-	GenerationCaller       string
-	LiveIndex              string
-	LiveAssetsRoot         string
-	PrivateSceneRoot       string
-	ServingRevision        string
+	Web                     appserver.Config
+	CatalogFile             string
+	AssetRoot               string
+	AssetOrigin             string
+	CommunityStore          community.Store
+	CommunityMemory         bool
+	FirestoreProject        string
+	FirestoreDatabase       string
+	SecureCookies           bool
+	GenerationFile          string
+	GenerationService       *generation.Service
+	GenerationSyncAudience  string
+	GenerationManager       bool
+	GenerationManagerURL    string
+	GenerationAudience      string
+	GenerationCaller        string
+	GenerationCleanupURLMap string
+	LiveIndex               string
+	LiveAssetsRoot          string
+	PrivateSceneRoot        string
+	ServingRevision         string
 }
 
 type application struct {
@@ -56,7 +57,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 	if cfg.GenerationManager {
 		return newGenerationManager(cfg, logger)
 	}
-	if cfg.GenerationAudience != "" || cfg.GenerationCaller != "" {
+	if cfg.GenerationAudience != "" || cfg.GenerationCaller != "" || cfg.GenerationCleanupURLMap != "" {
 		return nil, fmt.Errorf("generation manager identity options require manager mode")
 	}
 	if cfg.GenerationManagerURL != "" && (cfg.GenerationFile != "" || cfg.GenerationService != nil || cfg.GenerationSyncAudience != "") {
@@ -240,7 +241,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		app.closers = append(app.closers, reader)
 		readLive = reader.Read
 	}
-	liveHandler, err := live.NewHandler(live.Config{Read: readLive, AssetOrigin: liveOrigin, Logger: logger})
+	liveHandler, err := live.NewHandler(live.Config{Read: filterDeletedLive(readLive, store, liveOrigin), AssetOrigin: liveOrigin, Logger: logger})
 	if err != nil {
 		return app, err
 	}
@@ -346,6 +347,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			return app, err
 		}
 		mux.Handle("/api/v1/operations/publishers/{account}/generation/", grants)
+		mux.Handle("/api/v1/operations/publishers/{account}/deletion", publisherDeletionHandler(store, generationRemote, adminOwner, logger))
 		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))
 	}
 	if generationService != nil {
@@ -376,6 +378,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			return app, err
 		}
 		mux.Handle("/api/v1/operations/publishers/{account}/generation/", grants)
+		mux.Handle("/api/v1/operations/publishers/{account}/deletion", publisherDeletionHandler(store, generationService, adminOwner, logger))
 		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))
 	}
 	mux.Handle("/api/", api)

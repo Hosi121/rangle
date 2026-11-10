@@ -131,12 +131,13 @@ func (h *Handler) listPublishers(w http.ResponseWriter, r *http.Request) {
 		next = string(rows[19].ID)
 	}
 	type view struct {
-		Account publisher.Account `json:"account"`
-		Status  publisher.Status  `json:"status"`
+		Account           publisher.Account `json:"account"`
+		Status            publisher.Status  `json:"status"`
+		DeletionRequested bool              `json:"deletion_requested"`
 	}
 	views := make([]view, 0, len(rows))
 	for _, a := range rows {
-		views = append(views, view{a, a.Status})
+		views = append(views, view{a, a.Status, a.DeletionRequested})
 	}
 	h.write(w, r, 200, map[string]any{"publishers": views, "next_cursor": next})
 }

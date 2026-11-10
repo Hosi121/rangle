@@ -107,7 +107,8 @@ resource "google_cloud_run_v2_service" "generation" {
         "-catalog", "/mnt/catalog/snapshots/${var.application.catalog_sha256}.json",
         "-generation-config", "/mnt/catalog/generation/${var.application.generation_config_sha256}.json",
         "-generation-manager-audience", local.generation_manager_origin,
-        "-generation-caller-service-account", google_service_account.runtime.email
+        "-generation-caller-service-account", google_service_account.runtime.email,
+        "-generation-cleanup-url-map", "${local.prefix}-https"
       ], local.generation_sync_enabled ? ["-generation-sync-audience", local.generation_manager_origin] : [])
       ports { container_port = 8080 }
       resources {
@@ -145,7 +146,7 @@ resource "google_cloud_run_v2_service" "generation" {
       error_message = "Do not recreate generation control after the presentation deadline."
     }
   }
-  depends_on = [google_project_iam_member.generation_data, google_storage_bucket_iam_member.generation_catalog, google_project_iam_member.generation_runtime, google_project_iam_member.generation_service_agent, google_service_account_iam_member.trainer_act_as, google_service_account_iam_member.live_trainer_act_as]
+  depends_on = [google_project_iam_member.generation_data, google_storage_bucket_iam_member.generation_catalog, google_project_iam_member.generation_runtime, google_project_iam_member.generation_service_agent, google_service_account_iam_member.trainer_act_as, google_service_account_iam_member.live_trainer_act_as, google_storage_bucket_iam_member.generation_output_list, google_storage_bucket_iam_member.generation_output_delete, google_project_iam_member.generation_cache_cleanup]
 }
 
 resource "google_cloud_run_v2_service_iam_member" "generation_runtime_invoker" {

@@ -22,6 +22,7 @@ type HistoryClip struct {
 	Sport string `json:"sport" firestore:"sport"`
 }
 type CheeredClip struct {
+	Deleted       bool        `json:"deleted,omitempty" firestore:"-"`
 	Clip          HistoryClip `json:"clip" firestore:"clip"`
 	LastCheeredAt time.Time   `json:"last_cheered_at" firestore:"last_cheered_at"`
 }
@@ -132,6 +133,22 @@ func (h *Handler) cheerHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	if rows == nil {
 		rows = []CheeredClip{}
+	}
+	if tombstones, ok := h.cfg.Store.(interface {
+		DeletedClips(context.Context, []string) (map[string]bool, error)
+	}); ok && len(rows) > 0 {
+		ids := make([]string, len(rows))
+		for i, row := range rows {
+			ids[i] = row.Clip.ID
+		}
+		deleted, err := tombstones.DeletedClips(r.Context(), ids)
+		if err != nil {
+			h.unavailable(w, r, "history_deleted_clips", err)
+			return
+		}
+		for i := range rows {
+			rows[i].Deleted = deleted[rows[i].Clip.ID]
+		}
 	}
 	h.write(w, r, 200, map[string]any{"clips": rows, "next_cursor": cursor})
 }

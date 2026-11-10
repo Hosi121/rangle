@@ -112,6 +112,9 @@ func newSyncHandler(service *Service, audience string, validate tokenValidator) 
 			return
 		}
 		job, err := service.SyncActive(ctx)
+		if err == nil {
+			err = service.syncPublisherCleanup(ctx)
+		}
 		if err != nil {
 			if errors.Is(err, ErrExpired) {
 				fail(410, "generation_window_ended")

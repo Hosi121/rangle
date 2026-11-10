@@ -34,7 +34,7 @@ CSRF・本文上限・同時hash数・ログイン頻度制限を適用する。
 
 作成時は担当者名の一意性をtransactionで検査する。変更時は団体・操作主体・対象担当者を同じtransactionで読み、現在の役割と資格情報世代を再検査する。受付後に管理者権限を失った要求もコミットしない。権限・無効化状態の変更では資格情報世代を進め、古いセッションを失効させる。同じ設定の再送では世代を進めない。
 
-最後の有効な管理者も無効化できる。団体と動画は残し、運営が別の管理者を作成して引継ぐ。担当者名・IDは上書き・再割当せず、無効化した担当者は監査のため残す。団体削除と団体のセルフ登録は別段階。
+最後の有効な管理者も無効化できる。団体と動画は残し、運営が別の管理者を作成して引継ぐ。担当者名・IDは上書き・再割当せず、無効化した担当者は監査のため残す。団体のセルフ登録は設けない。
 
 ## パスワード変更・再設定
 
@@ -57,5 +57,17 @@ CSRF・本文上限・同時hash数・ログイン頻度制限を適用する。
 運営は `GET/PUT /api/v1/operations/publishers/{account}/generation/presets` で入力割当を確認・設定する。PUTは `{presets: ["preset-id", ...]}` で全件置換し、空配列で解除する。確認済みpresetのIDだけを受け付け、任意の入力URIや学習条件は設定できない。
 
 割当はmanagerの専用DBへ保存し、未設定時だけconfigの `publisher_accounts` を使う。明示した空配列はconfigの許可も無効にする。新規生成の台帳transactionでも現在の割当を再検査する。解除後も既存ジョブの参照・取消・再送は維持する。作成者が脱退してもジョブは残り、他の有効な担当者が引き継ぐ。全団体・運営で既存のGPU予算・同時実行枠・期限を共有する。公開時の資産検証と既存deep linkの挙動は維持する。
+
+## 団体削除
+
+団体管理者は `GET/PUT /api/v1/publishers/{account}/deletion-request` で要求を確認・変更する。PUTは `{requested: true|false, confirmation: "団体ID"}`。要求だけでは利用を停止しない。rangle運営が `DELETE /api/v1/operations/publishers/{account}/deletion` に `{confirmation: "団体ID"}` を送り、実行する。同じURLのGETで進捗を確認・再開できる。削除中からの復帰・IDの再利用は行わない。
+
+公開サーバーはcommunity DBの状態と削除要求ID、private managerは所有ジョブと処理段階を保存する。削除開始は生成受付と同じ団体別文書をtransactionで更新し、所有ジョブを確定して公開registryから除外する。新しい生成・公開・担当者操作を拒否し、生成済み動画の詳細・交流APIも参照不能にする。遅れて届いた受付も対象から漏れない。
+
+処理はジョブ終了確認 → 所有資産削除 → CDN無効化。受付結果が不明なGPUジョブは終了扱いにせず、照合・取消を待つ。`generated/{job}/`、`live/{job}/`、`live-index/{job}.json` だけを導出し、各オブジェクトのgeneration一致で削除する。再一覧で空を確認し、固定media hostのキャッシュ無効化がDONEになるまで完了にしない。進捗の世代照合と固定requestIdで並行ポーリング・応答消失に対応する。管理画面の確認と既存の認証済みschedulerが有限量ずつ進める。
+
+完了時は動画の削除印を残す。声援・コメント・個人履歴・担当者とジョブの監査記録は保持し、履歴は「削除済み動画」として再生できなくする。LIVEの一覧からも除外する。共有の元データ・試合・選手・チーム・会場、旧運営所有のジョブは対象外。GCSのsoft-delete保持期間や取得済みのブラウザ内コピーは別管理であり、物理消去の完了を意味しない。
+
+managerへ追加する権限はmedia bucketの一覧、`generated/`・`live/`・`live-index/` の削除、CDN無効化とoperation参照のみ。公開runtimeやtrainerには付けない。URL mapのIAM Conditionsではresource.nameを使えないため、CDNの2権限はproject単位・既存期限付きとし、アプリがURL map/host/所有キーを固定する。バケット復元・作成・LB変更権限は付けない。[GCSのIAM](https://docs.cloud.google.com/storage/docs/access-control/iam)、[IAM条件の対象資源](https://docs.cloud.google.com/iam/docs/conditions-resource-attributes)、[CDN無効化API](https://docs.cloud.google.com/compute/docs/reference/rest/v1/urlMaps/invalidateCache)を参照。
 
 公開runtimeは認証結果を短寿命の `X-Rangle-Principal` としてprivate managerへ送る。managerはCloud Run IAMと、指定runtimeのGoogle署名・audienceを検証してから採用する。ブラウザの同名headerやCookieは転送しない。旧runtime用 `X-Rangle-Owner` は運営IDに限って受け、両headerの併記は拒否する。managerを先に更新することで旧runtimeも動く。新しいDB/IAM権限や共有secretは追加しない。失効は新規リクエストの受付で反映し、既に受付済みの操作までDBをまたいで巻き戻す仕組みではない。
