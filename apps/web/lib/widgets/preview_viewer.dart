@@ -7,6 +7,7 @@ import 'package:pointer_interceptor/pointer_interceptor.dart';
 
 import '../viewer/viewer_adapter.dart';
 import '../viewer/playback_controller.dart';
+import '../viewer/viewer_selection.dart';
 import 'edge_seek_bar.dart';
 
 class PreviewViewer extends StatefulWidget {
@@ -68,6 +69,8 @@ class PreviewViewer extends StatefulWidget {
 class _PreviewViewerState extends State<PreviewViewer>
     with WidgetsBindingObserver {
   late ViewerAdapter _adapter;
+  late ViewerSelection<ViewerValue> _updates;
+  late ViewerSelection<Object> _presentation;
   final _playbackFocus = FocusNode();
   bool _hasReadyFrame = false;
   bool _readyNotified = false;
@@ -100,17 +103,27 @@ class _PreviewViewerState extends State<PreviewViewer>
     _lastReportedSource = null;
     _preparedNotified = false;
     _adapter = widget.factory(widget.source);
+    _updates = ViewerSelection(_adapter, (value) => value);
+    _presentation = ViewerSelection(_updates, (value) => value.presentation);
     _adapter.configureTransportIdentity(widget.transportIdentity);
     if (widget.continuity && widget.thumbnailSource != null) {
       _adapter.configureContinuity(widget.thumbnailSource!, widget.mapping);
     }
     widget.controller?.attach(_adapter);
-    _adapter.addListener(_reportStatus);
+    _updates.addListener(_reportStatus);
     if (!widget.visible || !_appVisible) unawaited(_adapter.pause());
     final playback = retry ?? widget.playback;
     if (playback != null) unawaited(_restore(playback, retry: retry != null));
     unawaited(_adapter.initialize());
     _reportStatus();
+  }
+
+  void _afterFrame(VoidCallback callback) {
+    final binding = WidgetsBinding.instance;
+    binding.addPostFrameCallback((_) => callback());
+    // Hidden surfaces and position-only updates need not dirty a widget.
+    // Control acknowledgements must still run even when no repaint is pending.
+    binding.ensureVisualUpdate();
   }
 
   void _reportStatus() {
@@ -123,9 +136,14 @@ class _PreviewViewerState extends State<PreviewViewer>
         adapter.value.playIntent ?? adapter.value.playing,
       );
     }
-    if (!identical(_pendingValueAdapter, adapter)) {
+    final reportValue =
+        widget.onValueChanged != null ||
+        (adapter.value.prepared &&
+            adapter.value.timeline != null &&
+            !_preparedNotified);
+    if (reportValue && !identical(_pendingValueAdapter, adapter)) {
       _pendingValueAdapter = adapter;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      _afterFrame(() {
         if (identical(_pendingValueAdapter, adapter)) {
           _pendingValueAdapter = null;
         }
@@ -145,7 +163,7 @@ class _PreviewViewerState extends State<PreviewViewer>
         source != null &&
         source != _lastReportedSource) {
       _lastReportedSource = source;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      _afterFrame(() {
         if (mounted &&
             identical(adapter, _adapter) &&
             adapter.value.source == source) {
@@ -155,7 +173,7 @@ class _PreviewViewerState extends State<PreviewViewer>
     }
     if (status == _lastStatus) return;
     _lastStatus = status;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _afterFrame(() {
       if (!mounted ||
           !identical(adapter, _adapter) ||
           adapter.value.status != status) {
@@ -225,7 +243,7 @@ class _PreviewViewerState extends State<PreviewViewer>
         !restored) {
       return;
     }
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    _afterFrame(() {
       if (mounted &&
           identical(adapter, _adapter) &&
           (retry || widget.playback == state)) {
@@ -258,7 +276,9 @@ class _PreviewViewerState extends State<PreviewViewer>
 
   void _retry() {
     setState(() {
-      _adapter.removeListener(_reportStatus);
+      _updates.removeListener(_reportStatus);
+      _presentation.dispose();
+      _updates.dispose();
       widget.controller?.detach(_adapter);
       _adapter.dispose();
       _create(_lastGoodPlayback);
@@ -277,7 +297,9 @@ class _PreviewViewerState extends State<PreviewViewer>
   void dispose() {
     _bufferingTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
-    _adapter.removeListener(_reportStatus);
+    _updates.removeListener(_reportStatus);
+    _presentation.dispose();
+    _updates.dispose();
     widget.controller?.detach(_adapter);
     _adapter.dispose();
     _playbackFocus.dispose();
@@ -307,7 +329,7 @@ class _PreviewViewerState extends State<PreviewViewer>
   }
 
   Widget _buildViewer(BuildContext context) => ListenableBuilder(
-    listenable: _adapter,
+    listenable: _presentation,
     builder: (context, _) {
       final value = _adapter.value;
       final ready = value.status == ViewerStatus.ready;
@@ -435,20 +457,29 @@ class _PreviewViewerState extends State<PreviewViewer>
                 left: 0,
                 right: 0,
                 bottom: 0,
-                child: EdgeSeekBar(
-                  position: value.position,
-                  duration: value.duration,
-                  label: widget.freeView ? 'シーンの時刻' : '再生位置',
-                  thumbnailSource: widget.visible
-                      ? (widget.thumbnailSource ??
-                            (widget.freeView ? null : widget.source))
-                      : null,
-                  intercepting: widget.visible,
-                  onSeek: ready && value.duration > Duration.zero
-                      ? (position) =>
-                            unawaited(_interact(() => _adapter.seek(position)))
-                      : null,
-                  onTogglePlayback: canPlay ? _togglePlayback : null,
+                child: ValueListenableBuilder<ViewerValue>(
+                  valueListenable: _updates,
+                  builder: (context, value, _) => EdgeSeekBar(
+                    position: value.position,
+                    duration: value.duration,
+                    label: widget.freeView ? 'シーンの時刻' : '再生位置',
+                    thumbnailSource: widget.visible
+                        ? (widget.thumbnailSource ??
+                              (widget.freeView ? null : widget.source))
+                        : null,
+                    intercepting: widget.visible,
+                    onSeek:
+                        value.status == ViewerStatus.ready &&
+                            value.duration > Duration.zero
+                        ? (position) => unawaited(
+                            _interact(() => _adapter.seek(position)),
+                          )
+                        : null,
+                    onTogglePlayback:
+                        value.status == ViewerStatus.ready && value.canPlay
+                        ? _togglePlayback
+                        : null,
+                  ),
                 ),
               ),
           ],

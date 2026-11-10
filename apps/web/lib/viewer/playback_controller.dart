@@ -1,17 +1,23 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
+
 import 'package:flutter/widgets.dart';
 import 'package:flutter/scheduler.dart';
 
 import 'viewer_adapter.dart';
 
 /// Borrows a viewer; PreviewViewer remains responsible for its lifetime.
-class PlaybackController extends ChangeNotifier {
+class PlaybackController extends ChangeNotifier
+    implements ValueListenable<ViewerValue> {
   ViewerAdapter? _adapter;
+  ViewerValue _lastValue = const ViewerValue();
+  @override
   ViewerValue get value => _adapter?.value ?? const ViewerValue();
   void attach(ViewerAdapter adapter) {
     _adapter?.removeListener(_changed);
     _adapter = adapter;
+    _lastValue = adapter.value;
     adapter.addListener(_changed);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (identical(_adapter, adapter)) notifyListeners();
@@ -25,6 +31,9 @@ class PlaybackController extends ChangeNotifier {
   }
 
   void _changed() {
+    final next = value;
+    if (next == _lastValue) return;
+    _lastValue = next;
     if (SchedulerBinding.instance.schedulerPhase ==
         SchedulerPhase.persistentCallbacks) {
       final adapter = _adapter;
