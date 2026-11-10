@@ -166,7 +166,8 @@ if args[:3] == ['run', 'revisions', 'describe'] and args[3].startswith(manager_s
         '-generation-config', '/mnt/catalog/generation/' + 'e' * 64 + '.json',
         '-generation-manager-audience', manager_url,
         '-generation-caller-service-account', 'rangle-stg-runtime@comin-up.iam.gserviceaccount.com',
-        '-generation-sync-audience', manager_url]
+        '-generation-sync-audience', manager_url,
+        '-generation-cleanup-url-map', 'rangle-stg-https']
     if os.environ.get('BAD_MANAGER_ARGS'):
         manager_args += ['-firestore-project', 'comin-up']
     if os.environ.get('BAD_MANAGER_CATALOG'):
@@ -718,6 +719,26 @@ class Deployment(unittest.TestCase):
 
 
 class ReceiptStorage(unittest.TestCase):
+    def test_manager_cleanup_is_optional_pinned_and_forbidden_at_public_runtime(self):
+        base = ['-generation-manager', '-catalog', '/mnt/catalog/snapshots/' + 'd' * 64 + '.json',
+                '-generation-config', '/mnt/catalog/generation/' + 'e' * 64 + '.json',
+                '-generation-manager-audience', RECEIPT.MANAGER_URL,
+                '-generation-caller-service-account', RECEIPT.RUNTIME_SA]
+        for value in (None, 'rangle-stg-https', 'other-project-map', 'https://untrusted.test'):
+            args = base + (['-generation-cleanup-url-map', value] if value is not None else [])
+            document = {'spec': {'template': {'spec': {'serviceAccountName': RECEIPT.MANAGER_SA,
+                'containers': [{'image': RECEIPT.IMAGE_BASE + '@sha256:' + 'a' * 64, 'args': args}]}}}}
+            if value in (None, 'rangle-stg-https'):
+                self.assertEqual(RECEIPT.manager_identity(document)['catalog_sha256'], 'd' * 64)
+            else:
+                with self.assertRaises(ValueError):
+                    RECEIPT.manager_identity(document)
+        public = {'args': ['-generation-manager-url', RECEIPT.MANAGER_URL,
+                           '-generation-cleanup-url-map', 'rangle-stg-https',
+                           '-firestore-project', 'comin-up', '-firestore-database', 'rangle-stg']}
+        with self.assertRaises(ValueError):
+            RECEIPT.generation_remote(public)
+
     def test_latest_and_tagged_traffic_resolve_to_concrete_serving_revisions(self):
         document = {'status': {'latestReadyRevisionName': 'rangle-stg-old-a', 'traffic': [
             {'latestRevision': True, 'percent': 80},
