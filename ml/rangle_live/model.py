@@ -159,7 +159,10 @@ class IncrementalModel:
             packed=False,
         )
 
-    def fit(self, window, steps, deadline):
+    def fit(self, window, steps, deadline, *, offline_auxiliary=None):
+        # Deliberately no CLI/cloud route: explicit offline experiment objects only.
+        if offline_auxiliary is not None:
+            offline_auxiliary.validate_window(window)
         torch, p = self.torch, self.params
         if self.window_start is not None:
             advance_local_window(p, window.start - self.window_start)
@@ -193,6 +196,10 @@ class IncrementalModel:
             )
             loss += 1e-4 * p["scales"].exp().mean()
             loss += 1e-3 * max(0, 1 - step / 3000) * p["opacities"].sigmoid().mean()
+            if offline_auxiliary is not None:
+                loss += offline_auxiliary.loss(
+                    p, frame, view, self.views[view], self.Ks[view]
+                )
             loss.backward()
             self.optimizers["means"].param_groups[0]["lr"] = self.rates[
                 "means"
@@ -223,7 +230,7 @@ class IncrementalModel:
         value = float(loss.detach())
         if not math.isfinite(value):
             raise RuntimeError("Nonfinite live training loss")
-        return {
+        metrics = {
             "training_seconds": time.monotonic() - began,
             "update_steps": steps,
             "total_optimizer_steps": self.total_steps,
@@ -234,6 +241,9 @@ class IncrementalModel:
             "training_views": self.rig.train.tolist(),
             "heldout_views": self.rig.heldout.tolist(),
         }
+        if offline_auxiliary is not None:
+            metrics.update(offline_auxiliary.metrics())
+        return metrics
 
     def snapshot(self, window, deadline):
         torch, p = self.torch, self.params
