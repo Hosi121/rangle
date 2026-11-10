@@ -5,6 +5,24 @@ import { TransportABR } from '../src/transport-abr.js';
 import { TransportPlayback } from '../src/transport-playback.js';
 import { parseManifest } from '../src/session.js';
 import { createHash } from 'node:crypto';
+
+test('transport reads irregular chunks exactly and rejects short or overflowing bodies', async () => {
+  const expected = Uint8Array.from({ length: 256 }, (_, i) => i);
+  for (const length of [256, 255, 257]) {
+    const body = Uint8Array.from({ length }, (_, i) => i % 256);
+    const playback = new TransportPlayback({ createViewer() {}, notify() {}, async fetchAsset() {
+      let offset = 0;
+      return new Response(new ReadableStream({ pull(controller) {
+        if (offset === body.length) { controller.close(); return; }
+        const end = Math.min(body.length, offset + (offset % 17) + 1);
+        controller.enqueue(body.slice(offset, end)); offset = end;
+      } }));
+    } });
+    const read = playback.read('https://media.test/model.rgs', 256, new AbortController().signal);
+    if (length === 256) assert.deepEqual(await read, expected);
+    else await assert.rejects(read, /size mismatch/);
+  }
+});
 const source = 'https://media.test/manifests/clip/r1.json';
 function manifest(count = 20) {
   return { version: 1, clip_id: 'clip', revision: 'r1', codec: 'rangle-temporal-rgs1-segments-v1',
