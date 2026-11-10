@@ -231,8 +231,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(aborted, isTrue);
     expect(find.text('Clip 500'), findsOneWidget);
-    expect(feedPage(tester), 0);
-    expect(find.byType(ClipCard), findsOneWidget);
+    expect(find.byKey(const Key('highlight-feed')), findsNothing);
+    expect(find.byType(ClipCard), findsNothing);
     expect(repo.queries, ['/', '/', 'new/']);
     expect(tester.takeException(), isNull);
   });

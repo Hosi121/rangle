@@ -20,6 +20,7 @@ import 'publishers/public_publisher_screen.dart';
 import 'sharing/share_clip.dart';
 import 'live/live_api.dart';
 import 'widgets/search_dialog.dart';
+import 'widgets/search_results_screen.dart';
 import 'models/clip.dart';
 import 'viewer/viewer_adapter.dart';
 import 'widgets/clip_card.dart';
@@ -72,7 +73,9 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   AccountController? _account;
   Future<void>? _accountReady;
   String _query = '', _tag = '';
-  bool _generationOpen = false, _historyOpening = false;
+  String _lastSearch = '';
+  bool _searchOpen = false, _fromSearch = false;
+  bool _generationOpen = false, _clipOpening = false;
   bool _publisherPageOpen = false;
 
   @override
@@ -134,7 +137,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
     );
     if (!mounted) return;
     setState(() => _publisherPageOpen = false);
-    if (clip != null) await _openHistoryClip(clip);
+    if (clip != null) await _openClip(clip);
   }
 
   Future<void> _openGeneration({
@@ -222,25 +225,57 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   Future<void> _search(Iterable<String> tags) async {
     final value = await showSearchDialog(
       context,
-      initial: _tag.isEmpty ? _query : '#$_tag',
+      initial: _lastSearch,
       tags: tags,
     );
     if (value == null || !mounted) return;
-    setState(() {
-      _tag = value.startsWith('#') ? value.substring(1) : '';
-      _query = value.startsWith('#') ? '' : value;
-    });
-    _reload();
+    await _showSearchResults(
+      query: value.startsWith('#') ? '' : value,
+      tag: value.startsWith('#') ? value.substring(1) : '',
+    );
   }
 
-  Future<void> _openHistoryClip(String id) async {
-    if (_historyOpening) return;
-    _historyOpening = true;
+  Future<void> _showSearchResults({String query = '', String tag = ''}) async {
+    if (_searchOpen) return;
+    _paging.cancelPending();
+    _lastSearch = tag.isEmpty ? query : '#$tag';
+    setState(() => _searchOpen = true);
+    final selection = await Navigator.of(context).push<SearchSelection>(
+      MaterialPageRoute(
+        builder: (_) => SearchResultsScreen(
+          repository: widget.repository,
+          query: query,
+          tag: tag,
+          onSearchChanged: (query, tag) =>
+              _lastSearch = tag.isEmpty ? query : '#$tag',
+        ),
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _searchOpen = false);
+    if (selection != null) {
+      await _openClip(
+        selection.clip.id,
+        query: selection.query,
+        tag: selection.tag,
+        fromSearch: true,
+      );
+    }
+  }
+
+  Future<void> _openClip(
+    String id, {
+    String query = '',
+    String tag = '',
+    bool fromSearch = false,
+  }) async {
+    if (_clipOpening) return;
+    _clipOpening = true;
     final previous = _paging, generation = _paging.generation;
     final next = ClipPagingController(widget.repository);
     var adopted = false;
     try {
-      await next.reset(clipId: id);
+      await next.reset(clipId: id, query: query, tag: tag);
       if (!mounted ||
           _paging != previous ||
           previous.generation != generation) {
@@ -257,36 +292,32 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
       setState(() {
         _paging = next;
         _clipId = id;
-        _query = _tag = '';
+        _query = query;
+        _tag = tag;
+        _fromSearch = fromSearch;
       });
       adopted = true;
       previous.dispose();
     } finally {
       if (!adopted) next.dispose();
-      _historyOpening = false;
+      _clipOpening = false;
     }
   }
 
   void _filterQuery(String query) {
-    setState(() {
-      _query = query;
-      _tag = '';
-    });
-    _reload();
+    unawaited(_showSearchResults(query: query));
   }
 
   void _filterTag(String tag) {
-    setState(() {
-      _tag = tag;
-      _query = '';
-    });
-    _reload();
+    unawaited(_showSearchResults(tag: tag));
   }
 
   void _clearSearch() {
     setState(() {
       _tag = '';
       _query = '';
+      _lastSearch = '';
+      _fromSearch = false;
     });
     _reload();
   }
@@ -302,7 +333,8 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => _generationOpen || _publisherPageOpen
+  Widget build(BuildContext context) =>
+      _generationOpen || _publisherPageOpen || _searchOpen
       ? const SizedBox.expand()
       : _account?.user?.isAdmin == true && widget.initialClipId == null
       ? GenerationScreen(
@@ -406,9 +438,15 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                         _search(clips.expand((clip) => clip.tags).toSet()),
                     onTag: _filterTag,
                     onQuery: _filterQuery,
-                    onOpenClip: _openHistoryClip,
+                    onOpenClip: _openClip,
                     onClearSearch: _clearSearch,
-                    filterLabel: _tag.isEmpty ? _query : '#$_tag',
+                    onShowSearchResults: () =>
+                        _showSearchResults(query: _query, tag: _tag),
+                    filterLabel: _fromSearch && _query.isEmpty && _tag.isEmpty
+                        ? '検索結果'
+                        : _tag.isEmpty
+                        ? _query
+                        : '#$_tag',
                     onLive: _openLive,
                     initialFreeView:
                         RegExp(r'^generated-[a-f0-9]{32}$')
@@ -444,6 +482,7 @@ class _HighlightFeed extends StatefulWidget {
     required this.onQuery,
     required this.onOpenClip,
     required this.onClearSearch,
+    required this.onShowSearchResults,
     required this.onOpenPublisher,
     required this.onViewPublisher,
     required this.filterLabel,
@@ -457,6 +496,7 @@ class _HighlightFeed extends StatefulWidget {
   final AccountController? account;
   final ClipShareAction shareAction;
   final VoidCallback onSearch, onClearSearch, onLive, onOpenPublisher;
+  final VoidCallback onShowSearchResults;
   final ValueChanged<String> onTag, onQuery, onOpenClip;
   final ValueChanged<String> onViewPublisher;
   final String filterLabel;
@@ -732,10 +772,23 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                             children: [
                               const SizedBox(width: 12),
                               Expanded(
-                                child: Text(
-                                  widget.filterLabel,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
+                                child: PointerInterceptor(
+                                  intercepting: _freeView,
+                                  child: Tooltip(
+                                    message: '検索結果に戻る',
+                                    child: TextButton.icon(
+                                      onPressed: widget.onShowSearchResults,
+                                      icon: const Icon(
+                                        Icons.arrow_back,
+                                        size: 16,
+                                      ),
+                                      label: Text(
+                                        widget.filterLabel,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ),
                                 ),
                               ),
                               PointerInterceptor(
