@@ -10,9 +10,13 @@ async function loadPending() {
   if (!pendingLoad || loading || hidden) return;
   const data = pendingLoad, abort = loading = new AbortController();
   try {
-    const response = await fetch(data.url, { signal: abort.signal,
-      redirect: data.strict ? 'error' : 'follow', credentials: data.strict ? 'omit' : 'same-origin' });
-    const bytes = await readTemporalBody(response);
+    let bytes;
+    if (data.bytes instanceof ArrayBuffer) bytes = new Uint8Array(data.bytes);
+    else {
+      const response = await fetch(data.url, { signal: abort.signal,
+        redirect: data.strict ? 'error' : 'follow', credentials: data.strict ? 'omit' : 'same-origin' });
+      bytes = await readTemporalBody(response);
+    }
     if (abort.signal.aborted || hidden) return;
     if (data.sha256 !== undefined) {
       if (!/^[a-f0-9]{64}$/.test(data.sha256)) throw new Error('Invalid model digest');

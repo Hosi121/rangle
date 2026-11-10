@@ -25,7 +25,7 @@ export class TemporalSession {
     this.disposed = false;
   }
 
-  load(manifest, { autoplay = false, strict = false, sha256, continuity = null } = {}) {
+  load(manifest, { autoplay = false, strict = false, sha256, bytes, continuity = null } = {}) {
     this.continuity = continuity;
     this.live = strict;
     this.userPaused = false;
@@ -49,7 +49,7 @@ export class TemporalSession {
       this.resolveLoad = resolve;
       this.rejectLoad = reject;
       if (!this.live || !this.paused) this.timeout = setTimeout(() => this.fail(), 30000);
-      this.worker.postMessage({ type: 'load', url: manifest.temporal.url, strict, sha256, hidden: this.paused });
+      this.worker.postMessage({ type: 'load', url: manifest.temporal.url, strict, sha256, bytes, hidden: this.paused }, bytes ? [bytes] : []);
     });
   }
 
@@ -165,13 +165,13 @@ export class TemporalSession {
   }
 
   /** At most one candidate worker/mesh, alongside the current interactive model. */
-  replace(manifest, { sha256 } = {}) {
+  replace(manifest, { sha256, bytes } = {}) {
     if (this.disposed || !this.initialized || this.paused) return Promise.resolve(false);
     for (const request of [this.activeReplacement, this.pendingReplacement]) {
       if (request?.manifest.temporal.url === manifest.temporal.url && request.sha256 === sha256) return request.promise;
     }
     let resolve;
-    const request = { manifest, sha256, promise: new Promise(done => { resolve = done; }), resolve: value => resolve(value) };
+    const request = { manifest, sha256, bytes, promise: new Promise(done => { resolve = done; }), resolve: value => resolve(value) };
     this.pendingReplacement?.resolve(false);
     this.pendingReplacement = request;
     this.drainReplacement();
@@ -188,11 +188,11 @@ export class TemporalSession {
       this.activeReplacement = null;
       this.drainReplacement();
     };
-    try { void this.replaceActive(request.manifest, request.sha256).then(finish, () => finish(false)); }
+    try { void this.replaceActive(request.manifest, request.sha256, request.bytes).then(finish, () => finish(false)); }
     catch { finish(false); }
   }
 
-  replaceActive(manifest, sha256) {
+  replaceActive(manifest, sha256, bytes) {
     const worker = this.createWorker();
     let candidate, camera, sortId, finished = false;
     return new Promise(resolve => {
@@ -264,7 +264,7 @@ export class TemporalSession {
           }
         } catch { finish(false); }
       });
-      worker.postMessage({ type: 'load', url: manifest.temporal.url, strict: true, sha256 });
+      worker.postMessage({ type: 'load', url: manifest.temporal.url, strict: true, sha256, bytes }, bytes ? [bytes] : []);
     });
   }
 

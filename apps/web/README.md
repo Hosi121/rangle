@@ -6,7 +6,7 @@ Flutter/Dart・日本語Material3のスポーツfeed。既定はsame-origin `/ap
 
 mobileは全面縦feed、desktopは中央縦長player。元縦横比を保ちcropしない。映像tap/spaceで再生停止、下端seekbarのhover/touchでpreview（取得不可は時刻だけ）、概要で出典/全文を表示する。無音autoplay/loopを試し、再生制限時は1回だけcontrollerを再作成して手動再生へ戻す。取得/decode失敗はerror/retry、muteも手動操作可能。
 
-自由視点はdrag/orbit・scroll/zoom・seek、時間modelはdouble click/tapで再生停止する。入場・動画への復帰・資源保持は[没入UI](../../docs/immersive-ui.md)、Worker/SDKは[client処理](../../docs/client-processing.md)、時間model/評価は[連続再生](../../docs/temporal-playback.md)を参照。ABR/スマートフォン実機評価は未実施。
+自由視点はdrag/orbit・scroll/zoom・seek、時間modelはdouble click/tapで再生停止する。入場・動画への復帰・資源保持は[没入UI](../../docs/immersive-ui.md)、Worker/SDKは[client処理](../../docs/client-processing.md)、時間model/評価は[連続再生](../../docs/temporal-playback.md)を参照。[transport再生](../../docs/transport-playback.md)はAPI/manifest・ABR判断・区間描画へ接続済み。実品質ラダー/スマートフォン実機評価は未実施。
 
 管理者はfeedの代わりに生成/LIVE管理へ進む。`/demo/?generate=1` も管理者専用。承認presetの静的/動的生成・状態・中止・結果を扱い、API無効時は準備中とする。任意動画uploadは扱わない。[生成API](../../docs/generation.md)・[掲載UI](../../docs/generation-publication-ui.md)
 
@@ -126,7 +126,7 @@ flutter --suppress-analytics build web --no-web-resources-cdn
 
 JSはmanifest・数/rate・最新seek・camera・失敗/離脱破棄をGPUなしで、Flutterはfeed/video・asset参照・切替/seek/retry/破棄を確認する。実WebGL/orbit/codec/HTTP/CORS/Worker解放は実資産のbrowser確認が必要。
 
-ViewerAdapterは既存video APIとClip.sceneUrlを使う。scene_url（API）/RANGLE_SCENE_URL（demo）不在では自由視点button無効。Goの `/manifests/{clip_id}/{revision}.json` はtransport用で、描画sceneとは別。ABR判断には未使用。
+ViewerAdapterは通常動画と自由視点のsourceを区別する。対応RGS1 codecではClip.manifestUrlからtransport/ABRを使い、それ以外は従来のClip.sceneUrlを使う。新しい複数区間codecでmanifestが欠ける場合は動画を維持し、先頭sceneだけへ読み替えない。Goの `/manifests/{clip_id}/{revision}.json` と描画sceneは別の形式として検証する。
 
 ## LIVEの自由視点
 

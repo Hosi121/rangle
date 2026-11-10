@@ -48,6 +48,7 @@ abstract class ViewerAdapter extends ChangeNotifier {
   Future<void> pause();
   Future<void> resume() async {}
   Future<bool> updateSource(Uri source, {String? sha256}) async => false;
+  void configureTransportIdentity(Map<String, String>? identity) {}
   void configureContinuity(Uri preview, PreviewSceneMapping? mapping) {}
   Future<PlaybackState> capturePlayback() async =>
       PlaybackState(value.position, value.playIntent ?? value.playing);
