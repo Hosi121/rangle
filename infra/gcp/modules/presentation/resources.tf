@@ -46,7 +46,7 @@ resource "google_storage_bucket" "private" {
     content {
       origin          = ["*"]
       method          = ["GET", "HEAD"]
-      response_header = ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Cache-Control", "Last-Modified"]
+      response_header = ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Cache-Control", "Last-Modified", "If-None-Match", "Range"]
       max_age_seconds = 3600
     }
   }

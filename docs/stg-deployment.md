@@ -22,9 +22,11 @@
 | --- | --- |
 | mode / TTL | `FORCE_CACHE_ALL`、default/client86400秒。APIが省略するmax TTLは設定しない |
 | 無効 | negative cache・stale serve・dynamic compression |
-| key / CORS | queryは `generation` だけ。Originは明示key指定がAPI非対応のため `Vary: Origin` を利用。匿名CORS `*`、GET/HEAD・Range用header、credentialsなし |
+| key / CORS | queryは `generation` だけ。Originごとの内容選択なし。media matcherで匿名CORS `*`と必要なExpose-Headersを一貫して付与し、GET/HEAD・Range/If-None-Matchのpreflightを許可。credentialsなし |
 
 媒体は公開許諾済みの不変bytesだけに限定する。実CDNのGET/HEAD/206/304/416・CORS/hash/cold missを確認し、queryをcontent選択/認可に流用しない。[CDN cache](https://docs.cloud.google.com/cdn/docs/caching)
+
+2026-11-10に公開app originのWeb/Workerで[ブラウザ契約](cdn-browser-verification.md)を確認した。preflight許可とCDN生成304のCORS欠落を修正済み。FORCE_CACHE_ALLではuploadの`no-transform`自体は応答に残らず、変換なしはcompression設定とfixture bytes/hashの一致で確認した。
 
 catalogのreadonly mount・versioning・新規作成限定の公開順は[Terraform共通契約](../infra/gcp/README.md#catalog-と公開工程)に従う。presentationのpreview/sceneはmedia originの絶対URLを使い、domain確定後にcatalog SHAを再計算する。Terraformはuploadしない。[mount](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts)、[FUSE制約](https://docs.cloud.google.com/storage/docs/cloud-storage-fuse/overview#limitations)
 
