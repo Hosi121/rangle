@@ -116,6 +116,16 @@ func (s *FirestoreStore) AdmitScoped(ctx context.Context, p Principal, preset Pr
 		if err != ErrNotFound {
 			return err
 		}
+		if p.Kind == "staff" {
+			doc, err := tx.Get(s.grantsDoc(p.Account.ID))
+			grants, err := decodeGrants(doc, err, p.Account.ID)
+			if err != nil {
+				return err
+			}
+			if grants != nil && !grants.allows(preset.ID) {
+				return ErrInvalid
+			}
+		}
 		var a admission
 		snapshot, err := tx.Get(s.ledger())
 		if err == nil {

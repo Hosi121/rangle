@@ -5,6 +5,7 @@
 | API | 認証・入力 |
 | --- | --- |
 | `POST /api/v1/operations/publishers` | 運営。`id, name, kind, staff_username, staff_password` で団体と最初の管理者を同時に作る |
+| `GET /api/v1/operations/publishers?cursor=...` | 運営。団体のプロフィール・状態をID順に20件ずつ取得 |
 | `POST /api/v1/publisher-auth/login` | `account_id, username, password`。団体IDと団体内の担当者名でログイン |
 | `GET /api/v1/publisher-auth/me` | 現在の団体・担当者。未ログインは `identity: null` |
 | `POST /api/v1/publisher-auth/logout` | 担当者セッションを失効しCookieを削除 |
@@ -51,6 +52,8 @@ CSRF・本文上限・同時hash数・ログイン頻度制限を適用する。
 | `DELETE /jobs/{job}` | 団体のジョブを取消 |
 | `PUT /jobs/{job}/publication` | `{published: true/false}` で公開・取り下げ |
 
-運営がpresetの `publisher_accounts` へ団体IDを設定するまで入力は表示・受付されない。作成者が脱退してもジョブは残り、他の有効な担当者が引き継ぐ。全団体・運営で既存のGPU予算・同時実行枠・期限を共有する。公開時の資産検証、公開済みフィードと限定しない既存の生成結果deep linkの挙動は維持する。
+運営は `GET/PUT /api/v1/operations/publishers/{account}/generation/presets` で入力割当を確認・設定する。PUTは `{presets: ["preset-id", ...]}` で全件置換し、空配列で解除する。確認済みpresetのIDだけを受け付け、任意の入力URIや学習条件は設定できない。
+
+割当はmanagerの専用DBへ保存し、未設定時だけconfigの `publisher_accounts` を使う。明示した空配列はconfigの許可も無効にする。新規生成の台帳transactionでも現在の割当を再検査する。解除後も既存ジョブの参照・取消・再送は維持する。作成者が脱退してもジョブは残り、他の有効な担当者が引き継ぐ。全団体・運営で既存のGPU予算・同時実行枠・期限を共有する。公開時の資産検証と既存deep linkの挙動は維持する。
 
 公開runtimeは認証結果を短寿命の `X-Rangle-Principal` としてprivate managerへ送る。managerはCloud Run IAMと、指定runtimeのGoogle署名・audienceを検証してから採用する。ブラウザの同名headerやCookieは転送しない。旧runtime用 `X-Rangle-Owner` は運営IDに限って受け、両headerの併記は拒否する。managerを先に更新することで旧runtimeも動く。新しいDB/IAM権限や共有secretは追加しない。失効は新規リクエストの受付で反映し、既に受付済みの操作までDBをまたいで巻き戻す仕組みではない。

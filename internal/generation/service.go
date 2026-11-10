@@ -47,8 +47,25 @@ func (s *Service) CreateFor(ctx context.Context, principal Principal, presetID, 
 		return Job{}, err
 	}
 	preset, ok := s.Config.preset(presetID)
-	if !ok || !principal.permitsPreset(preset) {
+	if !ok {
 		return Job{}, ErrInvalid
+	}
+	allowed, err := s.PresetsFor(ctx, principal)
+	if err != nil {
+		return Job{}, err
+	}
+	permitted := false
+	for _, candidate := range allowed {
+		if candidate.ID == presetID {
+			permitted = true
+			break
+		}
+	}
+	if !permitted {
+		return Job{}, ErrInvalid
+	}
+	if principal.Kind == "staff" {
+		preset.PublisherAccounts = []publisher.ID{principal.Account.ID}
 	}
 	if !s.now().Add(MaxRuntime + time.Minute).Before(s.Config.Deadline) {
 		return Job{}, ErrExpired
@@ -63,7 +80,6 @@ func (s *Service) CreateFor(ctx context.Context, principal Principal, presetID, 
 	preset = principal.snapshot(preset)
 	var job Job
 	var created bool
-	var err error
 	if scoped, ok := s.Store.(ScopedAdmission); ok {
 		job, created, err = scoped.AdmitScoped(ctx, principal, preset, nonce, s.Config.Attempts, s.now())
 	} else if principal.Kind == "operator" {

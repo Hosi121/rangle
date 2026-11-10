@@ -67,6 +67,7 @@ func NewHandler(cfg Config) *Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/auth/me", h.me)
 	mux.HandleFunc("POST /api/v1/operations/publishers", h.provisionPublisher)
+	mux.HandleFunc("GET /api/v1/operations/publishers", h.listPublishers)
 	mux.HandleFunc("GET /api/v1/publisher-auth/me", h.staffMe)
 	mux.HandleFunc("POST /api/v1/publisher-auth/login", h.staffLogin)
 	mux.HandleFunc("POST /api/v1/publisher-auth/logout", h.staffLogout)

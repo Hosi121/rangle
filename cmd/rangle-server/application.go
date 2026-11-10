@@ -298,6 +298,34 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		return user.ID, nil
 	}
 	staffAuthority := generationStaffAuthority(interactions)
+	grantOperator := func(r *http.Request) (string, error) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		r = r.WithContext(ctx)
+		id, err := adminOwner(r)
+		if err != nil || id == "" {
+			return id, err
+		}
+		account := publisher.ID(r.PathValue("account"))
+		if !account.Valid() {
+			return "", generation.ErrNotFound
+		}
+		directory, ok := store.(community.PublisherStore)
+		if !ok {
+			return "", generation.ErrInvalid
+		}
+		a, err := directory.Publisher(r.Context(), account)
+		if errors.Is(err, community.ErrNotFound) {
+			return "", generation.ErrNotFound
+		}
+		if err != nil {
+			return "", err
+		}
+		if a.Status != publisher.Active && a.Status != publisher.Suspended {
+			return "", generation.ErrNotFound
+		}
+		return id, nil
+	}
 	if generationRemote != nil {
 		api, err = catalog.WithPublicClips(api, generationRemote.PublicClips)
 		if err != nil {
@@ -313,6 +341,11 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			return app, err
 		}
 		mux.Handle("/api/v1/publishers/{account}/generation/", staffJobs)
+		grants, err := generation.NewPublisherGrantRemoteHandler(generationRemote, grantOperator)
+		if err != nil {
+			return app, err
+		}
+		mux.Handle("/api/v1/operations/publishers/{account}/generation/", grants)
 		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))
 	}
 	if generationService != nil {
@@ -338,6 +371,11 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			return app, err
 		}
 		mux.Handle("/api/v1/publishers/{account}/generation/", staffJobs)
+		grants, err := generation.NewPublisherGrantHandler(generationService, grantOperator)
+		if err != nil {
+			return app, err
+		}
+		mux.Handle("/api/v1/operations/publishers/{account}/generation/", grants)
 		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))
 	}
 	mux.Handle("/api/", api)
