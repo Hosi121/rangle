@@ -71,15 +71,35 @@ class _CheerEmbersState extends State<CheerEmbers>
 }
 
 class _Burst {
-  _Burst(this.born, this.seed);
+  _Burst(this.born, int seed) {
+    final random = math.Random(seed);
+    particles = List.generate(
+      10,
+      (_) => _Particle(
+        random.nextDouble() * 2 - 1,
+        18 + random.nextDouble() * 30,
+        .8 + random.nextDouble() * 1.5,
+        random.nextDouble() * math.pi * 2,
+      ),
+      growable: false,
+    );
+  }
   final Duration born;
-  final int seed;
+  late final List<_Particle> particles;
+}
+
+class _Particle {
+  const _Particle(this.spread, this.rise, this.radius, this.phase);
+  final double spread, rise, radius, phase;
 }
 
 class _EmbersPainter extends CustomPainter {
   _EmbersPainter(this.bursts, this.clock);
   final List<_Burst> bursts;
   final Duration clock;
+  final _glowPaint = Paint()
+    ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5);
+  final _particlePaint = Paint()..strokeCap = StrokeCap.round;
   @override
   void paint(Canvas canvas, Size size) {
     final origin = Offset(size.width / 2, size.height - 28);
@@ -88,22 +108,20 @@ class _EmbersPainter extends CustomPainter {
         0.0,
         1.0,
       );
-      final random = math.Random(burst.seed);
       if (progress < .3) {
         canvas.drawCircle(
           origin,
           8 + progress * 16,
-          Paint()
+          _glowPaint
             ..color = const Color(0xFFFF6500)
-                .withValues(alpha: .15 * (1 - progress / .3))
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 5),
+                .withValues(alpha: .15 * (1 - progress / .3)),
         );
       }
-      for (var i = 0; i < 10; i++) {
-        final spread = random.nextDouble() * 2 - 1;
-        final rise = 18 + random.nextDouble() * 30;
-        final radius = .8 + random.nextDouble() * 1.5;
-        final phase = random.nextDouble() * math.pi * 2;
+      for (final particle in burst.particles) {
+        final spread = particle.spread;
+        final rise = particle.rise;
+        final radius = particle.radius;
+        final phase = particle.phase;
         final x =
             origin.dx +
             spread * 28 * progress +
@@ -119,10 +137,9 @@ class _EmbersPainter extends CustomPainter {
           const Color(0xFFFF4C00),
           progress,
         )!;
-        final paint = Paint()
+        final paint = _particlePaint
           ..color = color.withValues(alpha: alpha)
-          ..strokeWidth = radius * (1 - .5 * progress)
-          ..strokeCap = StrokeCap.round;
+          ..strokeWidth = radius * (1 - .5 * progress);
         canvas.drawLine(
           Offset(x, y + 1.5 + progress * 2),
           Offset(x + spread * 2, y),

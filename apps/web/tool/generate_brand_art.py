@@ -37,6 +37,27 @@ final _paths = <String, Path>{
 '''+ '\n'.join(entries)+'''
 };
 
+// Fixed SVG-local paints and shaders are shared across sizes and animations.
+// They are never mutated after creation; Canvas applies each draw's transform.
+final _whitePaint = Paint()..color = Colors.white;
+final _unchargedPaint = Paint()..color = const Color(0xFF8D3D0A);
+final _closedEyePath = Path()..moveTo(440,625)..quadraticBezierTo(557,601,721,513);
+final _closedEyePaint = Paint()..color=const Color(0xFF32120B)..style=PaintingStyle.stroke..strokeWidth=16..strokeCap=StrokeCap.round;
+final _paints = <String, Paint>{
+  for (final id in _paths.keys.where((id) => id.length != 1)) id: _createPaint(id),
+};
+Paint _createPaint(String id) {
+  if (id == 'eye-white' || id == 'eye-upper-cut' || id == 'pupil-highlight') { return _whitePaint; }
+  if (id == 'pupil') { return Paint()..color=const Color(0xFF080909); }
+  if (id == 'iris-shadow') { return Paint()..color=const Color(0x80D94A00); }
+  if (id == 'flame-brow-facet') { return Paint()..color=const Color(0xFFEE4C00); }
+  final path = _paths[id]!;
+  final colors = id.startsWith('flame-') && id != 'flame-silhouette'
+    ? const [Color(0xFFFF7100),Color(0xFFDB3000)]
+    : const [Color(0xFFFF9500),Color(0xFFFF6500),Color(0xFFFB4000)];
+  return Paint()..shader=LinearGradient(begin:Alignment.topLeft,end:Alignment.bottomRight,colors:colors).createShader(path.getBounds());
+}
+
 class RangleWordmark extends StatelessWidget {
   const RangleWordmark({this.width = 154, super.key});
   final double width;
@@ -49,7 +70,7 @@ class _WordmarkPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     canvas.scale(size.width / 945);canvas.translate(-157, -885);
-    for(final id in ['R','A','N','G','L','E']) {canvas.drawPath(_paths[id]!, Paint()..color=Colors.white);}
+    for(final id in ['R','A','N','G','L','E']) {canvas.drawPath(_paths[id]!, _whitePaint);}
   }
   @override
   bool shouldRepaint(_WordmarkPainter old) => false;
@@ -66,30 +87,19 @@ class FlameMark extends StatelessWidget {
 class _FlamePainter extends CustomPainter {
   _FlamePainter(this.charge,this.eye,this.orbit,this.time);
   final double charge, eye, orbit, time;
-  Paint paintFor(String id) {
-    if (id == 'eye-white' || id == 'eye-upper-cut' || id == 'pupil-highlight') { return Paint()..color=Colors.white; }
-    if (id == 'pupil') { return Paint()..color=const Color(0xFF080909); }
-    if (id == 'iris-shadow') { return Paint()..color=const Color(0x80D94A00); }
-    if (id == 'flame-brow-facet') { return Paint()..color=const Color(0xFFEE4C00); }
-    final path = _paths[id]!;
-    final colors = id.startsWith('flame-') && id != 'flame-silhouette'
-      ? const [Color(0xFFFF7100),Color(0xFFDB3000)]
-      : const [Color(0xFFFF9500),Color(0xFFFF6500),Color(0xFFFB4000)];
-    return Paint()..shader=LinearGradient(begin:Alignment.topLeft,end:Alignment.bottomRight,colors:colors).createShader(path.getBounds());
-  }
   void draw(Canvas canvas, Iterable<String> ids) {
-    for(final id in ids) { canvas.drawPath(_paths[id]!, paintFor(id)); }
+    for(final id in ids) { canvas.drawPath(_paths[id]!, _paints[id]!); }
   }
   @override
   void paint(Canvas canvas,Size size) {
     canvas.save(); canvas.scale(size.width/709,size.height/745);canvas.translate(-283,-100);
     const flames=['flame-silhouette','flame-upper-facet','flame-brow-facet','flame-bottom-facet'];
     canvas.save();canvas.translate(620,800);canvas.skew(math.sin(time*7)*.015,0);canvas.scale(1,1+math.sin(time*9)*.012);canvas.translate(-620,-800);
-    for(final id in flames){canvas.drawPath(_paths[id]!,Paint()..color=const Color(0xFF8D3D0A));}
+    for(final id in flames){canvas.drawPath(_paths[id]!,_unchargedPaint);}
     canvas.save();canvas.clipRect(Rect.fromLTRB(270,845-745*charge.clamp(0,1),1010,850));draw(canvas,flames);canvas.restore();canvas.restore();
     if(eye>0) {canvas.save();canvas.translate(0,565);canvas.scale(1,eye.clamp(.01,1));canvas.translate(0,-565);
       draw(canvas,['eye-upper-cut','eye-white','iris','iris-shadow','pupil','pupil-highlight']);canvas.restore();}
-    else {canvas.drawPath(Path()..moveTo(440,625)..quadraticBezierTo(557,601,721,513),Paint()..color=const Color(0xFF32120B)..style=PaintingStyle.stroke..strokeWidth=16..strokeCap=StrokeCap.round);}
+    else {canvas.drawPath(_closedEyePath,_closedEyePaint);}
     if(orbit>0){final burst=orbit<.3? .55+orbit/.3*1.75:2.3-(orbit-.3)/.7;
       canvas.save();canvas.translate(637,570);canvas.scale(burst);canvas.translate(-637,-570);
       draw(canvas,['orbit-right','orbit-left','spark-right-upper','spark-right-lower','spark-left']);canvas.restore();}

@@ -54,11 +54,16 @@ class _VideoThumbnails implements ThumbnailSource {
           ..crossOrigin = 'anonymous'
           ..muted = true
           ..playsInline = true
-          ..preload = 'auto';
+          ..preload = position == Duration.zero ? 'auto' : 'metadata';
         final url = source.hasScheme
             ? source.toString()
             : ui_web.assetManager.getAssetUrl(source.toString());
-        if (!await _wait('loadeddata', () {
+        // At time zero, metadata readiness can precede actual first pixels.
+        // Keep the proven initial-frame path; other timestamps seek from metadata.
+        final event = position == Duration.zero
+            ? 'loadeddata'
+            : 'loadedmetadata';
+        if (!await _wait(event, () {
           video.src = url;
           video.load();
         })) {
@@ -71,6 +76,7 @@ class _VideoThumbnails implements ThumbnailSource {
       if (!video.duration.isFinite || seconds > video.duration || seconds < 0) {
         return null;
       }
+      // Metadata preload avoids buffering the clip just to inspect its timeline.
       // seeked follows decoding; do not snapshot the previously decoded frame.
       final target = seconds.clamp(
         0,
@@ -97,6 +103,7 @@ class _VideoThumbnails implements ThumbnailSource {
         canvas.height,
       );
       final data = canvas.toDataURL('image/jpeg', .7.toJS);
+      video.preload = 'metadata';
       return base64Decode(data.substring(data.indexOf(',') + 1));
     } on Object {
       // Includes CORS-tainted canvas, unsupported codecs and interrupted loads.
