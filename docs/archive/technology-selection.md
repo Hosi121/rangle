@@ -1,6 +1,6 @@
 # rangle 技術選定案
 
-2026-11-07の初期判断記録。現在の採用構成は[クラウド構成](cloud-architecture.md)、学習は[4DGS](dynamic-gs-training.md)、接続状況は[現状](backend-status.md)を参照。
+2026-11-07の初期判断記録。現在の採用構成は[クラウド構成](../cloud-architecture.md)、学習は[4DGS](../dynamic-gs-training.md)、接続状況は[現状](../backend-status.md)を参照。
 
 ## 初期構成の提案
 
@@ -54,7 +54,7 @@ LocalDyGSの[VRU手順](https://github.com/WuJH2001/LocalDyGS#22-for-other-multi
 | 時系列・品質別資産 | 対応が定義できれば差分、未成立なら明示サンプル。品質ごとに独立復号 |
 | preview | 自由視点資産の準備中に表示する動画・画像 |
 
-HTTPオブジェクトを独立区間で取得・切替する。追加点だけで品質を上げる互換性は仮定しない。現在clipを優先し、次clipのpreview・先頭区間だけを限定先読み、離脱時に取得・復号を取消しGPU資源を解放する。[ABR調査](streaming-research.md)・[共通契約](streaming-contract.md)を参照。
+HTTPオブジェクトを独立区間で取得・切替する。追加点だけで品質を上げる互換性は仮定しない。現在clipを優先し、次clipのpreview・先頭区間だけを限定先読み、離脱時に取得・復号を取消しGPU資源を解放する。[ABR調査](streaming-research.md)・[共通契約](../streaming-contract.md)を参照。
 
 ## 同時視聴規模に必要な最適化
 
@@ -118,7 +118,7 @@ VRU gzの同一区間・評価視点・時刻・解像度で比較し、モデ�
 
 ## モノレポの構成案
 
-API、ML、端末描画、形式契約、infra、benchmarksを分離する構想。実際の配置は[製品README](../README.md#資料と開発)を参照。生データ・大型モデル・秘密情報をGitへ置かず、出典・hash・条件・設定を管理する。開発と最終提出の違いは[提出案内](submission.md)に集約する。
+API、ML、端末描画、形式契約、infra、benchmarksを分離する構想。実際の配置は[製品README](../../README.md#資料と開発)を参照。生データ・大型モデル・秘密情報をGitへ置かず、出典・hash・条件・設定を管理する。開発と最終提出の違いは[提出案内](../submission.md)に集約する。
 
 ## 次の段階の区切り
 

@@ -10,12 +10,12 @@
 
 | 機能 | 内容 |
 | --- | --- |
-| [見る](apps/web/README.md) | 動画フィード、検索・タグ・共有、自由視点・時間モデルの再生 |
-| [生成](docs/generation.md) | 運営・団体担当者向け3DGS/4DGS生成、担当者管理・入力割当・公開 |
-| [交流](docs/accounts.md) | ログインしていいね・コメント・自分のコメント削除 |
+| [見る](apps/web/README.md) | 縦型フィード、サムネイル付き検索結果・タグ・共有、自由視点・時間モデルの再生 |
+| [生成](docs/generation.md) | 運営・団体担当者向け3DGS/4DGS生成、進捗・ETA、入力割当・公開 |
+| [交流](docs/accounts.md) | いいね・声援・コメント、声援履歴、団体ページ・公開動画一覧・フォロー |
 | [LIVE](docs/cloud-live.md) | 多視点録画を到着順に学習し、Tokyo T4×1から8モデルを実CDN公開 |
 
-LIVEの継続30秒遅延は未達。実カメラ入力、実スマートフォン性能、大規模視聴、実GaussianのABR切替は未検証/未接続です。[実装と残る課題](docs/backend-status.md)
+LIVEの継続30秒遅延は未達。実カメラ入力、実スマートフォン性能、大規模視聴、実品質ラダーを使うABRの効果は未検証です。[実装と残る課題](docs/backend-status.md)
 
 ## はじめる
 
@@ -49,7 +49,7 @@ curl -i -H 'Range: bytes=0-15' http://127.0.0.1:8080/assets/demo/synthetic-v1/lo
 | `ml/` | 前処理・学習・packing |
 | [infra/gcp/](infra/gcp/README.md) | Terraform |
 | [共有fixture](testdata/contracts/v1/README.md) | Go/Python/JS/Dartのmedia契約、74件の合成入力 |
-| [docs/](docs/README.md) | 構成、仕様、運用、実測・初期案 |
+| [docs/](docs/README.md) | 現行の構成・仕様・運用・実測。初期案はarchive |
 
 開発正本は[Hosi121/rangle](https://github.com/Hosi121/rangle)（origin）。作業PR→stg→mainの手順は[開発ルール](CONTRIBUTING.md)、最終提出先と制約は[提出案内](docs/submission.md)を参照。実データ・重み・認証情報はGitへ追加しません。
 

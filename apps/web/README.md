@@ -101,7 +101,7 @@ viewerはGaussianSplats3D 0.4.7 / three 0.160.0（MIT）をlocal bundleしCDNに
 | frames | 非空splat URL配列。相対URLはmanifest最終URLから解決。各fileはその時刻の実Gaussian |
 | frameRate | 正の有限値。数/rateはmanifestに従い固定しない。2frame/25fpsは最終0.04秒、20frameは0.76秒 |
 | temporal | framesの代わりに `"frameCount": 20, "temporal": { "url": "model.rgs" }`。RGS1は一度受信し時間/視点を更新する。一般4DGS checkpointは直接読めない |
-| camera.referenceImageHeight | 任意64〜2160整数pixel。480×270学習なら270。drawing buffer高さを固定、幅は表示比率、CSS/縦画角/視点は維持。DPRと独立した描画条件で、高解像度ほど高画質の指定ではない。未指定はDPR。[比較](../../docs/gaussian-quality.md) |
+| camera.referenceImageHeight | 任意64〜2160整数pixel。480×270学習なら270。drawing buffer高さを固定、幅は表示比率、CSS/縦画角/視点は維持。DPRと独立した描画条件で、高解像度ほど高画質の指定ではない。未指定はDPR。[比較](../../docs/archive/gaussian-quality.md) |
 | camera.intrinsics | 任意pinhole `{ "width": 960, "height": 803, "fx": 915.1, "fy": 915.3, "cx": 476.4, "cy": 407.3 }`。左上原点、width/heightは校正寸法。fyから縦画角、fx/fy差・主点を反映。表示比変更は縦画角を保ち左右範囲を変更。未指定はfovYDegrees。補正/resize後のKを渡し、viewerは歪み補正しない |
 
 seekは直列で最新要求へ集約しorbit cameraを保持する。失敗時は動画/retryを残し、遅い旧応答で復活させない。clip ID/revision/URL変更・離脱で状態を破棄し、GS cacheはactive1clipに限定する。

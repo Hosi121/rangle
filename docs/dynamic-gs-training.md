@@ -11,7 +11,7 @@ position(t) = position + velocity * (t - centre_time)
 opacity(t) = sigmoid(peak_logit) * exp(-0.5 * ((t - centre_time) / sigma)^2)
 ```
 
-This independent RGB implementation uses gsplat 1.5.3 and the conditional 4D representation in [FreeTimeGS §3.1](https://arxiv.org/html/2506.05348v1), matching `temporal-material.js`. It does not reproduce the full paper or its quality/speed. The [UVG-GS study](gaussian-training.md) uses different data/supervision.
+This independent RGB implementation uses gsplat 1.5.3 and the conditional 4D representation in [FreeTimeGS §3.1](https://arxiv.org/html/2506.05348v1), matching `temporal-material.js`. It does not reproduce the full paper or its quality/speed. The [UVG-GS study](archive/gaussian-training.md) uses different data/supervision.
 
 Each step samples one time/training camera and jointly updates all fields. Separate Adam optimizers feed gsplat `DefaultStrategy`; split/duplicate/prune operations preserve alignment of temporal rows and optimizer moments.
 

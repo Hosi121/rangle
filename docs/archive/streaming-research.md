@@ -1,6 +1,6 @@
 # rangle ABRと配信最適化の調査
 
-2026-11-07の初期調査。ABRは次に取得する品質の選択で、圧縮・区間分割・cache・先読みと組み合わせる。実Gaussianへの接続状況は[現状](backend-status.md)、HTTP仕様は[API](api-delivery.md)を参照。
+2026-11-07の初期調査。ABRは次に取得する品質の選択で、圧縮・区間分割・cache・先読みと組み合わせる。実Gaussianへの接続状況は[現状](../backend-status.md)、HTTP仕様は[API](../api-delivery.md)を参照。
 
 ## 初期の選定
 
@@ -77,4 +77,4 @@ Go初期実装は復号時間・作業メモリをmetadata上の上限として�
 
 ## 今回の実装範囲
 
-[Goの基準契約](streaming-contract.md)に沿うABR・合成simulator・HTTP serverまで。実品質ラダー、取得中断/先読みclient、BOLA、HLS/DASH化、実端末性能の成立はこの初期調査に含めない。
+[Goの基準契約](../streaming-contract.md)に沿うABR・合成simulator・HTTP serverまで。実品質ラダー、取得中断/先読みclient、BOLA、HLS/DASH化、実端末性能の成立はこの初期調査に含めない。

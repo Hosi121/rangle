@@ -1,6 +1,6 @@
 # 初期インフラ構成案
 
-初回配備前の判断記録。現在は[クラウド構成](cloud-architecture.md)・[stg配備](stg-deployment.md)・[Terraform](../infra/gcp/README.md)を参照。設計目標の10万CCUは未検証（[#20](https://github.com/Hosi121/rangle/issues/20)）。
+初回配備前の判断記録。現在は[クラウド構成](../cloud-architecture.md)・[stg配備](../stg-deployment.md)・[Terraform](../../infra/gcp/README.md)を参照。設計目標の10万CCUは未検証（[#20](https://github.com/Hosi121/rangle/issues/20)）。
 
 ## 推奨する構成
 

@@ -30,7 +30,7 @@ PythonのLIVE入力は既に構築済みobject。raw構文だけのL05（escaped
 
 RGSの共通profileは学習出力window（2–32 frames）。汎用Go publication/JS viewerは15000 framesまで扱うが、Python trainer/generationの入力・出力制限を緩めない。このcorpusは未列挙の全JSON/全形式について完全な等価性を証明するものではない。
 
-Z1は従来の[単一gzip member契約](../../../../docs/rgs-gzip-contract.md)を実decoderでも強制する。R15–R38は、追加/反復member、NUL padding、非gzip余剰、CRC/ISIZE/FHCRC、optional header、予約flag、宣言長・wire上限を固定する。正しいoptional headerとdeflate内のmagic byte列は受理する。これは既知の実decoder差を直す追加coverageで、v1 corpusによる全RGS wireの完全等価性の証明ではない。独自Deflate parserは追加しない。
+Z1は従来の[単一gzip member契約](../../../docs/rgs-gzip-contract.md)を実decoderでも強制する。R15–R38は、追加/反復member、NUL padding、非gzip余剰、CRC/ISIZE/FHCRC、optional header、予約flag、宣言長・wire上限を固定する。正しいoptional headerとdeflate内のmagic byte列は受理する。これは既知の実decoder差を直す追加coverageで、v1 corpusによる全RGS wireの完全等価性の証明ではない。独自Deflate parserは追加しない。
 
 `python3 testdata/contracts/v1/generate_rgs_gzip.py`で新しい合成caseを再生成できる。既存R01を元にし、実画像・学習済みmodelは用いない。R36は32MiB+1のwireを各adapterで生成する。R30/R38は小さな圧縮入力で32MiB超の展開を表し、R38はISIZEも偽装して展開中の上限を通すことができないか確認する。
 

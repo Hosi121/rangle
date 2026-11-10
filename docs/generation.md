@@ -35,7 +35,7 @@ Vertex作成timeoutでは自動再作成せずjob labelで照合する。不明�
 
 ## 学習と結果
 
-入力と来歴は[共通前処理](dataset-preprocessing.md)、方式/制限は[静的学習](gaussian-training.md)・[4DGS](dynamic-gs-training.md)、profile/評価は[品質比較](training-quality.md)、保存形式/可逆圧縮は[連続再生](temporal-playback.md)・[圧縮比較](temporal-compression-comparison.md)を参照。
+入力と来歴は[共通前処理](dataset-preprocessing.md)、方式/制限は[学習コンテナ](../ml/container.md)・[4DGS](dynamic-gs-training.md)、profile/評価は[品質比較](training-quality.md)、保存形式/可逆圧縮は[連続再生](temporal-playback.md)・[圧縮比較](temporal-compression-comparison.md)を参照。
 
 GCSは新規作成限定、`scene.json`を最後に公開する。成功結果は共有リンクで自由視点表示し、所有者が確認してから明示掲載する。未掲載/取り下げ後も共有と第三者の交流を使える。[固定path・bytes/hash・出典検証](generated-publication.md)に従う。私的な実験環境はこの実行経路・資格情報・配信基盤へ接続しない。
 

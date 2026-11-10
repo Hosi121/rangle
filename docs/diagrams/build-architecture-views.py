@@ -252,6 +252,22 @@ body {padding:24px;}.page {max-width:none;}.head {max-width:1600px;}.lede {max-w
 """
 
 
+def diagram_css(template):
+    """Retain the group and edge styles used by the four diagrams."""
+    css = re.search(r"<style>(.*?)</style>", template, re.DOTALL).group(1)
+    css = re.sub(r"/\*.*?\*/", "", css, flags=re.DOTALL)
+    lines = []
+    for line in css.splitlines():
+        group_style = re.match(r"\s*\.group\.([\w-]+)", line)
+        edge_style = re.match(r"\s*path\.([\w-]+)", line)
+        if group_style and group_style[1] not in {"gcp", "gb"}:
+            continue
+        if edge_style and edge_style[1] not in {"e", "n", "telemetry"}:
+            continue
+        lines.append(line.rstrip())
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tool-root", type=Path, required=True)
@@ -266,7 +282,7 @@ def main():
         parser.error(f"stack-diagram must be pinned to {PIN}")
     skill = args.tool_root / "skills/stack-diagram"
     template = (skill / "assets/template.html").read_text()
-    css = re.search(r"<style>(.*?)</style>", template, re.DOTALL).group(1)
+    css = diagram_css(template)
     notices = html.escape(
         (Path(__file__).parent / "THIRD-PARTY-NOTICES.txt").read_text()
     )
