@@ -89,7 +89,8 @@ def generation_remote(item):
     if any(arg == '-generation-manager-url' or arg.startswith('-generation-manager-url=') for arg in args):
         if argument(args, '-generation-manager-url') != MANAGER_URL or any(
             arg.split('=', 1)[0] in {'-generation-config', '-generation-sync-audience', '-generation-manager',
-                                     '-generation-manager-audience', '-generation-caller-service-account'} for arg in args
+                                     '-generation-manager-audience', '-generation-caller-service-account',
+                                     '-generation-cleanup-url-map'} for arg in args
         ):
             raise ValueError('Remote generation requires only the canonical manager URL on the public service.')
         if argument(args, '-firestore-project') != 'comin-up' or argument(args, '-firestore-database') != 'rangle-stg':
@@ -152,7 +153,7 @@ def manager_identity(document, revision=None, expected_catalog=None):
     spec = document.get('spec', {}) if revision else document.get('spec', {}).get('template', {}).get('spec', {})
     args = arguments(item)
     paired = {'-listen', '-catalog', '-generation-config', '-generation-manager-audience',
-              '-generation-caller-service-account', '-generation-sync-audience'}
+              '-generation-caller-service-account', '-generation-sync-audience', '-generation-cleanup-url-map'}
     values = {}
     index = 0
     while index < len(args):
@@ -175,6 +176,7 @@ def manager_identity(document, revision=None, expected_catalog=None):
             values.get('-generation-manager-audience') != MANAGER_URL or
             values.get('-generation-caller-service-account') != RUNTIME_SA or
             values.get('-generation-sync-audience') not in (None, MANAGER_URL) or
+            values.get('-generation-cleanup-url-map') not in (None, 'rangle-stg-https') or
             values.get('-listen', '0.0.0.0:8080') != '0.0.0.0:8080' or
             expected_catalog is not None and catalog.group(1) != expected_catalog):
         raise ValueError('Manager identity, immutable image, catalog or bounded configuration does not match the contract.')

@@ -24,6 +24,8 @@ manager昇格後に公開候補・公開後検証・receipt保存・tag cleanup�
 
 manager用ID tokenはbuild後にWIFで発行し、audienceを `https://rangle-stg-generation-113704194486.asia-northeast1.run.app` に固定する。email claimを含め、script内でexportを解除し、curlへstdin headerで渡す。argv・子process環境・ログ・receiptへ含めない。deployerはmanager invoke・image/traffic更新を持つが、managerの独立したidentity検証は業務API利用を拒否する。CIはIAM/network/DBを変更しない。
 
+managerの削除設定は `-generation-cleanup-url-map rangle-stg-https` だけを許可し、公開runtimeには渡さない。IaCでargsを変更しても既存trafficは維持するため、候補の起動確認と明示昇格、または次のCDで有効にする。初回のcustom role作成後、GCSへの権限付与が反映待ちで失敗した場合は同じ限定権限で再plan・適用する。
+
 初回bootstrapに限り、公開templateがlegacy `-generation-config` を持ちremote flagを持たなければmanager配備をskipできる。その後writersを凍結し、IaCと[台帳移行](security-generation-migration.md)を完了してremote構成で再実行する。remoteからlegacyへの自動fallbackはしない。
 
 候補・公開probeは次を照合する。
