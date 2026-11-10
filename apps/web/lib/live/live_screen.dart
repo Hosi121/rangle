@@ -9,6 +9,7 @@ import '../viewer/playback_controller.dart';
 import '../widgets/preview_viewer.dart';
 import '../widgets/rangle_header.dart';
 import '../widgets/viewer_modal.dart';
+import '../widgets/viewer_viewport.dart';
 import 'live_api.dart';
 import 'live_controller.dart';
 
@@ -136,47 +137,52 @@ class _LiveScreenState extends State<LiveScreen> with WidgetsBindingObserver {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: Colors.black,
-    // Keep navigation outside the HTML viewer's bounds so it stays reachable
-    // while the viewer is loading, failed, or handling pointer gestures.
-    appBar: PreferredSize(
-      preferredSize: const Size.fromHeight(64),
-      child: PointerInterceptor(
-        child: RangleHeader(
-          title: 'LIVE',
-          onBack: widget.onBack,
-          backLabel: widget.backLabel,
-          actions: [
-            if (_controller?.selectedId != null)
-              IconButton(
-                tooltip: 'LIVE一覧',
-                onPressed: () => _select(null),
-                icon: const Icon(Icons.list),
+  Widget build(BuildContext context) => ViewerViewport(
+    child: Scaffold(
+      backgroundColor: Colors.black,
+      // Keep navigation outside the HTML viewer's bounds so it stays reachable
+      // while the viewer is loading, failed, or handling pointer gestures.
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(64),
+        child: PointerInterceptor(
+          child: RangleHeader(
+            title: 'LIVE',
+            onBack: widget.onBack,
+            backLabel: widget.backLabel,
+            actions: [
+              if (_controller?.selectedId != null)
+                IconButton(
+                  tooltip: 'LIVE一覧',
+                  onPressed: () => _select(null),
+                  icon: const Icon(Icons.list),
+                ),
+            ],
+          ),
+        ),
+      ),
+      body: SafeArea(
+        top: false,
+        child: Column(
+          children: [
+            Expanded(
+              child: _controller == null
+                  ? const ViewerMessage(
+                      icon: Icons.cloud_off,
+                      title: 'LIVEに接続できません',
+                      description: '接続先または配信URLを確認してください。',
+                    )
+                  : ListenableBuilder(
+                      listenable: _controller!,
+                      builder: (context, _) => _content(),
+                    ),
+            ),
+            if (widget.jobStatus != null)
+              Material(
+                color: const Color(0xFF191614),
+                child: widget.jobStatus!,
               ),
           ],
         ),
-      ),
-    ),
-    body: SafeArea(
-      top: false,
-      child: Column(
-        children: [
-          Expanded(
-            child: _controller == null
-                ? const ViewerMessage(
-                    icon: Icons.cloud_off,
-                    title: 'LIVEに接続できません',
-                    description: '接続先または配信URLを確認してください。',
-                  )
-                : ListenableBuilder(
-                    listenable: _controller!,
-                    builder: (context, _) => _content(),
-                  ),
-          ),
-          if (widget.jobStatus != null)
-            Material(color: const Color(0xFF191614), child: widget.jobStatus!),
-        ],
       ),
     ),
   );
