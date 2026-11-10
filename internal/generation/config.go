@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/Hosi121/rangle/internal/sports"
 )
 
 const (
@@ -21,18 +23,19 @@ const (
 )
 
 type Preset struct {
-	ID                  string `json:"id"`
-	QualityProfile      string `json:"quality_profile,omitempty"`
-	EvaluateCompression bool   `json:"evaluate_compression,omitempty"`
-	Mode                string `json:"mode,omitempty"`
-	Title               string `json:"title"`
-	Sport               string `json:"sport"`
-	Description         string `json:"description"`
-	InputURI            string `json:"input_uri"`
-	InputSHA256         string `json:"input_sha256"`
-	PreviewURL          string `json:"preview_url"`
-	Source              string `json:"source"`
-	License             string `json:"license"`
+	Context             *sports.Context `json:"context,omitempty" firestore:"context,omitempty"`
+	ID                  string          `json:"id"`
+	QualityProfile      string          `json:"quality_profile,omitempty"`
+	EvaluateCompression bool            `json:"evaluate_compression,omitempty"`
+	Mode                string          `json:"mode,omitempty"`
+	Title               string          `json:"title"`
+	Sport               string          `json:"sport"`
+	Description         string          `json:"description"`
+	InputURI            string          `json:"input_uri"`
+	InputSHA256         string          `json:"input_sha256"`
+	PreviewURL          string          `json:"preview_url"`
+	Source              string          `json:"source"`
+	License             string          `json:"license"`
 }
 
 // ModeName keeps immutable presets written before temporal training compatible.
@@ -115,6 +118,13 @@ func (c Config) Validate() error {
 	if len(c.Presets) < 1 || len(c.Presets) > 10 {
 		return fmt.Errorf("generation requires one to ten reviewed presets")
 	}
+	contexts := make([]*sports.Context, len(c.Presets))
+	for i, p := range c.Presets {
+		contexts[i] = p.Context
+	}
+	if err := sports.ValidateCollection(contexts); err != nil {
+		return fmt.Errorf("generation context: %w", err)
+	}
 	seen := map[string]bool{}
 	for _, p := range c.Presets {
 		if !p.validProfile() || p.EvaluateCompression && p.ModeName() != "dynamic" {
@@ -154,6 +164,7 @@ func httpsURL(value string) bool {
 func (c Config) preset(id string) (Preset, bool) {
 	for _, p := range c.Presets {
 		if p.ID == id {
+			p.Context = p.Context.Clone()
 			return p, true
 		}
 	}

@@ -20,6 +20,9 @@ var generatedID = regexp.MustCompile(`^generated-[a-f0-9]{32}$`)
 // strict transport manifests required by Load. A scene is not a transport
 // manifest and must never be advertised as one.
 func (c PublicClip) ValidateGenerated() error {
+	if err := c.Context.Validate(); err != nil {
+		return err
+	}
 	if !generatedID.MatchString(c.ID) || c.Revision != strings.TrimPrefix(c.ID, "generated-") ||
 		c.Codec != "" || c.ManifestURL != "" || strings.TrimSpace(c.Title) == "" || len(c.Title) > 256 ||
 		strings.TrimSpace(c.Sport) == "" || len(c.Sport) > 128 || len(c.Description) > 4096 ||

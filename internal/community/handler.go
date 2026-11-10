@@ -339,7 +339,8 @@ func (h *Handler) AccountUser(r *http.Request) (*User, error) {
 	return &a.User, nil
 }
 
-// AdminUser authorizes management operations using the current stored role.
+// AdminUser is the legacy authorization entry point for rangle operators.
+// It refreshes the stored platform role and never authorizes organization staff.
 func (h *Handler) AdminUser(r *http.Request) (*User, error) {
 	user, err := h.AccountUser(r)
 	if err == nil && user != nil && !user.Admin {

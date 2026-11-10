@@ -12,22 +12,25 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Hosi121/rangle/internal/sports"
 )
 
 const feedPath = "/api/v1/clips"
 const catalogSHAHeader = "X-Rangle-Catalog-SHA256"
 
 type PublicClip struct {
-	ID          string   `json:"id"`
-	Revision    string   `json:"revision"`
-	Title       string   `json:"title"`
-	Sport       string   `json:"sport"`
-	Description string   `json:"description"`
-	Tags        []string `json:"tags,omitempty"`
-	Codec       string   `json:"codec,omitempty"`
-	ManifestURL string   `json:"manifest_url,omitempty"`
-	PreviewURL  string   `json:"preview_url,omitempty"`
-	SceneURL    string   `json:"scene_url,omitempty"`
+	Context     *sports.Context `json:"context,omitempty" firestore:"context,omitempty"`
+	ID          string          `json:"id"`
+	Revision    string          `json:"revision"`
+	Title       string          `json:"title"`
+	Sport       string          `json:"sport"`
+	Description string          `json:"description"`
+	Tags        []string        `json:"tags,omitempty"`
+	Codec       string          `json:"codec,omitempty"`
+	ManifestURL string          `json:"manifest_url,omitempty"`
+	PreviewURL  string          `json:"preview_url,omitempty"`
+	SceneURL    string          `json:"scene_url,omitempty"`
 }
 
 type clipView = PublicClip
@@ -81,7 +84,7 @@ func NewHandler(c *Catalog, assetOrigin string) (http.Handler, error) {
 			Title: entry.Title, Sport: entry.Sport, Description: entry.Description,
 			Codec: entry.Manifest.Codec, ManifestURL: resolve(entry.Manifest.URL()),
 			PreviewURL: resolve(entry.PreviewURL), SceneURL: resolve(entry.SceneURL),
-			Tags: tags,
+			Tags: tags, Context: entry.Context,
 		}
 		data, err := json.Marshal(view)
 		if err != nil {

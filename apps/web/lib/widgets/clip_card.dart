@@ -18,6 +18,7 @@ import '../viewer/playback_controller.dart';
 import '../viewer/viewer_adapter.dart';
 import 'cheer_seek_bar.dart';
 import 'feed_sheet.dart';
+import 'sports_context_details.dart';
 import 'immersive_effect.dart';
 import 'preview_viewer.dart';
 
@@ -31,6 +32,7 @@ class ClipCard extends StatefulWidget {
     this.onNext,
     this.account,
     this.onTag,
+    this.onQuery,
     this.shareAction = shareClip,
     this.initialFreeView = false,
     super.key,
@@ -42,6 +44,7 @@ class ClipCard extends StatefulWidget {
   final VoidCallback? onNext;
   final AccountController? account;
   final ValueChanged<String>? onTag;
+  final ValueChanged<String>? onQuery;
   final ClipShareAction shareAction;
   @override
   State<ClipCard> createState() => _ClipCardState();
@@ -431,6 +434,16 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
           ),
           const SizedBox(height: 12),
           SelectableText(clip.description, semanticsLabel: clip.description),
+          if (clip.context case final details?)
+            SportsContextDetails(
+              context: details,
+              onSearch: widget.onQuery == null
+                  ? null
+                  : (query) {
+                      Navigator.pop(context);
+                      widget.onQuery!(query);
+                    },
+            ),
           TextButton.icon(
             onPressed: () {
               Navigator.pop(context);

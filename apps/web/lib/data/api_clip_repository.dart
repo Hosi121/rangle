@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/clip.dart';
+import '../models/sports_context.dart';
 import '../viewer/playback_state.dart';
 import 'clip_repository.dart';
 
@@ -168,6 +169,11 @@ class ApiClipRepository
               ? const PreviewSceneMapping()
               : null,
           tags: tags(row['tags']),
+          context: row['context'] == null
+              ? null
+              : row['context'] is Map<String, dynamic>
+              ? SportsContext.fromJson(row['context'] as Map<String, dynamic>)
+              : throw const FormatException('Invalid sporting context.'),
         );
       }
 

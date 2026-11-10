@@ -1,0 +1,11 @@
+{
+  "publisher": {"id": "example-sports", "name": "Example Sports", "kind": "company"},
+  "event": {
+    "id": "sample-final", "name": "サンプルカップ決勝", "kind": "match",
+    "competition": {"id": "sample-cup", "name": "サンプルカップ"},
+    "starts_at": "2026-11-14T15:00:00+09:00",
+    "venue": {"id": "sample-arena", "name": "例示体育館", "city": "東京"},
+    "teams": [{"id": "sample-a", "name": "サンプルA"}, {"id": "sample-b", "name": "サンプルB"}]
+  },
+  "athletes": [{"id": "sample-player", "name": "サンプル選手"}]
+}

@@ -14,6 +14,8 @@ var (
 	ErrForbidden = errors.New("forbidden")
 )
 
+// User is a personal viewing identity. The legacy Admin flag identifies a
+// rangle platform operator; organization staff have separate account-local IDs.
 type User struct {
 	ID    string `json:"id" firestore:"id"`
 	Name  string `json:"name" firestore:"name"`

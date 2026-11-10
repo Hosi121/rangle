@@ -47,7 +47,8 @@ func publicClip(job Job, origin string) catalog.PublicClip {
 		model = "4DGS"
 	}
 	return catalog.PublicClip{
-		ID: "generated-" + job.ID, Revision: job.ID, Title: p.Title + "（生成した" + model + "）", Sport: p.Sport,
+		Context: p.Context.Clone(),
+		ID:      "generated-" + job.ID, Revision: job.ID, Title: p.Title + "（生成した" + model + "）", Sport: p.Sport,
 		Description: p.Description + "\n" + p.Source + " / " + p.License,
 		Tags:        catalog.GeneratedTags(p.Sport, model), PreviewURL: p.PreviewURL,
 		SceneURL: origin + "/generated/" + job.ID + "/scene.json",
