@@ -5,12 +5,14 @@ import '../widgets/viewer_modal.dart';
 import 'account_controller.dart';
 import 'community_api.dart';
 import 'cheer_history_dialog.dart';
+import '../publishers/subscriptions_dialog.dart';
 
 Future<bool> showAccountDialog(
   BuildContext context,
   AccountController? account, {
   ValueChanged<String>? onOpenClip,
   VoidCallback? onOpenPublisher,
+  ValueChanged<String>? onViewPublisher,
 }) async {
   if (account == null) {
     ScaffoldMessenger.of(context)
@@ -23,6 +25,7 @@ Future<bool> showAccountDialog(
       account: account,
       onOpenClip: onOpenClip,
       onOpenPublisher: onOpenPublisher,
+      onViewPublisher: onViewPublisher,
     ),
   );
   return account.user != null;
@@ -33,9 +36,11 @@ class _AccountDialog extends StatefulWidget {
     required this.account,
     this.onOpenClip,
     this.onOpenPublisher,
+    this.onViewPublisher,
   });
   final ValueChanged<String>? onOpenClip;
   final VoidCallback? onOpenPublisher;
+  final ValueChanged<String>? onViewPublisher;
   final AccountController account;
   @override
   State<_AccountDialog> createState() => _AccountDialogState();
@@ -119,6 +124,27 @@ class _AccountDialogState extends State<_AccountDialog> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   Text('@${user.id}'),
+                  if (widget.onViewPublisher != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.groups_outlined),
+                      title: const Text('フォロー中の団体'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () async {
+                        final owner = widget.account.user?.id;
+                        final publisher = await showPublisherSubscriptions(
+                          context,
+                          widget.account,
+                        );
+                        if (!context.mounted ||
+                            publisher == null ||
+                            widget.account.user?.id != owner) {
+                          return;
+                        }
+                        Navigator.pop(context);
+                        widget.onViewPublisher!(publisher);
+                      },
+                    ),
                   if (widget.onOpenClip != null)
                     ListTile(
                       contentPadding: EdgeInsets.zero,

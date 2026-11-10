@@ -5,9 +5,15 @@ import 'package:flutter/material.dart';
 import '../models/sports_context.dart';
 
 class SportsContextDetails extends StatelessWidget {
-  const SportsContextDetails({required this.context, this.onSearch, super.key});
+  const SportsContextDetails({
+    required this.context,
+    this.onSearch,
+    this.onViewPublisher,
+    super.key,
+  });
   final SportsContext context;
   final ValueChanged<String>? onSearch;
+  final ValueChanged<String>? onViewPublisher;
   @override
   Widget build(BuildContext context) {
     Widget row(String label, String name) {
@@ -29,7 +35,15 @@ class SportsContextDetails extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (this.context.publisher case final publisher?)
-          row('投稿者', publisher.name),
+          onViewPublisher == null
+              ? row('投稿者', publisher.name)
+              : ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(publisher.name),
+                  subtitle: const Text('投稿者'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => onViewPublisher!(publisher.id),
+                ),
         if (event != null) ...[
           row(switch (event.kind) {
             'match' => '試合',

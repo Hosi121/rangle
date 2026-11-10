@@ -24,6 +24,7 @@ void main() {
       initialClipId: Uri.base.queryParameters['clip'],
       initialGeneration: Uri.base.queryParameters['generate'] == '1',
       initialPublisher: Uri.base.queryParameters['publisher'] == '1',
+      initialPublicPublisherId: Uri.base.queryParameters['organization'],
       repository: config.createClipRepository(),
     ),
   );
@@ -39,6 +40,7 @@ class RangleApp extends StatelessWidget {
     this.generation,
     this.initialGeneration = false,
     this.initialPublisher = false,
+    this.initialPublicPublisherId,
     this.publisher,
     this.initialClipId,
     this.live,
@@ -54,6 +56,7 @@ class RangleApp extends StatelessWidget {
   final GenerationApi? generation;
   final bool initialGeneration;
   final bool initialPublisher;
+  final String? initialPublicPublisherId;
   final PublisherApi? publisher;
   final String? initialClipId;
   final LiveApi? live;
@@ -112,6 +115,7 @@ class RangleApp extends StatelessWidget {
         generation: generation,
         initialGeneration: initialGeneration,
         initialPublisher: initialPublisher,
+        initialPublicPublisherId: initialPublicPublisherId,
         publisher: publisher,
         initialClipId: initialClipId,
         live: live,
