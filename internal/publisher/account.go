@@ -88,19 +88,25 @@ const (
 	RequestDeletion  Permission = "account.deletion.request"
 )
 
-// Allows defines the proposed organization RBAC policy. HTTP/storage wiring is
-// pending; current management APIs still require a rangle platform operator.
+// Allows authenticates the account/staff relationship and resolves organization
+// RBAC. The caller must refresh the owning account and staff from trusted data.
 // The account receiver must be the resource's owning account from trusted data.
 func (a Account) Allows(actor StaffPrincipal, staff StaffAccount, permission Permission) bool {
 	if a.Validate() != nil || a.Status != Active || actor.PublisherAccountID != a.ID || staff.PublisherAccountID != a.ID ||
 		actor.StaffAccountID != staff.ID || !accountID.MatchString(string(staff.ID)) || !staffUsername.MatchString(staff.Username) || staff.Disabled {
 		return false
 	}
+	return staff.Role.Allows(permission)
+}
+
+// Allows resolves only the role-to-permission matrix, without authenticating
+// the caller or replacing account/staff lifecycle checks.
+func (role Role) Allows(permission Permission) bool {
 	switch permission {
 	case ReadPresets, CreateGeneration, ReadGeneration, CancelGeneration, PublishClip, WithdrawClip:
-		return staff.Role == Administrator || staff.Role == Editor
+		return role == Administrator || role == Editor
 	case ManageStaff, RequestDeletion:
-		return staff.Role == Administrator
+		return role == Administrator
 	default:
 		return false
 	}

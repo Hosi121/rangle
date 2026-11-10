@@ -94,12 +94,20 @@ func (s *FirestoreStore) Active(ctx context.Context) (*Job, error) {
 }
 
 func (s *FirestoreStore) Admit(ctx context.Context, owner string, preset Preset, nonce string, maximum int, now time.Time) (job Job, created bool, err error) {
+	return s.AdmitScoped(ctx, OperatorPrincipal(owner), preset, nonce, maximum, now)
+}
+
+func (s *FirestoreStore) AdmitScoped(ctx context.Context, p Principal, preset Preset, nonce string, maximum int, now time.Time) (job Job, created bool, err error) {
+	if !p.valid() || !p.permitsPreset(preset) {
+		return Job{}, false, ErrInvalid
+	}
+	owner := p.ownerKey()
 	ref := s.jobs().Doc(requestJobID(owner, nonce))
 	err = s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		created = false
 		old, err := decodeJob(tx.Get(ref))
 		if err == nil {
-			if old.Owner != owner || old.Preset != preset.ID {
+			if !p.owns(old) || old.Preset != preset.ID {
 				return ErrConflict
 			}
 			job = old
@@ -123,7 +131,7 @@ func (s *FirestoreStore) Admit(ctx context.Context, owner string, preset Preset,
 		if a.Active != "" {
 			return ErrBusy
 		}
-		job = Job{ID: ref.ID, Owner: owner, Preset: preset.ID, Snapshot: preset, State: Submitting, CreatedAt: now, UpdatedAt: now}
+		job = Job{ID: ref.ID, Owner: owner, PublisherAccountID: p.accountID(), CreatedBy: p.actor(), Preset: preset.ID, Snapshot: preset, State: Submitting, CreatedAt: now, UpdatedAt: now}
 		if err := tx.Create(ref, job); err != nil {
 			return err
 		}
@@ -168,7 +176,7 @@ func (s *FirestoreStore) Transition(ctx context.Context, id, name string, state 
 			return err
 		}
 		result, err = nextJob(old, name, state, now)
-		if err != nil || result == old {
+		if err != nil || result.State == old.State && result.ProviderName == old.ProviderName && result.UpdatedAt.Equal(old.UpdatedAt) {
 			return err
 		}
 		var a admission

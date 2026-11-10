@@ -3,9 +3,12 @@ package generation
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"time"
+
+	"github.com/Hosi121/rangle/internal/publisher"
 )
 
 type Service struct {
@@ -26,12 +29,17 @@ func (s *Service) now() time.Time {
 }
 
 func (s *Service) Create(ctx context.Context, owner, presetID, nonce string) (Job, error) {
-	if owner == "" || !requestID.MatchString(nonce) {
+	return s.CreateFor(ctx, OperatorPrincipal(owner), presetID, nonce)
+}
+
+func (s *Service) CreateFor(ctx context.Context, principal Principal, presetID, nonce string) (Job, error) {
+	if !principal.allows(publisher.CreateGeneration) || !requestID.MatchString(nonce) {
 		return Job{}, ErrInvalid
 	}
+	owner := principal.ownerKey()
 	id := requestJobID(owner, nonce)
 	if existing, err := s.Store.Get(ctx, id); err == nil {
-		if existing.Preset != presetID {
+		if !principal.owns(existing) || existing.Preset != presetID {
 			return Job{}, ErrConflict
 		}
 		return s.refresh(ctx, existing)
@@ -39,7 +47,7 @@ func (s *Service) Create(ctx context.Context, owner, presetID, nonce string) (Jo
 		return Job{}, err
 	}
 	preset, ok := s.Config.preset(presetID)
-	if !ok {
+	if !ok || !principal.permitsPreset(preset) {
 		return Job{}, ErrInvalid
 	}
 	if !s.now().Add(MaxRuntime + time.Minute).Before(s.Config.Deadline) {
@@ -52,7 +60,17 @@ func (s *Service) Create(ctx context.Context, owner, presetID, nonce string) (Jo
 			return Job{}, err
 		}
 	}
-	job, created, err := s.Store.Admit(ctx, owner, preset, nonce, s.Config.Attempts, s.now())
+	preset = principal.snapshot(preset)
+	var job Job
+	var created bool
+	var err error
+	if scoped, ok := s.Store.(ScopedAdmission); ok {
+		job, created, err = scoped.AdmitScoped(ctx, principal, preset, nonce, s.Config.Attempts, s.now())
+	} else if principal.Kind == "operator" {
+		job, created, err = s.Store.Admit(ctx, owner, preset, nonce, s.Config.Attempts, s.now())
+	} else {
+		return Job{}, fmt.Errorf("scoped admission unavailable")
+	}
 	if err != nil {
 		return Job{}, err
 	}
@@ -60,7 +78,7 @@ func (s *Service) Create(ctx context.Context, owner, presetID, nonce string) (Jo
 		return s.refresh(ctx, job)
 	}
 	if s.Logger != nil {
-		s.Logger.InfoContext(ctx, "generation job admitted", "job_id", job.ID, "preset_id", preset.ID, "deadline", job.CreatedAt.Add(MaxRuntime))
+		s.Logger.InfoContext(ctx, "generation job admitted", "job_id", job.ID, "preset_id", preset.ID, "publisher_account_id", job.PublisherAccountID, "actor_kind", principal.Kind, "actor_id", principal.ID, "deadline", job.CreatedAt.Add(MaxRuntime))
 	}
 	name, err := s.Provider.Submit(ctx, job, preset)
 	if err != nil {
@@ -82,18 +100,44 @@ func (s *Service) Create(ctx context.Context, owner, presetID, nonce string) (Jo
 }
 
 func (s *Service) Get(ctx context.Context, owner, id string) (Job, error) {
+	return s.GetFor(ctx, OperatorPrincipal(owner), id)
+}
+func (s *Service) GetFor(ctx context.Context, p Principal, id string) (Job, error) {
+	if !p.allows(publisher.ReadGeneration) {
+		return Job{}, ErrPublisherForbidden
+	}
 	job, err := s.Store.Get(ctx, id)
 	if err != nil {
 		return Job{}, err
 	}
-	if job.Owner != owner {
+	if !p.owns(job) {
 		return Job{}, ErrNotFound
 	}
 	return s.refresh(ctx, job)
 }
-
+func (s *Service) ListFor(ctx context.Context, p Principal) ([]Job, error) {
+	if !p.allows(publisher.ReadGeneration) {
+		return nil, ErrPublisherForbidden
+	}
+	rows, err := s.Store.List(ctx, p.ownerKey())
+	if err != nil {
+		return nil, err
+	}
+	for _, job := range rows {
+		if !p.owns(job) {
+			return nil, fmt.Errorf("invalid generation ownership index")
+		}
+	}
+	return rows, nil
+}
 func (s *Service) Cancel(ctx context.Context, owner, id string) (Job, error) {
-	job, err := s.Get(ctx, owner, id)
+	return s.CancelFor(ctx, OperatorPrincipal(owner), id)
+}
+func (s *Service) CancelFor(ctx context.Context, p Principal, id string) (Job, error) {
+	if !p.allows(publisher.CancelGeneration) {
+		return Job{}, ErrPublisherForbidden
+	}
+	job, err := s.GetFor(ctx, p, id)
 	if err != nil || job.State.Terminal() || job.State == Cancelling {
 		return job, err
 	}
@@ -102,6 +146,9 @@ func (s *Service) Cancel(ctx context.Context, owner, id string) (Job, error) {
 	}
 	if err := s.Provider.Cancel(ctx, job.ProviderName); err != nil {
 		return Job{}, err
+	}
+	if s.Logger != nil {
+		s.Logger.InfoContext(ctx, "generation cancellation requested", "job_id", id, "publisher_account_id", job.PublisherAccountID, "actor_kind", p.Kind, "actor_id", p.ID)
 	}
 	return s.Store.Transition(ctx, job.ID, job.ProviderName, Cancelling, s.now())
 }

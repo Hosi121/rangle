@@ -19,11 +19,18 @@ type memoryStore struct {
 
 func newMemory() *memoryStore { return &memoryStore{jobs: map[string]Job{}} }
 func (m *memoryStore) Admit(_ context.Context, owner string, preset Preset, nonce string, maximum int, now time.Time) (Job, bool, error) {
+	return m.AdmitScoped(context.Background(), OperatorPrincipal(owner), preset, nonce, maximum, now)
+}
+func (m *memoryStore) AdmitScoped(_ context.Context, p Principal, preset Preset, nonce string, maximum int, now time.Time) (Job, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	if !p.valid() || !p.permitsPreset(preset) {
+		return Job{}, false, ErrInvalid
+	}
+	owner := p.ownerKey()
 	id := requestJobID(owner, nonce)
 	if old, ok := m.jobs[id]; ok {
-		if old.Preset != preset.ID {
+		if !p.owns(old) || old.Preset != preset.ID {
 			return Job{}, false, ErrConflict
 		}
 		return old, false, nil
@@ -34,7 +41,7 @@ func (m *memoryStore) Admit(_ context.Context, owner string, preset Preset, nonc
 	if m.a.Active != "" {
 		return Job{}, false, ErrBusy
 	}
-	job := Job{ID: id, Owner: owner, Preset: preset.ID, Snapshot: preset, State: Submitting, CreatedAt: now, UpdatedAt: now}
+	job := Job{ID: id, Owner: owner, PublisherAccountID: p.accountID(), CreatedBy: p.actor(), Preset: preset.ID, Snapshot: preset, State: Submitting, CreatedAt: now, UpdatedAt: now}
 	m.jobs[id] = job
 	m.a.Used++
 	m.a.Active = id

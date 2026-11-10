@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hosi121/rangle/internal/publisher"
 	"github.com/Hosi121/rangle/internal/sports"
 )
 
@@ -23,6 +24,7 @@ const (
 )
 
 type Preset struct {
+	PublisherAccounts   []publisher.ID  `json:"publisher_accounts,omitempty"`
 	Context             *sports.Context `json:"context,omitempty" firestore:"context,omitempty"`
 	ID                  string          `json:"id"`
 	QualityProfile      string          `json:"quality_profile,omitempty"`
@@ -145,6 +147,16 @@ func (c Config) Validate() error {
 		if !identifier.MatchString(p.ID) || seen[p.ID] || p.Title == "" || p.Sport == "" || p.Description == "" || p.License != "CC BY 4.0" || !httpsURL(p.Source) || !httpsURL(p.PreviewURL) || !checksum.MatchString(p.InputSHA256) || !validInput {
 			return fmt.Errorf("generation preset %q must have reviewed CC BY 4.0 provenance and a checksummed dataset bundle", p.ID)
 		}
+		if len(p.PublisherAccounts) > 100 {
+			return fmt.Errorf("too many preset publisher grants")
+		}
+		grants := map[publisher.ID]bool{}
+		for _, id := range p.PublisherAccounts {
+			if !id.Valid() || grants[id] {
+				return fmt.Errorf("invalid preset publisher grant")
+			}
+			grants[id] = true
+		}
 		seen[p.ID] = true
 	}
 	return nil
@@ -165,6 +177,7 @@ func (c Config) preset(id string) (Preset, bool) {
 	for _, p := range c.Presets {
 		if p.ID == id {
 			p.Context = p.Context.Clone()
+			p.PublisherAccounts = append([]publisher.ID(nil), p.PublisherAccounts...)
 			return p, true
 		}
 	}
