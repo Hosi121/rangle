@@ -61,7 +61,7 @@ func publisherAuthority(auth func(*http.Request) (Principal, error)) func(*http.
 	}
 }
 
-func newPrincipalHandler(service *Service, auth func(*http.Request) (Principal, error), prefix string) (*Handler, error) {
+func newHandlerBase(service *Service, auth func(*http.Request) (Principal, error)) (*Handler, error) {
 	if service == nil || auth == nil {
 		return nil, ErrInvalid
 	}
@@ -71,7 +71,14 @@ func newPrincipalHandler(service *Service, auth func(*http.Request) (Principal, 
 	if service.Store == nil || service.Provider == nil {
 		return nil, ErrInvalid
 	}
-	h := &Handler{service: service, principal: auth, limiter: rate.NewLimiter(rate.Every(time.Second), 4)}
+	return &Handler{service: service, principal: auth, limiter: rate.NewLimiter(rate.Every(time.Second), 4)}, nil
+}
+
+func newPrincipalHandler(service *Service, auth func(*http.Request) (Principal, error), prefix string) (*Handler, error) {
+	h, err := newHandlerBase(service, auth)
+	if err != nil {
+		return nil, err
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET "+prefix+"/presets", h.presets)
 	mux.HandleFunc("POST "+prefix+"/jobs", h.create)
@@ -158,10 +165,14 @@ func (h *Handler) presets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows := make([]map[string]string, 0, len(h.service.Config.Presets))
-	for _, p := range h.service.Config.Presets {
-		if !principal.permitsPreset(p) {
-			continue
-		}
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	presets, err := h.service.PresetsFor(ctx, principal)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	for _, p := range presets {
 		rows = append(rows, map[string]string{"id": p.ID, "mode": p.ModeName(), "title": p.Title, "sport": p.Sport, "description": p.Description, "source": p.Source, "license": p.License})
 	}
 	h.write(w, r, 200, map[string]any{"available": true, "presets": rows, "limits": map[string]any{"concurrent_jobs": 1, "runtime_seconds": int(MaxRuntime / time.Second), "attempts": h.service.Config.Attempts}})
