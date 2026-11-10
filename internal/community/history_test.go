@@ -168,3 +168,30 @@ func TestHistoryDoesNotHideStorageFailure(t *testing.T) {
 		t.Fatal("history failure presented as empty", r.StatusCode, string(data))
 	}
 }
+
+func TestCheerResolvesEligibilityAndLabelsOnce(t *testing.T) {
+	store := NewMemoryStore()
+	reads := 0
+	h := NewHandler(Config{Store: store,
+		DescribeClip: func(context.Context, string) (HistoryClip, error) {
+			reads++
+			return HistoryClip{ID: "basketball", Title: "Reviewed highlight", Sport: "basketball"}, nil
+		},
+		ClipExists: func(context.Context, string) (bool, error) {
+			t.Fatal("duplicate eligibility lookup")
+			return false, nil
+		},
+	})
+	cookie := registerUser(t, h, "viewer")
+	bins := make([]int64, CheerBinCount)
+	bins[3] = 1
+	payload, _ := json.Marshal(map[string]any{"request_id": "1234567890abcdef1234567890abcdef", "bins": bins})
+	response, body := call(t, h, "POST", "/api/v1/clips/basketball/cheers", string(payload), cookie, nil)
+	if response.StatusCode != 200 || reads != 1 {
+		t.Fatal("lookup not shared", response.StatusCode, reads, string(body))
+	}
+	rows, err := store.CheeredClips(context.Background(), "viewer", nil, 20)
+	if err != nil || len(rows) != 1 || rows[0].Clip.Title != "Reviewed highlight" {
+		t.Fatal("missing labels", rows, err)
+	}
+}

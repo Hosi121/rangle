@@ -165,7 +165,8 @@ func (s *FirestoreStore) RecordCheers(ctx context.Context, clip string, batch Ch
 }
 
 func (h *Handler) cheers(w http.ResponseWriter, r *http.Request) {
-	clip := h.clip(w, r)
+	info := h.cheerClip(w, r)
+	clip := info.ID
 	if clip == "" {
 		return
 	}
@@ -204,19 +205,7 @@ func (h *Handler) cheers(w http.ResponseWriter, r *http.Request) {
 		}
 		sum := sha256.Sum256([]byte(user.ID + "\n" + input.RequestID))
 		now := time.Now().UTC().Truncate(time.Microsecond)
-		info := HistoryClip{ID: clip, Title: clip}
-		if h.cfg.DescribeClip != nil {
-			var err error
-			info, err = h.cfg.DescribeClip(r.Context(), clip)
-			if err != nil {
-				h.unavailable(w, r, "cheer_clip", err)
-				return
-			}
-			if info.ID != clip || info.Title == "" {
-				h.unavailable(w, r, "cheer_clip", fmt.Errorf("invalid clip labels"))
-				return
-			}
-		}
+
 		batch := CheerBatch{ID: hex.EncodeToString(sum[:16]), UserID: user.ID, Clip: info, CreatedAt: now, ExpiresAt: now.Add(7 * 24 * time.Hour)}
 		copy(batch.Bins[:], input.Bins)
 		if err := store.RecordCheers(r.Context(), clip, batch); err != nil {
@@ -234,4 +223,30 @@ func (h *Handler) cheers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.write(w, r, 200, value)
+}
+
+// Resolve eligibility and labels together. In cloud deployments this avoids
+// fetching the same generated job twice for each accepted batch.
+func (h *Handler) cheerClip(w http.ResponseWriter, r *http.Request) HistoryClip {
+	id := r.PathValue("clip")
+	if h.cfg.DescribeClip == nil {
+		if h.clip(w, r) == "" {
+			return HistoryClip{}
+		}
+		return HistoryClip{ID: id, Title: id}
+	}
+	info, err := h.cfg.DescribeClip(r.Context(), id)
+	if errors.Is(err, ErrNotFound) {
+		h.fail(w, r, 404, "clip_not_found")
+		return HistoryClip{}
+	}
+	if err != nil {
+		h.unavailable(w, r, "cheer_clip", err)
+		return HistoryClip{}
+	}
+	if info.ID != id || info.Title == "" {
+		h.unavailable(w, r, "cheer_clip", fmt.Errorf("invalid clip labels"))
+		return HistoryClip{}
+	}
+	return info
 }

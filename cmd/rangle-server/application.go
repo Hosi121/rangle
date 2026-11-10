@@ -172,6 +172,9 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			} else {
 				err = community.ErrNotFound
 			}
+			if errors.Is(err, generation.ErrNotFound) {
+				err = community.ErrNotFound
+			}
 			return community.HistoryClip{ID: view.ID, Title: view.Title, Sport: view.Sport}, err
 		},
 		ClipExists: func(ctx context.Context, id string) (bool, error) {
