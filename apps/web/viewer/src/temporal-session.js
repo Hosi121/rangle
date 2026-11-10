@@ -48,7 +48,7 @@ export class TemporalSession {
     return new Promise((resolve, reject) => {
       this.resolveLoad = resolve;
       this.rejectLoad = reject;
-      if (!this.live || !this.paused) this.timeout = setTimeout(() => this.fail(), 30000);
+      if (!this.live || !this.paused) this.timeout = setTimeout(() => this.fail(), this.live ? 30000 : 60000);
       this.worker.postMessage({ type: 'load', url: manifest.temporal.url, strict, sha256, bytes, hidden: this.paused }, bytes ? [bytes] : []);
     });
   }
