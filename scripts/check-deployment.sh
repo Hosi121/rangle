@@ -193,3 +193,6 @@ for key in ('manifest_url', 'preview_url', 'scene_url'):
         raise SystemExit(f'{key} must use the configured Cloud CDN media origin.')
 print('Smoke passed: health, landing, /demo/, and published clip API.')
 PY
+
+# Separate finite media stage: never pass candidate/app headers to the CDN.
+python3 "$(dirname "${BASH_SOURCE[0]}")/check-media-delivery.py" "$work/api" "$media_origin"

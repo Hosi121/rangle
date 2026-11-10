@@ -12,7 +12,7 @@ RECEIPT_SPEC = importlib.util.spec_from_file_location('release_receipt', SCRIPT.
 RECEIPT = importlib.util.module_from_spec(RECEIPT_SPEC)
 RECEIPT_SPEC.loader.exec_module(RECEIPT)
 FAKE = r'''#!/usr/bin/env python3
-import json, os, sys
+import hashlib, json, os, struct, sys
 from pathlib import Path
 root = Path(os.environ['STUB_STATE'])
 name = Path(sys.argv[0]).name
@@ -49,6 +49,44 @@ if name == 'curl':
         Path(args[args.index('--output') + 1]).write_text('ok\n')
         print('204' if os.environ.get('BAD_MANAGER_STATUS') else '200', end='')
         sys.exit(0)
+    if url.startswith('https://media.replay.example.test/'):
+        assert 'X-Rangle-Candidate: ci-candidate' not in args
+        assert not any('Authorization:' in arg or 'Cookie:' in arg for arg in args)
+        public = (root / 'promoted').exists()
+        if os.environ.get('FAIL_MEDIA_PUBLIC' if public else 'FAIL_MEDIA_CANDIDATE'):
+            sys.exit(22)
+        model = struct.pack('<8sIIIffI', b'RANGL4D1', 1, 56, 3, 25, .08, 0) + bytes(56)
+        scene = {'version': 1, 'frameCount': 3, 'frameRate': 25, 'temporal': {'url': 'model.rgs'},
+                 'camera': {'position': [0, 0, -1], 'lookAt': [0, 0, 0], 'up': [0, 1, 0], 'fovYDegrees': 60},
+                 'attribution': {'label': 'Fixture', 'source': 'https://source.example.test/fixture', 'license': 'Fixture only'}}
+        generated = os.environ.get('GENERATED_API')
+        prefix = '/generated/' + 'c' * 32 + '/' if generated else '/assets/vru/v1/full/'
+        content_type = 'application/json'
+        if '/manifests/' in url:
+            body = json.dumps({'version': 1, 'clip_id': 'vru', 'revision': 'v1', 'codec': 'rangle-temporal-rgs1',
+                'representations': [{'id': 'full', 'init_url': prefix + 'scene.json',
+                    'init_size_bytes': len(json.dumps(scene).encode()), 'segments': [{'index': 0,
+                    'start_seconds': 0, 'duration_seconds': .08, 'independent': True,
+                    'url': prefix + 'model.rgs', 'size_bytes': len(model), 'sha256': hashlib.sha256(model).hexdigest()}]}]}).encode()
+            if os.environ.get('BAD_MEDIA_MANIFEST'):
+                body = body.replace(b'"revision": "v1"', b'"revision": "wrong"')
+        elif url.endswith('/scene.json'):
+            body = json.dumps(scene).encode()
+        elif url.endswith('/metrics.json'):
+            body = json.dumps({'job_id': 'c' * 32, 'mode': 'dynamic', 'model_bytes': len(model),
+                               'model_sha256': hashlib.sha256(model).hexdigest()}).encode()
+        elif url.endswith('/model.rgs'):
+            body, content_type = model, 'application/octet-stream'
+            if os.environ.get('CORRUPT_MEDIA_MODEL'):
+                body = body[:-1] + b'X'
+        else:
+            body, content_type = b'\x1a\x45\xdf\xa3\x87\x42\x82\x84webm\x18\x53\x80\x67\xff\x16\x54\xae\x6b\x8f\xae\x8d\xd7\x81\x01\x83\x81\x01\x86\x85V_VP9\x1f\x43\xb6\x75\x88\xa3\x86\x81\x00\x00\x80ok', 'video/webm'
+            if os.environ.get('BAD_MEDIA_PREVIEW'):
+                body = b'<html>missing preview</html>'
+        Path(args[args.index('--dump-header') + 1]).write_text('HTTP/2 200\r\nContent-Type: ' + content_type + '\r\n\r\n')
+        Path(args[args.index('--output') + 1]).write_bytes(body)
+        print('200', end='')
+        sys.exit(0)
     candidate = 'X-Rangle-Candidate: ci-candidate' in args
     if '--write-out' in args:
         assert url.endswith('.run.app/health')
@@ -69,7 +107,7 @@ if name == 'curl':
             body = '<html>broken live endpoint</html>'
     elif '/api/' in url:
         clip = {'id': 'vru', 'revision': 'v1', 'title': 'VRU', 'sport': 'basketball',
-          'codec': 'synthetic-transport-v1' if os.environ.get('SYNTHETIC_API') else 'splat-v1',
+          'codec': 'synthetic-transport-v1' if os.environ.get('SYNTHETIC_API') else 'rangle-temporal-rgs1',
           'manifest_url': 'https://media.replay.example.test/manifests/vru/v1.json',
           'preview_url': 'https://media.replay.example.test/previews/vru.webm'}
         if os.environ.get('GENERATED_API'):
@@ -84,7 +122,7 @@ if name == 'curl':
             if os.environ.get('BAD_GENERATED_SCENE'):
                 clip['scene_url'] = 'https://media.replay.example.test/generated/' + 'd' * 32 + '/scene.json'
             if os.environ.get('PARTIAL_TRANSPORT'):
-                clip['codec'] = 'splat-v1'
+                clip['codec'] = 'rangle-temporal-rgs1'
             if os.environ.get('NULL_TRANSPORT'):
                 clip.update(codec=None, manifest_url=None)
         body = json.dumps({'clips': [clip]})
@@ -345,7 +383,7 @@ class Deployment(unittest.TestCase):
         direct = [call for call in calls if call[0] == 'curl' and '.run.app/' in call[-1]]
         self.assertEqual(len(direct), 2)
         self.assertTrue(all('--write-out' in call for call in direct))
-        probes = [call for call in calls if call[0] == 'curl' and '--dump-header' in call]
+        probes = [call for call in calls if call[0] == 'curl' and '--dump-header' in call and call[-1].startswith('https://app.')]
         self.assertTrue(all(call[-1].startswith('https://app.replay.example.test/') for call in probes))
         self.assertEqual(sum('X-Rangle-Candidate: ci-candidate' in call for call in probes), 5)
 
@@ -577,6 +615,17 @@ class Deployment(unittest.TestCase):
         self.assertEqual(self.traffic(calls), [])
         self.assertTrue(any('--remove-tags=ci-candidate' in call for call in calls))
 
+    def test_media_failure_blocks_candidate_or_restores_previous_traffic(self):
+        for flag in ('FAIL_MEDIA_CANDIDATE', 'CORRUPT_MEDIA_MODEL', 'BAD_MEDIA_MANIFEST', 'BAD_MEDIA_PREVIEW'):
+            with self.subTest(flag=flag):
+                result, calls = self.run_case({flag: '1'})
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(self.traffic(calls), [])
+        result, calls = self.run_case({'FAIL_MEDIA_PUBLIC': '1'})
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.traffic(calls), ['--to-revisions=rangle-stg-00003-abc=100',
+                                             '--to-revisions=rangle-stg-old-a=80,rangle-stg-old-b=20'])
+
     def test_successful_generated_result_can_be_first_without_fake_transport_fields(self):
         result, calls = self.run_case({'GENERATED_API': '1'})
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -694,6 +743,14 @@ class ReceiptStorage(unittest.TestCase):
                 RECEIPT.save_receipt({'schema_version': 1}, output, root)
             self.assertFalse(output.exists())
             self.assertEqual(list(root.glob('*.tmp')), [])
+
+
+def load_tests(loader, tests, pattern):
+    spec = importlib.util.spec_from_file_location('media_delivery_tests', SCRIPT.with_name('check-media-delivery.test.py'))
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    tests.addTests(loader.loadTestsFromModule(module))
+    return tests
 
 
 if __name__ == '__main__':

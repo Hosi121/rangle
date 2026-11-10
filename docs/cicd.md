@@ -17,7 +17,7 @@ Go＋Flutter Webを非rootの単一imageにまとめ、cacheを再利用してbu
 1. 実行元・設定・期限と共通検証を確認し、imageをbuild/pushする。
 2. desired templateに `-generation-manager-url` があれば、既存managerのSA/IAM/固定args/config・catalog SHA path/pinned image、両serviceの**実trafficと復帰先revision**を取得する。欠落・不一致なら更新前に失敗させる。
 3. 同じimageでmanagerをno-traffic更新する。`ci-manager-candidate` に新しいID tokenで `/health` を呼び、200・本文・`K_REVISION`由来headerを照合する。100%へ昇格後、実image/args/trafficを再確認する。
-4. 公開appをno-traffic更新する。既定 `run.app` とcandidate-tag URLの外部直通拒否を確認し、`https://app.<domain>` に `X-Rangle-Candidate: ci-candidate` を付けて候補のhealth/UI/API/LIVE APIとmedia URLを検証する。
+4. 公開appをno-traffic更新する。既定 `run.app` とcandidate-tag URLの外部直通拒否を確認し、`https://app.<domain>` に `X-Rangle-Candidate: ci-candidate` を付けて候補のhealth/UI/API/LIVE APIとmedia URL・媒体実体の有限サンプルを検証する。
 5. 公開候補へ100%切り替え、候補headerなしのHTTPS経路を再検証し、receiptを保存する。
 
 manager昇格後に公開候補・公開後検証・receipt保存・tag cleanupが失敗したら、**両serviceをそれぞれ元の明示revision/traffic比率へ戻す**。一方が失敗しても他方の復帰を試す。成功・失敗とも自分が作った2 tagだけを削除し、失敗releaseのreceiptは残さない。DB/IAM/attempt counterは巻き戻さない。外部artifact保存の失敗だけは下表の例外とする。
@@ -31,6 +31,12 @@ manager用ID tokenはbuild後にWIFで発行し、audienceを `https://rangle-st
 - desired argsの `/mnt/catalog/snapshots/<64hex>.json` から期待SHAを取り、APIの `X-Rangle-Catalog-SHA256` と比較する。生成結果が先頭でもSHAはbase static catalogの元JSON bytesを識別する。
 - 全probeの `X-Rangle-Revision` を候補revisionと照合する。値は `K_REVISION` 由来でrequest headerを信用しない。反映待ちで旧版が応答すれば候補昇格を止め、公開後ならrollbackする。`check-deployment.sh` 単体の `EXPECTED_CATALOG_SHA256` / `EXPECTED_REVISION` は任意。
 - フィード先頭の通常clipまたは掲載済み生成結果を検証する。生成結果はtransport codec/manifestを持たない契約で、ID・revision・固定scene path・media originを照合する。不完全なtransport情報や別jobのsceneは拒否する。
+
+`check-media-delivery.py` はAPI先頭1clipを、候補と公開後それぞれのsmokeで実取得する。transportはAPIと独立manifestのID/revision/codecを照合し、先頭representationの先頭segmentだけをsize/SHA256・RGS1 container/headerで検証する。transportのsceneは必須とし、scene/initのサイズ・model参照・timelineも照合する。両形式のsceneにfiniteなcamera vector・非退化position/up・FOV・非空attributionを要求する。生成結果はmanifestを仮定せず、固定job pathのscene/metrics/modelを取得し、job IDとstored size/SHA256を照合する。static生成結果は `Content-Encoding: gzip` を必須とし、旧形式もgzip展開を32MiB以内に制限してraw splat size/SHA256を照合する。previewがあればContent-TypeとWebM構造（DocType・video track・media block）を確認する。
+
+媒体stageは**1回につき最大8 request・合計64MiB・60秒**、各requestはconnect 5秒・全体20秒以内で、redirect/retryを許可しない。body上限はmanifest 1MiB、scene 64KiB、metrics 256KiB、model 32MiB、preview 16MiB。curl設定ファイルを無効化し、媒体にはcandidate selector・appの認証header/cookieを送らない。既存app metadata stageは5 endpoint、各request最大3試行・1MiB・20秒の上限を維持する。候補の反映待ちは既存の最大5回のsmoke再試行を行うため、媒体stageの上限も各回に適用する。
+
+欠損・redirect・不正なorigin/identity/codec・size/SHA不一致・不正containerは候補昇格を止め、公開後なら既存の復帰処理へ進む。対応transport codecは `rangle-temporal-rgs1` と `rangle-temporal-rgs1-segments-v1`。旧形式の区間長は `(N-1)/FPS`、分割形式は最低2区間と先頭sceneの `N/FPS` を確認し、RGS1 headerの最終sample時刻は両形式で `(N-1)/FPS` を維持する。後続区間は取得しない。未知codecは明示的に失敗する。このsmokeは[公開時の承認・全artifact検証](asset-publication.md)を置き換えず、全clip/全representation/全区間の完全性、Gaussian値の全検証、動画frame decode、ブラウザ描画、CDN負荷・性能を証明しない。`main` への同一artifact昇格、少量traffic保持/SLO判定も別の残条件である。
 
 候補headerは公開のrouting selectorで、操作認可は通常どおり適用する。専用固定tagを他workflow/手動配備と共有しない。[LB切替手順・適用状態](stg-deployment.md#lb入口制限への切替)
 
@@ -68,4 +74,4 @@ receipt生成前にcandidate 100%と実revisionのimage/args一致を確認す�
 
 revision名はCloud Runに生成させ、tagは別操作で付ける。同時指定による[provider差分問題](https://github.com/hashicorp/terraform-provider-google/issues/17218)を避け、IaCのruntime設定を保持する。build・配備・昇格期限は **2026-11-14T15:00:00Z**。停止・予算監視は別jobが担当する。
 
-`python3 scripts/deploy-stg.test.py` はgcloud/curl/date/sleepのstubで、実配信revisionとdesiredの相違、秘密の非export、SHA/revision不一致、receipt失敗、manager設定・認証・2service復帰、legacy bootstrap、通常/generated-firstを確認する。deliveryの移行/checker testもfake transport、Terraformのregex testもofflineである。これらはlive IAM・実移行・CEL compiler・ブラウザ描画・GPU/100k性能の証拠ではない。
+`python3 scripts/deploy-stg.test.py` はgcloud/curl/date/sleepのstubで、実配信revisionとdesiredの相違、秘密の非export、SHA/revision不一致、receipt失敗、manager設定・認証・2service復帰、legacy bootstrap、通常/generated-firstと媒体欠損/破損による候補停止・公開後復帰を確認する。`check-media-delivery.test.py` の有限取得・origin/redirect/header分離・proof/container異常テストも同じコマンドから実行する。deliveryの移行/checker testもfake transport、Terraformのregex testもofflineである。これらはlive IAM・実移行・CEL compiler・ブラウザ描画・GPU/100k性能の証拠ではない。
