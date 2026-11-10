@@ -18,6 +18,7 @@ class ThumbnailPreview extends ChangeNotifier {
   bool _busy = false;
   bool _readyToDecode = false;
   bool _disposed = false;
+  int _generation = 0;
   Uint8List? image;
 
   void preview(Duration position) {
@@ -42,6 +43,12 @@ class ThumbnailPreview extends ChangeNotifier {
   }
 
   void hide() {
+    // Keep the small JPEG cache, but stop the dedicated media fetch/decoder.
+    // A later uncached hover starts a fresh source without waiting on old work.
+    _generation++;
+    _source?.dispose();
+    _source = null;
+    _busy = false;
     _requested = null;
     _pending = null;
     _throttle?.cancel();
@@ -63,6 +70,7 @@ class ThumbnailPreview extends ChangeNotifier {
   Future<void> _drain() async {
     if (_busy || _disposed) return;
     _busy = true;
+    final generation = _generation;
     try {
       while (_pending != null && _readyToDecode && !_disposed) {
         final key = _pending!;
@@ -77,7 +85,7 @@ class ThumbnailPreview extends ChangeNotifier {
         } on Object {
           // Time-only fallback remains available on decoder failure.
         }
-        if (_disposed) return;
+        if (_disposed || generation != _generation) return;
         _cache[key] = bytes;
         if (_cache.length > 16) _cache.remove(_cache.keys.first);
         if (_requested == key) {
@@ -86,7 +94,7 @@ class ThumbnailPreview extends ChangeNotifier {
         }
       }
     } finally {
-      _busy = false;
+      if (generation == _generation) _busy = false;
     }
   }
 
@@ -94,7 +102,6 @@ class ThumbnailPreview extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     hide();
-    _source?.dispose();
     _cache.clear();
     super.dispose();
   }

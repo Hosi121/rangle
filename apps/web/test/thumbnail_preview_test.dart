@@ -28,6 +28,71 @@ class _Source implements ThumbnailSource {
 }
 
 void main() {
+  testWidgets(
+    'hide releases media while cached images remain reusable without a source',
+    (tester) async {
+      final sources = <_Source>[];
+      final preview = ThumbnailPreview(() {
+        final source = _Source();
+        sources.add(source);
+        return source;
+      });
+      preview.preview(const Duration(seconds: 1));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(preview.image, [10]);
+      preview.hide();
+      expect(sources.single.disposeCount, 1);
+      preview.preview(const Duration(seconds: 1));
+      expect(preview.image, [10]);
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(sources.length, 1);
+      preview.preview(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(sources.length, 2);
+      expect(preview.image, [20]);
+      preview.hide();
+      preview.hide();
+      preview.dispose();
+      expect(sources.map((s) => s.disposeCount), [1, 1]);
+    },
+  );
+
+  testWidgets(
+    'hide and reentry do not wait for a cancelled decoder or publish its old completion',
+    (tester) async {
+      final sources = <_Source>[];
+      final preview = ThumbnailPreview(() {
+        final source = _Source()..controlled = true;
+        sources.add(source);
+        return source;
+      });
+      preview.preview(const Duration(seconds: 1));
+      await tester.pump(const Duration(milliseconds: 80));
+      preview.hide();
+      preview.preview(const Duration(seconds: 1));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(sources.length, 2);
+      sources.first.pending.single.complete(Uint8List.fromList([99]));
+      await tester.pump();
+      expect(preview.image, isNull);
+      preview.preview(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 80));
+      // The old job's finally block cannot clear the new job's busy flag.
+      expect(sources.last.requests, [const Duration(seconds: 1)]);
+      sources.last.pending.first.complete(Uint8List.fromList([1]));
+      await tester.pump();
+      expect(sources.last.requests, [
+        const Duration(seconds: 1),
+        const Duration(seconds: 2),
+      ]);
+      expect(preview.image, isNull);
+      sources.last.pending.last.complete(Uint8List.fromList([2]));
+      await tester.pump();
+      expect(preview.image, [2]);
+      preview.dispose();
+    },
+  );
+
   testWidgets('continuous hover movement decodes latest frames every 80ms', (
     tester,
   ) async {
@@ -75,7 +140,9 @@ void main() {
     'only latest thumbnail is published and hidden/disposed work stays hidden',
     (tester) async {
       final source = _Source()..controlled = true;
-      final preview = ThumbnailPreview(() => source);
+      final resumed = _Source()..controlled = true;
+      var created = 0;
+      final preview = ThumbnailPreview(() => created++ == 0 ? source : resumed);
       preview.preview(const Duration(seconds: 1));
       await tester.pump(const Duration(milliseconds: 80));
       preview.preview(const Duration(seconds: 2));
@@ -96,15 +163,17 @@ void main() {
       preview.preview(const Duration(seconds: 4));
       await tester.pump(const Duration(milliseconds: 80));
       preview.hide();
+      expect(source.disposeCount, 1);
       source.pending.last.complete(Uint8List.fromList([4]));
       await tester.pump();
       expect(preview.image, isNull);
       preview.preview(const Duration(seconds: 5));
       await tester.pump(const Duration(milliseconds: 80));
       preview.dispose();
-      source.pending.last.complete(Uint8List.fromList([5]));
+      resumed.pending.last.complete(Uint8List.fromList([5]));
       await tester.pump();
       expect(source.disposeCount, 1);
+      expect(resumed.disposeCount, 1);
       expect(tester.takeException(), isNull);
     },
   );
