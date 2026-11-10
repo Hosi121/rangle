@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Hosi121/rangle/internal/publisher"
 	"golang.org/x/time/rate"
 )
 
@@ -69,15 +70,23 @@ type outputFixture struct {
 
 func fixturePublication(t *testing.T, mode string) (*Service, Job, *outputFixture) {
 	t.Helper()
+	return fixturePublicationFor(t, mode, OperatorPrincipal("owner"))
+}
+
+func fixturePublicationFor(t *testing.T, mode string, principal Principal) (*Service, Job, *outputFixture) {
+	t.Helper()
 	service, provider := testService()
 	service.Store = newPublicationMemory()
 	service.Config.Presets[0].Mode = mode
-	job, err := service.Create(context.Background(), "owner", "vru-frame0", nonce(1))
+	if principal.Kind == "staff" {
+		service.Config.Presets[0].PublisherAccounts = []publisher.ID{principal.Account.ID}
+	}
+	job, err := service.CreateFor(context.Background(), principal, "vru-frame0", nonce(1))
 	if err != nil {
 		t.Fatal(err)
 	}
 	provider.state = Succeeded
-	job, err = service.Get(context.Background(), "owner", job.ID)
+	job, err = service.GetFor(context.Background(), principal, job.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -20,6 +20,7 @@ import (
 	"github.com/Hosi121/rangle/internal/liveassets"
 	"github.com/Hosi121/rangle/internal/livesource"
 	"github.com/Hosi121/rangle/internal/privatepreview"
+	"github.com/Hosi121/rangle/internal/publisher"
 )
 
 type config struct {
@@ -296,6 +297,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		}
 		return user.ID, nil
 	}
+	staffAuthority := generationStaffAuthority(interactions)
 	if generationRemote != nil {
 		api, err = catalog.WithPublicClips(api, generationRemote.PublicClips)
 		if err != nil {
@@ -306,6 +308,11 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			return app, err
 		}
 		mux.Handle("/api/v1/generation/", jobs)
+		staffJobs, err := generation.NewPublisherRemoteHandler(generationRemote, staffAuthority)
+		if err != nil {
+			return app, err
+		}
+		mux.Handle("/api/v1/publishers/{account}/generation/", staffJobs)
 		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))
 	}
 	if generationService != nil {
@@ -326,6 +333,11 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			mux.Handle(generation.SyncPath, syncHandler)
 		}
 		mux.Handle("/api/v1/generation/", jobs)
+		staffJobs, err := generation.NewPublisherHandler(generationService, staffAuthority)
+		if err != nil {
+			return app, err
+		}
+		mux.Handle("/api/v1/publishers/{account}/generation/", staffJobs)
 		mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(api))
 	}
 	mux.Handle("/api/", api)
@@ -344,6 +356,26 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 		}
 	}
 	return app, nil
+}
+
+func generationStaffAuthority(accounts *community.Handler) func(*http.Request) (generation.Principal, error) {
+	return func(r *http.Request) (generation.Principal, error) {
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		identity, err := accounts.CurrentStaff(r.WithContext(ctx))
+		if err != nil || identity == nil {
+			return generation.Principal{}, err
+		}
+		if !identity.Account.Allows(identity.Principal, identity.Record.Staff, publisher.ReadGeneration) {
+			return generation.Principal{}, generation.ErrPublisherForbidden
+		}
+		return generation.Principal{
+			Kind: "staff", ID: string(identity.Record.Staff.ID), Role: identity.Record.Staff.Role,
+			Generation: identity.Record.Version, Account: &publisher.Account{
+				ID: identity.Account.ID, Name: identity.Account.Name, Kind: identity.Account.Kind,
+			},
+		}, nil
+	}
 }
 
 func (a *application) Close() error {

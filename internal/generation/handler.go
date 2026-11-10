@@ -10,34 +10,75 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Hosi121/rangle/internal/publisher"
 	"golang.org/x/time/rate"
 )
 
 type Handler struct {
-	service *Service
-	user    func(*http.Request) (string, error)
-	limiter *rate.Limiter
+	service   *Service
+	principal func(*http.Request) (Principal, error)
+	limiter   *rate.Limiter
 	http.Handler
 }
 
+// NewHandler preserves the operator-only API. The callback must refresh the
+// operator account; browser headers or body fields are not authority.
 func NewHandler(service *Service, user func(*http.Request) (string, error)) (*Handler, error) {
-	if service == nil {
+	if user == nil {
+		return nil, ErrInvalid
+	}
+	return newPrincipalHandler(service, func(r *http.Request) (Principal, error) {
+		id, err := user(r)
+		if id == "" {
+			return Principal{}, err
+		}
+		return OperatorPrincipal(id), err
+	}, "/api/v1/generation")
+}
+
+// NewPublisherHandler serves only the authenticated staff member's account.
+// The authenticator must load current account/staff state on every request.
+func NewPublisherHandler(service *Service, auth func(*http.Request) (Principal, error)) (*Handler, error) {
+	if auth == nil {
+		return nil, ErrInvalid
+	}
+	return newPrincipalHandler(service, publisherAuthority(auth), "/api/v1/publishers/{account}/generation")
+}
+
+func publisherAuthority(auth func(*http.Request) (Principal, error)) func(*http.Request) (Principal, error) {
+	return func(r *http.Request) (Principal, error) {
+		p, err := auth(r)
+		if err != nil || p.Kind == "" {
+			return p, err
+		}
+		if p.Kind != "staff" || !p.valid() {
+			return Principal{}, ErrPublisherForbidden
+		}
+		if string(p.Account.ID) != r.PathValue("account") {
+			return Principal{}, ErrNotFound
+		}
+		return p, nil
+	}
+}
+
+func newPrincipalHandler(service *Service, auth func(*http.Request) (Principal, error), prefix string) (*Handler, error) {
+	if service == nil || auth == nil {
 		return nil, ErrInvalid
 	}
 	if err := service.Config.Validate(); err != nil {
 		return nil, err
 	}
-	if service.Store == nil || service.Provider == nil || user == nil {
+	if service.Store == nil || service.Provider == nil {
 		return nil, ErrInvalid
 	}
-	h := &Handler{service: service, user: user, limiter: rate.NewLimiter(rate.Every(time.Second), 4)}
+	h := &Handler{service: service, principal: auth, limiter: rate.NewLimiter(rate.Every(time.Second), 4)}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /api/v1/generation/presets", h.presets)
-	mux.HandleFunc("POST /api/v1/generation/jobs", h.create)
-	mux.HandleFunc("GET /api/v1/generation/jobs", h.list)
-	mux.HandleFunc("GET /api/v1/generation/jobs/{job}", h.get)
-	mux.HandleFunc("DELETE /api/v1/generation/jobs/{job}", h.cancel)
-	mux.HandleFunc("PUT /api/v1/generation/jobs/{job}/publication", h.publication)
+	mux.HandleFunc("GET "+prefix+"/presets", h.presets)
+	mux.HandleFunc("POST "+prefix+"/jobs", h.create)
+	mux.HandleFunc("GET "+prefix+"/jobs", h.list)
+	mux.HandleFunc("GET "+prefix+"/jobs/{job}", h.get)
+	mux.HandleFunc("DELETE "+prefix+"/jobs/{job}", h.cancel)
+	mux.HandleFunc("PUT "+prefix+"/jobs/{job}/publication", h.publication)
 	protected := http.NewCrossOriginProtection().Handler(mux)
 	h.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
@@ -59,6 +100,8 @@ func (h *Handler) write(w http.ResponseWriter, r *http.Request, code int, value 
 func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	code, message := http.StatusServiceUnavailable, "generation_unavailable"
 	switch {
+	case errors.Is(err, ErrPublisherForbidden):
+		code, message = 403, "publisher_access_denied"
 	case errors.Is(err, ErrForbidden):
 		code, message = 403, "admin_required"
 	case errors.Is(err, ErrNotFound):
@@ -83,30 +126,42 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, err error) {
 	h.write(w, r, code, map[string]string{"error": message})
 }
 
-func (h *Handler) owner(w http.ResponseWriter, r *http.Request) (string, bool) {
-	owner, err := h.user(r)
+func (h *Handler) authority(w http.ResponseWriter, r *http.Request, permission publisher.Permission) (Principal, bool) {
+	p, err := h.principal(r)
 	if err != nil {
 		h.fail(w, r, err)
-		return "", false
+		return Principal{}, false
 	}
-	if owner == "" {
+	if p.Kind == "" {
 		h.write(w, r, 401, map[string]string{"error": "not_authenticated"})
-		return "", false
+		return Principal{}, false
+	}
+	if !p.allows(permission) {
+		h.fail(w, r, ErrPublisherForbidden)
+		return Principal{}, false
 	}
 	if !h.limiter.Allow() {
 		w.Header().Set("Retry-After", "1")
 		h.write(w, r, 429, map[string]string{"error": "rate_limited"})
-		return "", false
+		return Principal{}, false
 	}
-	return owner, true
+	return p, true
 }
 
 func (h *Handler) presets(w http.ResponseWriter, r *http.Request) {
-	if _, ok := h.owner(w, r); !ok {
+	principal, ok := h.authority(w, r, publisher.ReadPresets)
+	if !ok {
+		return
+	}
+	if r.URL.RawQuery != "" {
+		h.fail(w, r, ErrInvalid)
 		return
 	}
 	rows := make([]map[string]string, 0, len(h.service.Config.Presets))
 	for _, p := range h.service.Config.Presets {
+		if !principal.permitsPreset(p) {
+			continue
+		}
 		rows = append(rows, map[string]string{"id": p.ID, "mode": p.ModeName(), "title": p.Title, "sport": p.Sport, "description": p.Description, "source": p.Source, "license": p.License})
 	}
 	h.write(w, r, 200, map[string]any{"available": true, "presets": rows, "limits": map[string]any{"concurrent_jobs": 1, "runtime_seconds": int(MaxRuntime / time.Second), "attempts": h.service.Config.Attempts}})
@@ -141,7 +196,7 @@ func (h *Handler) response(job Job) map[string]any {
 }
 
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
-	owner, ok := h.owner(w, r)
+	principal, ok := h.authority(w, r, publisher.CreateGeneration)
 	if !ok {
 		return
 	}
@@ -162,7 +217,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	job, err := h.service.Create(ctx, owner, input.Preset, input.RequestID)
+	job, err := h.service.CreateFor(ctx, principal, input.Preset, input.RequestID)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -171,7 +226,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
-	owner, ok := h.owner(w, r)
+	principal, ok := h.authority(w, r, publisher.ReadGeneration)
 	if !ok {
 		return
 	}
@@ -181,7 +236,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
-	jobs, err := h.service.Store.List(ctx, owner)
+	jobs, err := h.service.ListFor(ctx, principal)
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -194,7 +249,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
-	owner, ok := h.owner(w, r)
+	principal, ok := h.authority(w, r, publisher.ReadGeneration)
 	if !ok {
 		return
 	}
@@ -204,7 +259,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	job, err := h.service.Get(ctx, owner, r.PathValue("job"))
+	job, err := h.service.GetFor(ctx, principal, r.PathValue("job"))
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -213,7 +268,7 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
-	owner, ok := h.owner(w, r)
+	principal, ok := h.authority(w, r, publisher.CancelGeneration)
 	if !ok {
 		return
 	}
@@ -223,7 +278,7 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	job, err := h.service.Cancel(ctx, owner, r.PathValue("job"))
+	job, err := h.service.CancelFor(ctx, principal, r.PathValue("job"))
 	if err != nil {
 		h.fail(w, r, err)
 		return
@@ -261,7 +316,7 @@ func (h *Handler) ClipHandler(fallback http.Handler) http.Handler {
 }
 
 func (h *Handler) publication(w http.ResponseWriter, r *http.Request) {
-	owner, ok := h.owner(w, r)
+	principal, ok := h.authority(w, r, publisher.ReadGeneration)
 	if !ok {
 		return
 	}
@@ -285,7 +340,7 @@ func (h *Handler) publication(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 25*time.Second)
 	defer cancel()
-	job, err := h.service.SetPublication(ctx, owner, r.PathValue("job"), *input.Published)
+	job, err := h.service.SetPublicationFor(ctx, principal, r.PathValue("job"), *input.Published)
 	if err != nil {
 		if errors.Is(err, ErrArtifacts) {
 			if h.service.Logger != nil {
@@ -294,7 +349,7 @@ func (h *Handler) publication(w http.ResponseWriter, r *http.Request) {
 			h.write(w, r, 409, map[string]string{"error": "publication_unavailable"})
 			return
 		}
-		if !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrInvalid) && !errors.Is(err, ErrConflict) && !errors.Is(err, ErrBusy) && !errors.Is(err, ErrBudget) && !errors.Is(err, ErrExpired) {
+		if !errors.Is(err, ErrPublisherForbidden) && !errors.Is(err, ErrNotFound) && !errors.Is(err, ErrInvalid) && !errors.Is(err, ErrConflict) && !errors.Is(err, ErrBusy) && !errors.Is(err, ErrBudget) && !errors.Is(err, ErrExpired) {
 			if h.service.Logger != nil {
 				h.service.Logger.ErrorContext(ctx, "generation publication failed", "job_id", r.PathValue("job"), "error", err)
 			}
