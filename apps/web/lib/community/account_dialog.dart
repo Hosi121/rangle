@@ -10,6 +10,7 @@ Future<bool> showAccountDialog(
   BuildContext context,
   AccountController? account, {
   ValueChanged<String>? onOpenClip,
+  VoidCallback? onOpenPublisher,
 }) async {
   if (account == null) {
     ScaffoldMessenger.of(context)
@@ -18,14 +19,23 @@ Future<bool> showAccountDialog(
   }
   await showViewerDialog<void>(
     context: context,
-    builder: (_) => _AccountDialog(account: account, onOpenClip: onOpenClip),
+    builder: (_) => _AccountDialog(
+      account: account,
+      onOpenClip: onOpenClip,
+      onOpenPublisher: onOpenPublisher,
+    ),
   );
   return account.user != null;
 }
 
 class _AccountDialog extends StatefulWidget {
-  const _AccountDialog({required this.account, this.onOpenClip});
+  const _AccountDialog({
+    required this.account,
+    this.onOpenClip,
+    this.onOpenPublisher,
+  });
   final ValueChanged<String>? onOpenClip;
+  final VoidCallback? onOpenPublisher;
   final AccountController account;
   @override
   State<_AccountDialog> createState() => _AccountDialogState();
@@ -278,6 +288,18 @@ class _AccountDialogState extends State<_AccountDialog> {
                       ),
                     ),
                   ),
+                if (widget.onOpenPublisher != null) ...[
+                  const SizedBox(height: 16),
+                  TextButton(
+                    onPressed: _busy
+                        ? null
+                        : () {
+                            Navigator.pop(context);
+                            widget.onOpenPublisher!();
+                          },
+                    child: const Text('団体担当者のログイン'),
+                  ),
+                ],
                 if (_error != null) ...[
                   const SizedBox(height: 12),
                   Text(

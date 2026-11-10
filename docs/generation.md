@@ -1,6 +1,6 @@
 # GS生成バックエンド
 
-校正済み複数カメラの1時刻から静的3DGS、複数時刻から動く4DGSを生成する。一般の単眼動画・任意uploadは対象外。運営ページと `/demo/?generate=1` でpreset選択・生成・状態/中止・結果を扱う。閉じてもjobは続き、再入すると履歴を確認できる。団体担当者向けはAPI接続済みで、UIは未接続。
+校正済み複数カメラの1時刻から静的3DGS、複数時刻から動く4DGSを生成する。一般の単眼動画・任意uploadは対象外。運営ページと `/demo/?generate=1`、団体担当者は `/demo/?publisher=1` でpreset選択・生成・状態/中止・結果を扱う。閉じてもjobは続き、再入すると所有するジョブの履歴を確認できる。
 
 APIのprefixは運営用 `/api/v1/generation`、団体用 `/api/v1/publishers/{account}/generation`。以下は各prefixからの相対パス。
 

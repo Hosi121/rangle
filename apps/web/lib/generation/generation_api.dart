@@ -9,7 +9,8 @@ class GenerationFailure implements Exception {
   final Duration? retryAfter;
 
   String get message => switch (code) {
-    'admin_required' => '管理者アカウントでログインしてください。',
+    'admin_required' => '運営アカウントでログインしてください。',
+    'publisher_access_denied' => 'この操作を行う権限がありません。',
     'not_authenticated' => 'ログインしてから、もう一度お試しください。',
     'generation_busy' => '別の生成が進行中です。少し時間をおいてお試しください。',
     'generation_budget_exhausted' => '現在の生成受付枠を使い切りました。',
@@ -93,10 +94,19 @@ class GenerationJob {
 
 /// Uses the existing same-origin HttpOnly session cookie, with no new auth state.
 class GenerationApi {
-  GenerationApi({required this.endpoint, http.Client? client})
-    : _client = client ?? http.Client(),
-      _ownsClient = client == null;
+  GenerationApi({
+    required this.endpoint,
+    this.publisherAccountId,
+    http.Client? client,
+  }) : _client = client ?? http.Client(),
+       _ownsClient = client == null {
+    if (publisherAccountId != null &&
+        !RegExp(r'^[a-z0-9][a-z0-9_-]{0,63}$').hasMatch(publisherAccountId!)) {
+      throw const FormatException('Invalid publisher scope.');
+    }
+  }
   final Uri endpoint;
+  final String? publisherAccountId;
   final http.Client _client;
   final bool _ownsClient;
   final _pending = <Completer<void>>{};
@@ -107,16 +117,13 @@ class GenerationApi {
     Map<String, Object?>? body,
   ]) async {
     final abort = Completer<void>();
-    final message =
-        http.AbortableRequest(
-            method,
-            endpoint.resolve('generation/$path'),
-            abortTrigger: abort.future,
-          )
-          ..headers.addAll({
-            'Accept': 'application/json',
-            'Cache-Control': 'no-store',
-          });
+    final message = http.AbortableRequest(
+      method,
+      endpoint.resolve(
+        '${publisherAccountId == null ? 'generation' : 'publishers/$publisherAccountId/generation'}/$path',
+      ),
+      abortTrigger: abort.future,
+    )..headers.addAll({'Accept': 'application/json', 'Cache-Control': 'no-store'});
     if (body != null) {
       message.headers['Content-Type'] = 'application/json';
       message.body = jsonEncode(body);

@@ -6,6 +6,7 @@ import 'config/app_config.dart';
 import 'data/clip_repository.dart';
 import 'community/community_api.dart';
 import 'generation/generation_api.dart';
+import 'publishers/publisher_api.dart';
 import 'live/live_api.dart';
 import 'sharing/share_clip.dart';
 import 'viewer/free_view_adapter.dart';
@@ -22,6 +23,7 @@ void main() {
       initialLiveId: Uri.base.queryParameters['live'],
       initialClipId: Uri.base.queryParameters['clip'],
       initialGeneration: Uri.base.queryParameters['generate'] == '1',
+      initialPublisher: Uri.base.queryParameters['publisher'] == '1',
       repository: config.createClipRepository(),
     ),
   );
@@ -36,6 +38,8 @@ class RangleApp extends StatelessWidget {
     this.community,
     this.generation,
     this.initialGeneration = false,
+    this.initialPublisher = false,
+    this.publisher,
     this.initialClipId,
     this.live,
     this.liveFactory,
@@ -49,6 +53,8 @@ class RangleApp extends StatelessWidget {
   final CommunityApi? community;
   final GenerationApi? generation;
   final bool initialGeneration;
+  final bool initialPublisher;
+  final PublisherApi? publisher;
   final String? initialClipId;
   final LiveApi? live;
   final ViewerFactory? liveFactory;
@@ -105,6 +111,8 @@ class RangleApp extends StatelessWidget {
         community: community,
         generation: generation,
         initialGeneration: initialGeneration,
+        initialPublisher: initialPublisher,
+        publisher: publisher,
         initialClipId: initialClipId,
         live: live,
         liveFactory: liveFactory,

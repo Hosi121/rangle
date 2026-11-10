@@ -47,7 +47,7 @@ receipt・集計shard・`accounts/{user}/cheered_clips/{clip}` は同じtransact
 
 `admin` はrangle運営用の予約IDで、一般登録できない。運営ログインではフィードの代わりにGS生成・LIVE・履歴の管理ページを表示する。通常ユーザーは視聴・交流を利用する。[団体担当者](publisher-auth.md)は別の資格情報・Cookieを使う。
 
-運営用 `/api/v1/generation` はプリセット一覧も運営専用。団体担当者は `/api/v1/publishers/{account}/generation` を使い、自団体のジョブと許可済み入力だけを扱う。操作ごとに現在の権限を読み直し、所有者チェック・CSRF・全体の生成予算を維持する。既存画面は `/auth/me` とログイン応答の `user.is_admin` で切り替え、団体担当者向けUIは未接続。
+運営用 `/api/v1/generation` はプリセット一覧も運営専用。団体担当者は `/api/v1/publishers/{account}/generation` を使い、自団体のジョブと許可済み入力だけを扱う。操作ごとに現在の権限を読み直し、所有者チェック・CSRF・全体の生成予算を維持する。運営画面は `/auth/me` とログイン応答の `user.is_admin` で切り替え、[団体担当者の画面](publisher-auth.md)は別の認証を使う。
 
 運用者は対象DBへのADC権限で次を実行する。パスワードは標準入力から読み、個別salt付きhashで保存する。既存アカウントは上書きしない。新規管理者は15〜128文字の有効なUTF-8・最大512byteが必須。既存管理者のパスワードと有効なセッションは変更しない。
 

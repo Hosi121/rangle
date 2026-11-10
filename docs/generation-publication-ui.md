@@ -1,6 +1,6 @@
 # 生成結果のフィード掲載UI
 
-既存の運営向け画面を対象とする。団体担当者向けは[専用API](publisher-auth.md#団体の生成公開)のみ接続済みで、UIは未接続。
+運営と団体担当者の共通画面を対象とする。団体担当者は[専用API](publisher-auth.md#団体の生成公開)へ接続し、履歴・公開操作を団体のスコープで行う。
 
 「自分の生成」の成功結果から「フィードに掲載」「掲載を取り下げる」を操作し、掲載中は状態を表示する。生成中・失敗・中止では操作を出さず、新GPU jobを作らない。成功結果には、掲載前/取り下げ後も共有リンクで開けることを添える。
 
@@ -16,6 +16,8 @@ Content-Type: application/json
 ```
 
 取り下げは同じURLへ `{"published":false}`。応答は既存の `job/viewer_url/scene_url` で、履歴のpublished省略だけfalseとして読む。
+
+団体担当者のURLは `/api/v1/publishers/{account}/generation/jobs/{id}/publication`。ログアウト・団体変更後は古い応答を反映せず、既存ジョブは担当者個人ではなく団体へ残す。
 
 PUT成功はjob ID・成功状態・boolean publishedが要求と一致する場合だけ確定する。欠落/不一致は再試行可能なエラー。viewer URLは同一origin・generated clip形式を検証する。
 
