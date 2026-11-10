@@ -23,7 +23,7 @@ configはproject・必須 `project_number`・`database: "rangle-stg-generation"`
 
 公開runtimeはmanager base URL audienceのGoogle ID tokenを `Authorization` と `X-Rangle-Service-Authorization` の両方に送る。managerは後者で署名・issuer・audience・期限・数値subject・verified email・指定runtime SAの完全一致を独立検証する。platformが前者の署名を除去しても検証を省略しない。[service authentication](https://docs.cloud.google.com/run/docs/authenticating/service-to-service)
 
-公開側でadmin cookie・現在role・CSRFを確認し、owner IDを転送する。managerは所有者、active 1件、最大10 attempts、固定preset/image、30分、deadlineを強制する。公開runtime侵害時にも残枠内の正規preset操作・owner偽装は可能だが、台帳reset・budget変更・任意Vertex specは許可しない。document CRUD/raw Vertex APIは公開せず、feed/detail/engagement確認も内部情報やinput URIを返さない。
+公開側で各経路の運営/担当者session・現在の団体/役割・CSRFを確認し、認証済みの操作主体を転送する。[団体用の短寿命assertionと旧運営headerの契約](publisher-auth.md#団体の生成公開)に従い、ブラウザの権限headerを転送しない。managerは所有者、入力の団体許可、active 1件、最大10 attempts、固定preset/image、30分、deadlineを強制する。公開runtime侵害時にも残枠内の正規preset操作・owner偽装は可能だが、台帳reset・budget変更・任意Vertex specは許可しない。document CRUD/raw Vertex APIは公開せず、feed/detail/engagement確認も内部情報やinput URIを返さない。
 
 旧community DBからの移行は[専用手順](security-generation-migration.md)でwritersを凍結し、native fields・ID・used/active・履歴・掲載状態を保持する。空DBでattemptを再発行せず、切替後は旧生成writerへ戻さない。クラウド公開runtimeはremote固定、ローカルは単一processも維持する。無効化はjobが全件terminalになってから行う。
 

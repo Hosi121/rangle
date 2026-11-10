@@ -1,23 +1,25 @@
 # GS生成バックエンド
 
-校正済み複数カメラの1時刻から静的3DGS、複数時刻から動く4DGSを生成する。一般の単眼動画・任意uploadは対象外。管理者ページと `/demo/?generate=1` でpreset選択・生成・状態/中止・結果を扱う。閉じてもjobは続き、再入すると自分の履歴を確認できる。
+校正済み複数カメラの1時刻から静的3DGS、複数時刻から動く4DGSを生成する。一般の単眼動画・任意uploadは対象外。運営ページと `/demo/?generate=1` でpreset選択・生成・状態/中止・結果を扱う。閉じてもjobは続き、再入すると履歴を確認できる。団体担当者向けはAPI接続済みで、UIは未接続。
+
+APIのprefixは運営用 `/api/v1/generation`、団体用 `/api/v1/publishers/{account}/generation`。以下は各prefixからの相対パス。
 
 | 操作 | API |
 | --- | --- |
-| preset一覧 | `GET /api/v1/generation/presets` |
-| 作成 | `POST /api/v1/generation/jobs`、`{"preset":"…","request_id":"32桁の小文字hex"}` |
-| 自分の履歴 | `GET /api/v1/generation/jobs` |
-| 状態・結果 | `GET /api/v1/generation/jobs/{id}` |
-| 中止 | `DELETE /api/v1/generation/jobs/{id}` |
-| 掲載・取り下げ | `PUT /api/v1/generation/jobs/{id}/publication`、`{"published":true}` / `{"published":false}` |
+| preset一覧 | `GET /presets` |
+| 作成 | `POST /jobs`、`{"preset":"…","request_id":"32桁の小文字hex"}` |
+| 所有するジョブの履歴 | `GET /jobs` |
+| 状態・結果 | `GET /jobs/{id}` |
+| 中止 | `DELETE /jobs/{id}` |
+| 掲載・取り下げ | `PUT /jobs/{id}/publication`、`{"published":true}` / `{"published":false}` |
 
-全API（preset含む）で[管理者session/CSRF](accounts.md#管理アカウント)が必要。作成・履歴・個別job・中止・掲載は所有者制限も維持する。同じユーザー/request_idの再送は元jobを返し、追加起動しない。jobは `published` を含み、成功時は `viewer_url` / `scene_url` が付く。
+全API（preset含む）で各経路のsessionとCSRF検査が必要。[運営](accounts.md#管理アカウント)は従来の運営所有ジョブ、[団体担当者](publisher-auth.md#団体の生成公開)は自団体のジョブと許可済み入力だけを扱う。同じ所有者/request_idの再送は元jobを返し、担当者の交代でも追加起動しない。jobは `published` を含み、成功時は `viewer_url` / `scene_url` が付く。
 
 履歴は保存済み状態を返す。個別GET・作成時の照合、有効時は2分ごとのSchedulerでactive1件を同期する。同期はattemptを増やさない。[掲載・同期の契約](generated-publication.md)
 
 入力URI/SHA256・方式・品質profile・image digest・GPU・期限はサーバーpresetへ固定し、公開要求からpath/command/profileを受け取らない。modeは `static` / `dynamic` / `live`、既存省略時はstatic。作成時snapshotを保存し、後の設定変更でjobの方式を変えない。`live` は録画入力ZIPと専用worker/publisherを使い、VOD掲載はできない。[クラウドLIVE](cloud-live.md)を参照。
 
-公開Go APIは認証必須のgeneration managerへ転送し、managerが専用台帳・実行枠・固定spec・予算/期限を守る。公開runtimeに生成台帳直接アクセス・Vertex操作・trainer actAsを与えない。admin/CSRFは公開runtime側の責任で、侵害されたruntimeから正規preset操作を行う脅威は残る。構成・IAM・署名検証・local modeは[生成インフラ](generation-infrastructure.md)を参照。
+公開Go APIは認証必須のgeneration managerへ転送し、managerが専用台帳・実行枠・固定spec・予算/期限を守る。公開runtimeに生成台帳直接アクセス・Vertex操作・trainer actAsを与えない。現在の運営/担当者認証とCSRFは公開runtime側の責任で、侵害されたruntimeから正規preset操作を行う脅威は残る。構成・IAM・署名検証・local modeは[生成インフラ](generation-infrastructure.md)を参照。
 
 ## 計算予算と失敗時
 

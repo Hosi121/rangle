@@ -11,7 +11,7 @@
 | 機能 | 内容 |
 | --- | --- |
 | [見る](apps/web/README.md) | 動画フィード、検索・タグ・共有、自由視点・時間モデルの再生 |
-| [生成](docs/generation.md) | 管理者向け3DGS/4DGS生成、状態確認・中止・owner掲載 |
+| [生成](docs/generation.md) | 運営向け3DGS/4DGS生成UI、団体所有の生成・取消・公開API |
 | [交流](docs/accounts.md) | ログインしていいね・コメント・自分のコメント削除 |
 | [LIVE](docs/cloud-live.md) | 多視点録画を到着順に学習し、Tokyo T4×1から8モデルを実CDN公開 |
 

@@ -4,7 +4,7 @@
 
 ## APIと認可
 
-`PUT /api/v1/generation/jobs/{id}/publication` は[既存session/CSRF](accounts.md)と所有者確認を使う。
+運営は `PUT /api/v1/generation/jobs/{id}/publication`、団体担当者は `PUT /api/v1/publishers/{account}/generation/jobs/{id}/publication` を使う。[各経路のsession/CSRFと現在の権限](publisher-auth.md)を検査し、団体では操作した担当者でなく団体所有者を照合する。
 
 | 項目 | 契約 |
 | --- | --- |
