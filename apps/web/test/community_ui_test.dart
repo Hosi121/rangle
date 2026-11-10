@@ -339,6 +339,9 @@ void main() {
     await tester.enterText(find.byType(TextFormField), '#自由視点');
     await tester.tap(find.widgetWithText(FilledButton, '検索'));
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('highlight-feed')), findsNothing);
+    await tester.tap(find.byKey(const ValueKey('search-result-demo-01')));
+    await tester.pumpAndSettle();
     expect(clipCount(), 1);
     await tester.tap(find.byTooltip('絞り込み解除'));
     await tester.pumpAndSettle();
@@ -348,8 +351,8 @@ void main() {
     await tester.enterText(find.byType(TextFormField), '存在しないキーワード');
     await tester.tap(find.widgetWithText(FilledButton, '検索'));
     await tester.pumpAndSettle();
-    expect(find.text('ハイライトが見つかりませんでした'), findsOneWidget);
-    await tester.tap(find.widgetWithText(OutlinedButton, 'すべてのハイライトを見る'));
+    expect(find.text('動画が見つかりませんでした。'), findsOneWidget);
+    await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(clipCount(), 3);
   });

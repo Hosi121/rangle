@@ -41,6 +41,17 @@ class ClipPagingController extends ChangeNotifier {
                   math.min(selectedIndex - firstIndex, _clips.length) <=
               maxClips);
 
+  /// Stop hidden prefetch without discarding the current metadata or cursor.
+  void cancelPending() {
+    if (_disposed || _inflight == null) return;
+    _epoch++;
+    _abort?.complete();
+    _abort = null;
+    _inflight = null;
+    loading = false;
+    notifyListeners();
+  }
+
   Future<void> reset({String query = '', String tag = '', String? clipId}) {
     if (_disposed) return Future.value();
     _epoch++;
