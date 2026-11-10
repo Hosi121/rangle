@@ -123,12 +123,15 @@ class _CheerHistoryDialogState extends State<CheerHistoryDialog> {
                   final row = _rows[i], at = row.lastCheeredAt.toLocal();
                   return ListTile(
                     leading: const Icon(Icons.celebration_outlined),
-                    title: Text(row.title),
+                    title: Text(row.deleted ? '削除済み動画' : row.title),
                     subtitle: Text(
                       '${row.sport} · ${at.year}/${at.month}/${at.day}',
                     ),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: _sameAccount
+                    trailing: row.deleted
+                        ? null
+                        : const Icon(Icons.chevron_right),
+                    enabled: !row.deleted,
+                    onTap: _sameAccount && !row.deleted
                         ? () => Navigator.pop(context, row.id)
                         : null,
                   );

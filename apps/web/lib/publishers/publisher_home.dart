@@ -10,6 +10,7 @@ import '../widgets/rangle_header.dart';
 import '../widgets/viewer_viewport.dart';
 import 'publisher_api.dart';
 import 'publisher_controller.dart';
+import 'publisher_deletion_screen.dart';
 import 'publisher_forms.dart';
 import 'publisher_staff_screen.dart';
 
@@ -70,6 +71,16 @@ class _PublisherHomeState extends State<PublisherHome> {
           if (await changePublisherPassword(context, widget.api)) {
             _session.expired();
           }
+        case 'deletion':
+          await Navigator.of(context).push<void>(
+            MaterialPageRoute(
+              builder: (_) => PublisherDeletionScreen(
+                api: widget.api,
+                account: identity.account,
+                onAuthenticationExpired: _session.expired,
+              ),
+            ),
+          );
         case 'logout':
           await _session.logout();
       }
@@ -121,6 +132,8 @@ class _PublisherHomeState extends State<PublisherHome> {
                 if (identity.canManageStaff)
                   const PopupMenuItem(value: 'staff', child: Text('担当者管理')),
                 const PopupMenuItem(value: 'password', child: Text('パスワード変更')),
+                if (identity.canManageStaff)
+                  const PopupMenuItem(value: 'deletion', child: Text('団体の削除')),
                 const PopupMenuItem(value: 'logout', child: Text('ログアウト')),
               ],
             ),

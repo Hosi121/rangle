@@ -44,7 +44,8 @@ class PublisherEntry {
     : account = PublisherAccount.fromJson(
         data['account'] as Map<String, dynamic>,
       ),
-      status = data['status'] as String {
+      status = data['status'] as String,
+      deletionRequested = data['deletion_requested'] as bool? ?? false {
     if (!const [
       'active',
       'suspended',
@@ -56,6 +57,7 @@ class PublisherEntry {
   }
   final PublisherAccount account;
   final String status;
+  final bool deletionRequested;
   bool get manageable => status == 'active' || status == 'suspended';
   String get statusLabel => switch (status) {
     'active' => '利用中',
@@ -69,6 +71,38 @@ class PublisherPage {
   PublisherPage(this.entries, this.nextCursor);
   final List<PublisherEntry> entries;
   final String nextCursor;
+}
+
+class PublisherDeletion {
+  PublisherDeletion.fromJson(Map<String, dynamic> data)
+    : state = data['state'] as String,
+      stage = data['stage'] as String? ?? '',
+      requested = data['requested'] as bool? ?? false,
+      prefix = data['prefix'] as int? ?? 0,
+      total = data['prefix_total'] as int? ?? 0 {
+    if (!const ['active', 'suspended', 'deleting', 'deleted'].contains(state) ||
+        !const ['', 'jobs', 'objects', 'cache', 'complete'].contains(stage) ||
+        prefix < 0 ||
+        total < prefix ||
+        total > 30 ||
+        state == 'deleted' && (stage != 'complete' || prefix != total) ||
+        state == 'deleting' &&
+            !const ['jobs', 'objects', 'cache'].contains(stage) ||
+        const ['active', 'suspended'].contains(state) && stage.isNotEmpty) {
+      throw const FormatException('Invalid deletion progress.');
+    }
+  }
+  final String state, stage;
+  final bool requested;
+  final int prefix, total;
+  bool get pending => state == 'deleting';
+  String get label => switch (stage) {
+    'jobs' => '生成の終了を確認しています',
+    'objects' => '動画・モデルを削除しています',
+    'cache' => '配信キャッシュを削除しています',
+    'complete' => '団体を削除しました',
+    _ => '団体の削除',
+  };
 }
 
 class StaffPage {
@@ -259,6 +293,34 @@ class PublisherApi {
 
   String _inputRoot(String account) =>
       'operations/publishers/${_id(account)}/generation/presets';
+
+  Future<bool> deletionRequested(String account) async =>
+      (await _request(
+            'GET',
+            'publishers/${_id(account)}/deletion-request',
+          ))['requested']
+          as bool;
+
+  Future<bool> requestDeletion(String account, bool requested) async =>
+      (await _request('PUT', 'publishers/${_id(account)}/deletion-request', {
+            'requested': requested,
+            'confirmation': account,
+          }))['requested']
+          as bool;
+
+  Future<PublisherDeletion> deletionStatus(String account) async =>
+      PublisherDeletion.fromJson(
+        await _request('GET', 'operations/publishers/${_id(account)}/deletion'),
+      );
+
+  Future<PublisherDeletion> deletePublisher(String account) async =>
+      PublisherDeletion.fromJson(
+        await _request(
+          'DELETE',
+          'operations/publishers/${_id(account)}/deletion',
+          {'confirmation': account},
+        ),
+      );
   Future<List<PublisherInput>> inputs(String account) async =>
       _inputs(await _request('GET', _inputRoot(account)));
   Future<List<PublisherInput>> assignInputs(
