@@ -63,6 +63,23 @@ resource.labels.job_id="<provider-id>"
 
 このインフラ適用ではGo imageを更新していない。MLのservice属性は既存実ログで確認したが、新GPU jobの専用bucket到達は未検証。
 
+### Go再配備後の受信確認
+
+Actions復旧後の[配備run 42735637379](https://github.com/Hosi121/rangle/actions/runs/42735637379)でGoを再配備した。revision `rangle-stg-00082-gmh` の実image・traffic 100%と[release receipt](https://github.com/Hosi121/rangle/actions/runs/42735637379/artifacts/13726792901)の一致を確認した。
+
+専用bucketの `_AllLogs` viewで、次の起動ログを受信した。
+
+```text
+timestamp: 2026-11-10T01:29:40.087730117Z
+revision: rangle-stg-00082-gmh
+severity: INFO
+jsonPayload.message: server started
+jsonPayload.service: rangle-server
+insertId: 6af2738400015bc037ba9711
+```
+
+bucketの `ACTIVE` / `retentionDays=30`、sinkの宛先/filter、dashboardの8 widgetsも実APIで再確認し、[#33](https://github.com/Hosi121/rangle/issues/33)は完了した。SLO通知・端末QoE・10万CCUの運用検証は対象外のままで、新GPU jobの専用bucket到達も未検証である。
+
 ## 参照
 
 - [Cloud Runの構造化ログ](https://docs.cloud.google.com/run/docs/logging#special-json-fields)

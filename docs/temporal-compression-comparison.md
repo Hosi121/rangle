@@ -48,6 +48,8 @@ Python/既存JS `decodeTemporal`で旧/新Z1を復号し、14,548,664Bが一致�
 
 契約は[既存RGS1-Z](gaussian-compression.md#rgs1-zの契約)のまま：`RANGL4Z1`、32byte header、単一gzip、32MiB入力/展開上限、長さ/CRC/終端検証。reader変更・先行配備は不要。HTTP Content-Encodingは付けず、新bytesのSHA/サイズを新revisionへ公開し、既存資産を上書きしない。
 
+この圧縮比較の時点では、正しいZ1の後ろの空gzip memberをPython/native JSが受理し、Goが拒否する差があった。その後[#115](https://github.com/Hosi121/rangle/pull/115)をstgへマージし、実decoderでも単一member契約を強制した。[gzip containerの契約](rgs-gzip-contract.md)に、共通fixture・Chrome 121/146での確認範囲とnative二重復号の追加負荷を記録している。上の通常出力の復号一致を、全入力・全browserの採否一致とは扱わない。コード採用と実環境への配備は別に確認する。
+
 ## 明示して使う
 
 Pythonは`compress_temporal_rle(raw)`でRLE単独、`compress_temporal_smallest(raw)`で容量優先。workerのauto exportでは後者を明示する。

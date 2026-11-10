@@ -4,9 +4,9 @@
 
 ## 構成
 
-APIは起動時のcatalogを終了まで使い、更新は再起動で反映する。利用者別状態を持たず、同じcatalogを複数processへ配れる。動的編集・推薦は未実装。交流は別API・保存先を使う。
+静的base catalogは起動時から終了まで固定し、新snapshotへの更新は再起動で反映する。生成結果の掲載registryは別の永続データで、掲載変更をfeedへ動的に統合する。同じcatalogとregistryを複数processで使え、掲載変更はETag/cursorも変える。一般的なcatalog編集・推薦は未実装。交流は別API・保存先を使う。
 
-clipのJSON/ETagは起動時に生成する。一覧は対象ページのJSONを結合してETagを計算し、ページcacheを蓄積しない。保持量はcatalog metadataに比例する。`X-Rangle-Catalog-SHA256` は選択した静的catalogの元JSON bytesを識別し、HEAD/304でも返す。registry・ETag・cursorとの違いは[snapshot契約](catalog-snapshots.md#選択した版を照合する)を参照。
+base catalogのclipのJSON/ETagは起動時に生成する。一覧は対象ページのJSONを結合してETagを計算し、ページcacheを蓄積しない。保持量はcatalog metadataに比例する。`X-Rangle-Catalog-SHA256` は選択した静的catalogの元JSON bytesを識別し、HEAD/304でも返す。registry・ETag・cursorとの違いは[snapshot契約](catalog-snapshots.md#選択した版を照合する)を参照。
 
 資産handlerは `internal/delivery` に分離する。ローカルでは同じHTTP入口、本番ではCDN/object storageから直接配信し、APIは設定したoriginへのURLを返す。
 
@@ -42,7 +42,7 @@ clipのJSON/ETagは起動時に生成する。一覧は対象ページのJSONを
 | `tag` | `#`なしの完全一致。検索条件もcursorへ結び付ける |
 | catalog `tags` | 任意、最大10個。各32文字以内、文字・数字・結合文字・`_`。未指定なら適合するsportを補う |
 
-clipは `id/revision/title/sport/description/codec/manifest_url`、任意の `preview_url/scene_url` を返す。manifestは動画へ直接渡すURLではない。Flutterは `RANGLE_API_URL=/api/v1/clips` で動画・自由視点・時刻シークに使う（[起動手順](../apps/web/README.md#apiから動画自由視点を開く)）。ABRは未接続。
+共通metadataは `id/revision/title/sport/description`。transportを持つbase catalogのclipは `codec/manifest_url` と任意の `preview_url/scene_url` を返す。掲載済みの生成結果は `preview_url/scene_url` を返し、`codec/manifest_url` は持たない（[掲載契約](generated-publication.md#永続化とフィード)）。manifestは動画へ直接渡すURLではない。Flutterは `RANGLE_API_URL=/api/v1/clips` で動画・自由視点・時刻シークに使う（[起動手順](../apps/web/README.md#apiから動画自由視点を開く)）。ABRは未接続。
 
 ## 公開するcatalog
 

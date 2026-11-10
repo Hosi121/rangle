@@ -13,7 +13,9 @@
 | `GET /api/v1/clips/{id}/comments?cursor=...` | 新しい順に20件ずつ取得 |
 | `POST /api/v1/clips/{id}/comments` | `{text, request_id}` で投稿 |
 | `DELETE /api/v1/clips/{id}/comments/{comment}` | 自分のコメントを削除 |
-| `GET` / `POST /api/v1/clips/{id}/cheers` | [声援と再生位置ごとの熱量](immersive-ui.md#声援と熱量バー) |
+| `GET` / `POST /api/v1/clips/{id}/cheers` | [声援と再生位置ごとの熱量](immersive-ui.md#声援と熱量バー)。2026-11-10調査で公開router未接続を発見。修正/配備は[#127](https://github.com/Hosi121/rangle/issues/127)で追跡 |
+
+2026-11-10の調査時点では、[community handler](../internal/community/handler.go)にある声援APIが公開[application router](../cmd/rangle-server/application.go)へ未登録で、既存clipへのGETも404だった。公開POSTの書き込み確認は行っていない。既存実装を公開経路へ接続し、認証/CSRF・同じrequest_idの再送・件数上限をapplication経由で確認する。現在の修正と配備段階は#127を正本とする。
 
 | 入力 | 制約 |
 | --- | --- |
