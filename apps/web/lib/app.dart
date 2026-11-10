@@ -62,7 +62,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   AccountController? _account;
   Future<void>? _accountReady;
   String _query = '', _tag = '';
-  bool _generationOpen = false;
+  bool _generationOpen = false, _historyOpening = false;
 
   @override
   void initState() {
@@ -174,6 +174,40 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
       _query = value.startsWith('#') ? '' : value;
     });
     _reload();
+  }
+
+  Future<void> _openHistoryClip(String id) async {
+    if (_historyOpening) return;
+    _historyOpening = true;
+    final previous = _paging, generation = _paging.generation;
+    final next = ClipPagingController(widget.repository);
+    var adopted = false;
+    try {
+      await next.reset(clipId: id);
+      if (!mounted ||
+          _paging != previous ||
+          previous.generation != generation) {
+        return;
+      }
+      if (next.error != null ||
+          next.clips.isEmpty ||
+          next.clips.first.id != id) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('この動画を開けませんでした。時間をおいて再度お試しください。')),
+        );
+        return;
+      }
+      setState(() {
+        _paging = next;
+        _clipId = id;
+        _query = _tag = '';
+      });
+      adopted = true;
+      previous.dispose();
+    } finally {
+      if (!adopted) next.dispose();
+      _historyOpening = false;
+    }
   }
 
   void _filterTag(String tag) {
@@ -303,6 +337,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                     onSearch: () =>
                         _search(clips.expand((clip) => clip.tags).toSet()),
                     onTag: _filterTag,
+                    onOpenClip: _openHistoryClip,
                     onClearSearch: _clearSearch,
                     filterLabel: _tag.isEmpty ? _query : '#$_tag',
                     onLive: _openLive,
@@ -337,6 +372,7 @@ class _HighlightFeed extends StatefulWidget {
     required this.onSearch,
     required this.onLive,
     required this.onTag,
+    required this.onOpenClip,
     required this.onClearSearch,
     required this.filterLabel,
     this.initialFreeView = false,
@@ -349,7 +385,7 @@ class _HighlightFeed extends StatefulWidget {
   final AccountController? account;
   final ClipShareAction shareAction;
   final VoidCallback onSearch, onClearSearch, onLive;
-  final ValueChanged<String> onTag;
+  final ValueChanged<String> onTag, onOpenClip;
   final String filterLabel;
   final bool initialFreeView;
 
@@ -590,6 +626,7 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                                   onPressed: () => showAccountDialog(
                                     context,
                                     widget.account,
+                                    onOpenClip: widget.onOpenClip,
                                   ),
                                   icon: Icon(
                                     widget.account!.user == null

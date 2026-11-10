@@ -33,6 +33,7 @@ type Config struct {
 	Store         Store
 	ClipIDs       map[string]bool
 	ClipExists    func(context.Context, string) (bool, error)
+	DescribeClip  func(context.Context, string) (HistoryClip, error)
 	SecureCookies bool
 	Logger        *slog.Logger
 }
@@ -65,6 +66,7 @@ func NewHandler(cfg Config) *Handler {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/auth/me", h.me)
+	mux.HandleFunc("GET /api/v1/me/cheered-clips", h.cheerHistory)
 	mux.HandleFunc("POST /api/v1/auth/register", h.register)
 	mux.HandleFunc("POST /api/v1/auth/login", h.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", h.logout)
