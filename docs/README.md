@@ -17,6 +17,7 @@
 | --- | --- |
 | [クラウド構成](cloud-architecture.md) | [全体](diagrams/overview.html)・[ML](diagrams/ml-pipeline.html)・[配信](diagrams/delivery.html)・[監視](diagrams/observability.html)の4図 |
 | [連続再生](temporal-playback.md)・[クライアント処理](client-processing.md) | RGS1、Worker、GPU描画・資源管理 |
+| [transport再生](transport-playback.md) | API/manifest、ABR、独立segmentの取得・描画 |
 | [没入UI](immersive-ui.md) | 動画/3D切替、時刻・視点・再生意図 |
 | [LIVE配信](live-streaming.md) | index、model交換、再接続 |
 
@@ -29,6 +30,7 @@
 | [アカウント/交流](accounts.md)・[保存先](community-storage.md)・[スポーツのドメイン](sports-domain.md) | 認証・声援履歴・投稿団体・試合・選手・会場 |
 | [生成API](generation.md)・[結果掲載](generated-publication.md)・[掲載UI](generation-publication-ui.md) | preset、job、公開操作 |
 | [資産公開](asset-publication.md)・[不変catalog](catalog-snapshots.md) | 許諾・bytes検証、配置・切替・復帰 |
+| [独立区間の公開](segmented-publication.md) | 複数model/metricsの承認・size/SHA・時刻整合 |
 | [配信部品の契約](streaming-contract.md)・[HTTP選択](http-delivery-decision.md) | GoのHTTP/ABR基準実装 |
 | [言語間fixture](../testdata/contracts/v1/README.md)・[gzip契約](rgs-gzip-contract.md) | schema、74入力、単一member・末尾余剰の採否 |
 

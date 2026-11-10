@@ -89,7 +89,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
   void initState() {
     super.initState();
     _freeView =
-        widget.initialFreeView && widget.active && clip.sceneUrl != null;
+        widget.initialFreeView && widget.active && clip.freeViewUrl != null;
     _sceneRequested = _freeView;
     _videoRequested = !_freeView;
     _scene.addListener(_checkAlignment);
@@ -138,7 +138,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
     if (!widget.active && old.active) unawaited(_cheers.flush());
     if (!widget.active ||
         old.clip.id != clip.id ||
-        old.clip.sceneUrl != clip.sceneUrl ||
+        old.clip.freeViewUrl != clip.freeViewUrl ||
         old.clip.previewUrl != clip.previewUrl ||
         old.clip.revision != clip.revision) {
       final wasLocked = _freeView || _entering;
@@ -203,7 +203,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
     if (!widget.active ||
         _freeView ||
         _entering ||
-        clip.sceneUrl == null ||
+        clip.freeViewUrl == null ||
         (clip.previewUrl != null &&
             _video.value.status != ViewerStatus.ready)) {
       return;
@@ -489,7 +489,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
               key: const Key('video-playback-surface'),
               onTap: _entering ? null : () => unawaited(_video.toggle()),
               behavior: HitTestBehavior.opaque,
-              child: clip.sceneUrl != null && !_freeView
+              child: clip.freeViewUrl != null && !_freeView
                   ? Center(
                       child: Semantics(
                         label: '長押しで自由視点',
@@ -575,10 +575,12 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
             child: Stack(
               fit: StackFit.expand,
               children: [
-                if (_sceneRequested && widget.active && clip.sceneUrl != null)
+                if (_sceneRequested &&
+                    widget.active &&
+                    clip.freeViewUrl != null)
                   Transform.scale(
                     key: ValueKey(
-                      '${clip.id}-${clip.revision}-${clip.sceneUrl}-scene',
+                      '${clip.id}-${clip.revision}-${clip.freeViewUrl}-scene',
                     ),
                     scale: !_reduced && (_entering || _hasEntered)
                         ? entryZoom(1, 1)
@@ -591,8 +593,17 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                         child: IgnorePointer(
                           ignoring: !_freeView,
                           child: PreviewViewer(
-                            source: clip.sceneUrl!,
+                            source: clip.freeViewUrl!,
                             factory: widget.sceneFactory,
+                            transportIdentity:
+                                clip.manifestUrl != null &&
+                                    clip.freeViewUrl == clip.manifestUrl
+                                ? {
+                                    'clipId': clip.id,
+                                    'revision': clip.revision,
+                                    'codec': clip.codec!,
+                                  }
+                                : null,
                             freeView: true,
                             thumbnailSource: clip.previewUrl,
                             continuity: true,
@@ -748,7 +759,7 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                                 ),
                               ),
                             )
-                          else if (clip.sceneUrl != null)
+                          else if (clip.freeViewUrl != null)
                             Expanded(
                               child: Align(
                                 alignment: Alignment.centerLeft,

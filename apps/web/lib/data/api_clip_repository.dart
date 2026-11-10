@@ -120,11 +120,17 @@ class ApiClipRepository
         final id = text('id');
         final revision = row['revision'] as String? ?? '';
         final preview = media('preview_url'), scene = media('scene_url');
+        final manifest = media('manifest_url');
+        final codec = row['codec'];
+        if (codec != null && (codec is! String || codec.trim().isEmpty)) {
+          throw const FormatException('Invalid clip codec.');
+        }
         // Published RGS1 bundle contract: the preview and model use the same
         // clip-relative clock. Binding includes origin, clip and revision.
         final prefix = '/assets/$id/$revision/full/';
         final paired =
-            row['codec'] == 'rangle-temporal-rgs1' &&
+            (row['codec'] == 'rangle-temporal-rgs1' ||
+                row['codec'] == 'rangle-temporal-rgs1-segments-v1') &&
             RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(id) &&
             RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(revision) &&
             preview != null &&
@@ -156,6 +162,8 @@ class ApiClipRepository
           description: text('description', emptyAllowed: true),
           previewUrl: preview,
           sceneUrl: scene,
+          manifestUrl: manifest,
+          codec: codec as String?,
           revision: revision,
           playbackMapping: paired || knownLegacy
               ? const PreviewSceneMapping()

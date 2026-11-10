@@ -52,6 +52,12 @@ class _FreeViewAdapter extends ViewerAdapter {
   int _requestedFrame = 0;
   Timer? _timeout;
   bool _deferFirstFrame = false, _prepared = false;
+  Map<String, String>? _transportIdentity;
+  @override
+  void configureTransportIdentity(Map<String, String>? identity) {
+    _transportIdentity = identity;
+  }
+
   Uri? _preview;
   PreviewSceneMapping? _mapping;
   ViewerTimeline? _timeline;
@@ -183,6 +189,8 @@ class _FreeViewAdapter extends ViewerAdapter {
         case 'boot':
           _send('load', {
             'url': source.toString(),
+            if (_transportIdentity != null)
+              'transportIdentity': _transportIdentity,
             if (_deferFirstFrame) ...{
               'deferFirstFrame': true,
               'previewUrl': _preview.toString(),

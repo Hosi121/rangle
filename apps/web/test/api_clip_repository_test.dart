@@ -17,6 +17,77 @@ Map<String, Object?> clip() => {
 };
 
 void main() {
+  test('transport metadata reaches the rendering source without replacing video or unknown codecs', () async {
+    for (final codec in [
+      'rangle-temporal-rgs1',
+      'rangle-temporal-rgs1-segments-v1',
+      'unsupported',
+    ]) {
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'clips': [
+              {
+                ...clip(),
+                'revision': 'v1',
+                'codec': codec,
+                'manifest_url':
+                    'https://media.example.test/manifests/basketball/v1.json',
+              },
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ),
+      );
+      addTearDown(client.close);
+      final value = (await ApiClipRepository(
+        endpoint: 'https://example.test/api/v1/clips',
+        client: client,
+      ).load()).single;
+      expect(value.codec, codec);
+      expect(
+        value.manifestUrl.toString(),
+        'https://media.example.test/manifests/basketball/v1.json',
+      );
+      expect(value.previewUrl, isNotNull);
+      expect(
+        value.freeViewUrl,
+        codec == 'unsupported' ? value.sceneUrl : value.manifestUrl,
+      );
+    }
+  });
+
+  test('segmented codec without a manifest keeps video and cannot silently play just its first scene', () async {
+    for (final codec in [
+      'rangle-temporal-rgs1-segments-v1',
+      'rangle-temporal-rgs1',
+      'unsupported',
+    ]) {
+      final client = MockClient(
+        (_) async => http.Response(
+          jsonEncode({
+            'clips': [
+              {...clip(), 'codec': codec},
+            ],
+          }),
+          200,
+          headers: {'content-type': 'application/json; charset=utf-8'},
+        ),
+      );
+      addTearDown(client.close);
+      final value = (await ApiClipRepository(
+        endpoint: 'https://example.test/api/v1/clips',
+        client: client,
+      ).load()).single;
+      expect(value.previewUrl, isNotNull);
+      expect(
+        value.freeViewUrl,
+        codec == 'rangle-temporal-rgs1-segments-v1' ? isNull : value.sceneUrl,
+      );
+    }
+  });
+
   test('only publisher-bound codec, clip, revision and exact paired URLs declare a shared clock', () async {
     final row = {
       ...clip(),

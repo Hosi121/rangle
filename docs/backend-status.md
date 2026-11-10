@@ -15,7 +15,7 @@
 | ログ監視 | Tokyoの専用bucket/sink・30日保持・8 widgetsのdashboard。Go再配備後のseverity/message受信を確認し、[#33](https://github.com/Hosi121/rangle/issues/33)は完了。[受信記録](observability.md#go再配備後の受信確認) |
 | 再生・圧縮 | 時間モデルの端末描画、local-lifetime学習、可逆packing。FP16/間引きは比較用。[再生](temporal-playback.md)・[圧縮比較](temporal-compression-comparison.md) |
 | LIVE | Tokyo Spot T4×1で8モデルを実CDN公開しterminal・active解放を確認。継続30秒遅延は未達。[実測](cloud-live.md) |
-| ABR | Go基準実装と合成テスト、実RGS1のsize/SHA/codec/working set広告。実モデルの複数segment・品質切替には未接続。[契約](streaming-contract.md) |
+| ABR | Go基準と照合したJS制御、API/manifestからsize/SHA検証・RGS1描画まで接続。独立区間の公開gateも実装。実品質ラダー・実端末/QoEの比較は未検証。[契約](streaming-contract.md) |
 | 私有model確認 | 管理者限定のローカルpreview。公開catalogには登録しない。[手順](private-preview.md) |
 
 公開Runのruntime設定と適用段階は[配備手順](stg-deployment.md)と[#24](https://github.com/Hosi121/rangle/issues/24)で管理する。配備・小規模疎通の成功を、10万CCUや実端末の容量根拠とはしない。素材ごとの来歴・校正・画質判断は継続する。
@@ -41,7 +41,7 @@ Go1.27.3、固定CPU・GOMAXPROCS=1、合成100clip、200ms×5回を前後交替
 ## 残る検証
 
 - 10万CCUのSLO・実端末・段階負荷・cold origin集中、実負荷下の版混在/復帰は未検証。[#20](https://github.com/Hosi121/rangle/issues/20)・[#35](https://github.com/Hosi121/rangle/issues/35)
-- LIVEは録画ZIP入力のクラウド公開まで実装済み。RTMP/RTSP入力は未実装、長時間・実カメラ・欠損なし25fpsは未検証、継続30秒遅延は未達。FP16/間引きは未採用、実ABR接続も残る。[#89](https://github.com/Hosi121/rangle/issues/89)・[#27](https://github.com/Hosi121/rangle/issues/27)・[#28](https://github.com/Hosi121/rangle/issues/28)
+- LIVEは録画ZIP入力のクラウド公開まで実装済み。RTMP/RTSP入力は未実装、長時間・実カメラ・欠損なし25fpsは未検証、継続30秒遅延は未達。FP16/間引きは未採用、実品質ラダーを使うABR比較と実端末測定は残る。[#89](https://github.com/Hosi121/rangle/issues/89)・[#27](https://github.com/Hosi121/rangle/issues/27)・[#28](https://github.com/Hosi121/rangle/issues/28)
 - 分散quota・容量設定と、SLO/費用モデル・段階リリースの受入は[#24](https://github.com/Hosi121/rangle/issues/24)・[#20](https://github.com/Hosi121/rangle/issues/20)・[#34](https://github.com/Hosi121/rangle/issues/34)に残る。SLO通知・端末QoEは完了した#33の対象外。
 - 旧[#32](https://github.com/Hosi121/rangle/issues/32)の残条件を分割し、公開app originのWeb/Worker・Range/条件付きGET・cache/公開切替は[#125](https://github.com/Hosi121/rangle/issues/125)で確認完了。有限のcold/warm・CDN hit率/origin観測は[#126](https://github.com/Hosi121/rangle/issues/126)に残る。
 - gzip追加memberの採否差は[#115](https://github.com/Hosi121/rangle/pull/115)で修正をstgへマージ済み。通常資産の可逆性、列挙fixtureと確認browserの範囲、追加復号負荷は[gzip契約](rgs-gzip-contract.md)を参照。FP16採用とは別の変更。

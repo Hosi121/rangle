@@ -1,3 +1,5 @@
+import { TransportPlayback } from './transport-playback.js';
+import { parseTransport } from './transport-manifest.js';
 import { validIntrinsics } from './camera-intrinsics.js';
 import { TemporalSession } from './temporal-session.js';
 import { liveSceneUrl } from './live-model.js';
@@ -77,7 +79,10 @@ export class SceneSession {
   }
 
   async manifestFrom(source, signal) {
-    let options = { signal };
+    const requested = httpUrl(source);
+    const transportSource = this.liveOptions.transportIdentity !== undefined ||
+      /^\/manifests\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9_-]{1,64}\.json$/.test(requested.pathname);
+    let options = transportSource ? { signal, redirect: 'error', credentials: 'omit' } : { signal };
     if (this.liveOptions.live) {
       const checked = liveSceneUrl(source, this.liveOptions.origins, this.liveSession);
       this.liveSession = checked.session;
@@ -85,26 +90,37 @@ export class SceneSession {
     }
     const response = await this.fetchManifest(httpUrl(source).href, options);
     if (!response.ok) throw new Error('Manifest request failed');
+    if (transportSource && response.url && response.url !== requested.href) throw Error('Transport manifest redirected');
     let json;
-    if (this.liveOptions.live) {
-      if (Number(response.headers.get('Content-Length')) > 1048576) throw new Error('Manifest too large');
+    if (this.liveOptions.live || transportSource) {
+      if (Number(response.headers.get('Content-Length')) > 1048576) {
+        await response.body?.cancel().catch(() => {}); throw new Error('Manifest too large');
+      }
       const reader = response.body.getReader(), chunks = [];
-      let size = 0;
+      let size = 0, rejectAbort;
+      const aborted = new Promise((_, reject) => { rejectAbort = reject; });
+      const cancel = () => {
+        rejectAbort(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        void reader.cancel().catch(() => {});
+      };
+      signal.addEventListener('abort', cancel, { once: true });
+      if (signal.aborted) cancel();
       try {
         while (true) {
-          const { value, done } = await reader.read();
+          const { value, done } = await Promise.race([reader.read(), aborted]);
           if (done) break;
           size += value.byteLength;
           if (size > 1048576) throw new Error('Manifest too large');
           chunks.push(value);
         }
-      } finally { await reader.cancel().catch(() => {}); reader.releaseLock(); }
+      } finally { signal.removeEventListener('abort', cancel); await reader.cancel().catch(() => {}); reader.releaseLock(); }
       const bytes = new Uint8Array(size);
       let offset = 0;
       for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
       json = strictJson(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
     } else json = strictJson(await response.text());
-    const manifest = parseManifest(json, response.url || source);
+    const manifest = transportSource || ['rangle-temporal-rgs1-segments-v1', 'rangle-temporal-rgs1'].includes(json?.codec) ?
+      parseTransport(json, requested.href, this.liveOptions.transportIdentity ?? {}) : parseManifest(json, response.url || source);
     if (this.liveOptions.live) {
       const model = new URL(manifest.temporal?.url ?? '');
       const expected = new URL('model.rgs', source);
@@ -119,6 +135,14 @@ export class SceneSession {
       this.manifest = await this.manifestFrom(source, this.abort.signal);
       clearTimeout(timeout);
       if (this.disposed) return;
+      if (this.manifest.representations) {
+        if (this.liveOptions.live) throw Error('LIVE cannot use VOD transport');
+        this.temporal = new TransportPlayback({ createViewer: this.createViewer, notify: this.notify,
+          fetchAsset: this.fetchManifest, parseScene: parseManifest });
+        this.temporal.pause(this.paused);
+        await this.temporal.load(this.manifest, { ...this.liveOptions, source });
+        return;
+      }
       const continuity = this.liveOptions.deferFirstFrame ?
         handoffTimeline(this.manifest, { ...this.liveOptions, source }) : null;
       if (this.manifest.temporal) {

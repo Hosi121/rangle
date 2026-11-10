@@ -228,6 +228,14 @@ func validateApproval(a Approval) error {
 			case "preview.webm":
 				limit = 16 << 20
 			default:
+				if indexedModelName.MatchString(name) {
+					limit = maxModel
+					break
+				}
+				if indexedMetricsName.MatchString(name) {
+					limit = 256 << 10
+					break
+				}
 				if !heldoutName.MatchString(name) {
 					return fmt.Errorf("file %q is outside public artifact allowlist", filename)
 				}
@@ -288,13 +296,20 @@ func checkRoot(ctx context.Context, root string, expected map[string]Proof) erro
 
 func verifyEntry(ctx context.Context, e entry, a Approval, origin *url.URL, root *os.Root, fetch fetchAsset) error {
 	m := e.Manifest
-	if m.Codec != "rangle-temporal-rgs1" || len(m.Representations) != 1 || m.Representations[0].ID != "full" {
+	segmented := m.Codec == segmentedCodec
+	if (m.Codec != "rangle-temporal-rgs1" && !segmented) || len(m.Representations) != 1 || m.Representations[0].ID != "full" {
 		return fmt.Errorf("new publication supports one full RGS1 representation")
 	}
 	r := m.Representations[0]
 	prefix := "/assets/" + m.ClipID + "/" + m.Revision + "/full/"
-	if len(r.Segments) != 1 || r.InitURL != prefix+"scene.json" || r.Segments[0].URL != prefix+"model.rgs" {
-		return fmt.Errorf("scene/model must share the exact clip revision")
+	if r.InitURL != prefix+"scene.json" || len(r.Segments) == 0 || (!segmented && len(r.Segments) != 1) || (segmented && len(r.Segments) < 2) {
+		return fmt.Errorf("scene/model must share the exact clip revision and profile")
+	}
+	for i, segment := range r.Segments {
+		model, _ := segmentNames(i)
+		if segment.URL != prefix+model {
+			return fmt.Errorf("segment %d has a noncanonical model path", i)
+		}
 	}
 	for _, pair := range [][2]string{{e.SceneURL, prefix + "scene.json"}, {e.PreviewURL, prefix + "preview.webm"}} {
 		actual, err := assetPath(pair[0], origin)
@@ -305,14 +320,26 @@ func verifyEntry(ctx context.Context, e entry, a Approval, origin *url.URL, root
 	if !strings.Contains(e.Description, a.Attribution) || !strings.Contains(a.Attribution, a.License) {
 		return fmt.Errorf("catalog description lacks approved attribution/license")
 	}
-	required := []string{m.URL(), prefix + "model.rgs", prefix + "scene.json", prefix + "preview.webm", prefix + "metrics.json"}
-	for _, filename := range required {
+	required := map[string]bool{m.URL(): true, prefix + "scene.json": true, prefix + "preview.webm": true}
+	for i, segment := range r.Segments {
+		model, metrics := segmentNames(i)
+		required[prefix+model], required[prefix+metrics] = true, true
+		if a.Files[segment.URL] != (Proof{segment.SizeBytes, segment.SHA256}) {
+			return fmt.Errorf("transport and approval proofs differ at segment %d", i)
+		}
+	}
+	for filename := range required {
 		if _, ok := a.Files[filename]; !ok {
 			return fmt.Errorf("missing proof for %s", filename)
 		}
 	}
-	if a.Files[r.InitURL].Bytes != r.InitSizeBytes || a.Files[r.Segments[0].URL] != (Proof{r.Segments[0].SizeBytes, r.Segments[0].SHA256}) {
-		return fmt.Errorf("transport and approval proofs differ")
+	for filename := range a.Files {
+		if !required[filename] && !heldoutName.MatchString(path.Base(filename)) {
+			return fmt.Errorf("unreferenced public artifact %s", filename)
+		}
+	}
+	if a.Files[r.InitURL].Bytes != r.InitSizeBytes {
+		return fmt.Errorf("transport and approval initialization proofs differ")
 	}
 	names := make([]string, 0, len(a.Files))
 	for filename := range a.Files {
@@ -361,12 +388,18 @@ func verifyEntry(ctx context.Context, e entry, a Approval, origin *url.URL, root
 	if contentHash(manifest) != contentHash(e.Manifest) {
 		return fmt.Errorf("standalone manifest differs from catalog")
 	}
-	if err := validateSceneModel(files[prefix+"scene.json"], files[prefix+"model.rgs"], files[prefix+"metrics.json"], e, a); err != nil {
-		return err
-	}
-	model := files[prefix+"model.rgs"]
-	if err := validateWebM(files[prefix+"preview.webm"], int(little32(model[16:20])), float32At(model[20:24])); err != nil {
-		return err
+	if segmented {
+		if err := validateSegmentedModels(files, e, a, prefix); err != nil {
+			return err
+		}
+	} else {
+		if err := validateSceneModel(files[prefix+"scene.json"], files[prefix+"model.rgs"], files[prefix+"metrics.json"], e, a); err != nil {
+			return err
+		}
+		model := files[prefix+"model.rgs"]
+		if err := validateWebM(files[prefix+"preview.webm"], int(little32(model[16:20])), float32At(model[20:24])); err != nil {
+			return err
+		}
 	}
 	for filename, data := range files {
 		if heldoutName.MatchString(path.Base(filename)) {

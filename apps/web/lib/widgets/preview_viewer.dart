@@ -28,6 +28,7 @@ class PreviewViewer extends StatefulWidget {
     this.playback,
     this.continuity = false,
     this.mapping,
+    this.transportIdentity,
     this.onValueChanged,
     this.onPrepared,
     this.onPlaybackRestored,
@@ -54,6 +55,7 @@ class PreviewViewer extends StatefulWidget {
   final PlaybackState? playback;
   final bool continuity;
   final PreviewSceneMapping? mapping;
+  final Map<String, String>? transportIdentity;
   final ValueChanged<ViewerValue>? onValueChanged;
   final ValueChanged<ViewerTimeline>? onPrepared;
   final VoidCallback? onPlaybackRestored;
@@ -98,6 +100,7 @@ class _PreviewViewerState extends State<PreviewViewer>
     _lastReportedSource = null;
     _preparedNotified = false;
     _adapter = widget.factory(widget.source);
+    _adapter.configureTransportIdentity(widget.transportIdentity);
     if (widget.continuity && widget.thumbnailSource != null) {
       _adapter.configureContinuity(widget.thumbnailSource!, widget.mapping);
     }
