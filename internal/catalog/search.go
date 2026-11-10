@@ -7,11 +7,14 @@ import (
 	"net/url"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/Hosi121/rangle/internal/publisher"
 )
 
 type searchEntry struct {
-	text string
-	tags map[string]bool
+	text      string
+	tags      map[string]bool
+	publisher publisher.ID
 }
 
 func newSearchEntry(view clipView) searchEntry {
@@ -22,6 +25,9 @@ func newSearchEntry(view clipView) searchEntry {
 	for _, tag := range view.Tags {
 		entry.tags[strings.ToLower(tag)] = true
 	}
+	if view.Context != nil && view.Context.Publisher != nil {
+		entry.publisher = view.Context.Publisher.ID
+	}
 	return entry
 }
 
@@ -29,19 +35,23 @@ func newSearchEntry(view clipView) searchEntry {
 // to the normalized filter so it cannot silently skip results of another search.
 func (h *handler) selectClips(query url.Values) (clipSelection, string, error) {
 	q, tag := query.Get("q"), query.Get("tag")
+	account := publisher.ID(query.Get("publisher"))
 	if len(q) > 256 || !utf8.ValidString(q) || len(strings.Fields(q)) > 8 ||
-		(tag != "" && !validTag(tag)) {
+		(tag != "" && !validTag(tag)) || (account != "" && !account.Valid()) {
 		return clipSelection{}, "", fmt.Errorf("invalid search")
 	}
 	terms := strings.Fields(strings.ToLower(q))
 	tag = strings.ToLower(tag)
-	if len(terms) == 0 && tag == "" {
+	if len(terms) == 0 && tag == "" && account == "" {
 		return clipSelection{first: h.extra, second: h.clips}, h.snapshot, nil
 	}
-	sum := sha256.Sum256([]byte(h.snapshot + "\n" + strings.Join(terms, " ") + "\n" + tag))
+	sum := sha256.Sum256([]byte(h.snapshot + "\n" + strings.Join(terms, " ") + "\n" + tag + "\n" + string(account)))
 	selected := make([]jsonDocument, 0)
 	collect := func(search []searchEntry, clips []jsonDocument) {
 		for i, entry := range search {
+			if account != "" && entry.publisher != account {
+				continue
+			}
 			if tag != "" && !entry.tags[tag] {
 				continue
 			}
