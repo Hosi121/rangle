@@ -59,7 +59,7 @@ test('Go collapse/recovery vector and excluded samples have identical decisions'
   });
   assert.throws(() => new TransportABR(parseTransport(manifest(), source), { maxDecodedBytes: 1 }).select({ segmentIndex: 0 }));
 });
-function playbackFixture(tamper = false, legacy = false, segmentCache) {
+function playbackFixture(tamper = false, legacy = false, segmentCache, animation = {}) {
   const raw = manifest(2); raw.representations = [raw.representations[0]];
   if (legacy) { raw.codec = 'rangle-temporal-rgs1'; raw.representations[0].segments.length = 1; raw.representations[0].segments[0].duration_seconds = 1.5; }
   const r = raw.representations[0], bodies = new Map(), requests = [], events = [], rendered = [];
@@ -76,7 +76,7 @@ function playbackFixture(tamper = false, legacy = false, segmentCache) {
     async load(m,o){rendered.push({m,o});}, async replace(m,o){rendered.push({m,o});return true;},
     async seek(frame){this.frame=frame;}, cancelReplacement(){}, async dispose(){this.disposed=true;} };
   const playback = new TransportPlayback({ createViewer(){}, notify:m=>events.push(m), parseScene:parseManifest,
-    requestFrame(){return 1;}, cancelFrame(){}, createTemporal(){return temporal;}, ...(segmentCache ? { segmentCache } : {}),
+    requestFrame(){return 1;}, cancelFrame(){}, createTemporal(){return temporal;}, ...animation, ...(segmentCache ? { segmentCache } : {}),
     async fetchAsset(url, options){requests.push({url,options});return new Response(bodies.get(url),{status:200,headers:{'Cache-Control':'public,max-age=600',Age:'0'}});} });
   return { playback, manifest:parseTransport(raw,source), requests, events, rendered, temporal };
 }
@@ -248,4 +248,120 @@ test('a model whose public response expires during transfer is displayed but nev
   await f.playback.load(f.manifest, { source });
   assert.equal(f.rendered.length, 1); assert.equal(storage.entries.size, 0); assert.ok(f.playback.abr.fast > 0);
   await f.playback.dispose();
+});
+
+
+function controlledAnimation() {
+  let next = 0;
+  const callbacks = new Map();
+  return {
+    requestFrame(callback) { callbacks.set(++next, callback); return next; },
+    cancelFrame(id) { callbacks.delete(id); },
+    get pending() { return callbacks.size; },
+    async advance(count = 1) {
+      for (let i = 0; i < count; i++) {
+        assert.equal(callbacks.size, 1, 'playback owns one pending animation callback');
+        const [id, callback] = callbacks.entries().next().value;
+        callbacks.delete(id);
+        callback();
+        await new Promise(resolve => setImmediate(resolve));
+      }
+    },
+  };
+}
+const playbackMessages = fixture => fixture.events.filter(message => message.type === 'playback');
+
+test('stationary paused RAF callbacks emit one playback message without changing the protocol', async t => {
+  const animation = controlledAnimation();
+  const f = playbackFixture(false, false, undefined, animation);
+  t.after(() => f.playback.dispose());
+  await f.playback.load(f.manifest, { source });
+  f.playback.clock.now = () => 0;
+  f.playback.clock.seek(0);
+  await animation.advance(60);
+  assert.deepEqual(playbackMessages(f), [
+    { type: 'playback', positionSeconds: 0, playing: false, playIntent: false },
+  ]);
+  assert.equal(f.events.filter(message => message.type === 'ready').length, 1);
+  assert.equal(f.temporal.frame, 0);
+});
+
+test('dedup retains play/pause and every changed committed playback position', async t => {
+  const animation = controlledAnimation();
+  const f = playbackFixture(false, false, undefined, animation);
+  t.after(() => f.playback.dispose());
+  await f.playback.load(f.manifest, { source });
+  let now = 0;
+  f.playback.clock.now = () => now;
+  f.playback.clock.seek(0);
+  await animation.advance();
+  f.playback.togglePlayback();
+  await animation.advance();
+  await animation.advance(60);
+  now = 500;
+  await animation.advance(2); // The same next-RAF commit behavior as before.
+  f.playback.togglePlayback();
+  await animation.advance(60);
+  assert.deepEqual(playbackMessages(f), [
+    { type: 'playback', positionSeconds: 0, playing: false, playIntent: false },
+    { type: 'playback', positionSeconds: 0, playing: true, playIntent: true },
+    { type: 'playback', positionSeconds: .5, playing: true, playIntent: true },
+    { type: 'playback', positionSeconds: .5, playing: false, playIntent: false },
+  ]);
+  assert.equal(f.temporal.frame, 1);
+});
+
+test('same-state seeks and presentations still publish loading and every ready acknowledgement', async t => {
+  const animation = controlledAnimation();
+  const f = playbackFixture(false, false, undefined, animation);
+  t.after(() => f.playback.dispose());
+  await f.playback.load(f.manifest, { source, deferFirstFrame: true });
+  f.playback.clock.now = () => 0;
+  f.playback.clock.seek(0);
+  assert.equal(f.events.filter(message => message.type === 'prepared').length, 1);
+  await f.playback.present(1, true, 7);
+  await f.playback.present(1, true, 8);
+  await f.playback.seek(1);
+  await f.playback.present(2, false, 9);
+  assert.equal(f.events.filter(message => message.type === 'loading').length, 4);
+  assert.deepEqual(f.events.filter(message => message.type === 'ready').map(message =>
+    [message.frame, message.presentationId, message.playing]),
+  [[1, 7, true], [1, 8, true], [1, undefined, true], [2, 9, false]]);
+  assert.deepEqual(playbackMessages(f), [
+    { type: 'playback', positionSeconds: .5, playing: true, playIntent: true },
+    { type: 'playback', positionSeconds: 1, playing: false, playIntent: false },
+  ]);
+});
+
+test('visibility suspension keeps play intent and excludes hidden time after resuming', async t => {
+  const animation = controlledAnimation();
+  const f = playbackFixture(false, false, undefined, animation);
+  t.after(() => f.playback.dispose());
+  await f.playback.load(f.manifest, { source });
+  let now = 0;
+  f.playback.clock.now = () => now;
+  f.playback.clock.seek(0);
+  await animation.advance();
+  f.playback.togglePlayback();
+  await animation.advance();
+  now = 500;
+  await animation.advance(2);
+  const beforeHidden = playbackMessages(f).length;
+  f.playback.pause(true);
+  now = 5500;
+  await animation.advance(60);
+  assert.equal(f.playback.clock.value(), .5);
+  assert.equal(playbackMessages(f).length, beforeHidden);
+  f.playback.pause(false);
+  await animation.advance();
+  assert.equal(f.playback.clock.playing, true);
+  assert.equal(playbackMessages(f).length, beforeHidden);
+  now = 6000;
+  await animation.advance(2);
+  assert.deepEqual(playbackMessages(f).at(-1),
+    { type: 'playback', positionSeconds: 1, playing: true, playIntent: true });
+  assert.equal(playbackMessages(f).length, beforeHidden + 1);
+  assert.equal(f.temporal.frame, 2);
+  await f.playback.dispose();
+  assert.equal(animation.pending, 0);
 });
