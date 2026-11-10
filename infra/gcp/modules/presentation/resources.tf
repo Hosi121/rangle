@@ -131,13 +131,19 @@ resource "google_cloud_run_v2_service" "app" {
   labels               = local.labels
   scaling {
     min_instance_count = 0
-    max_instance_count = 1
+    max_instance_count = 2
   }
   template {
-    service_account                  = google_service_account.runtime.email
-    execution_environment            = "EXECUTION_ENVIRONMENT_GEN2"
-    max_instance_request_concurrency = 40
-    timeout                          = "30s"
+    service_account       = google_service_account.runtime.email
+    execution_environment = "EXECUTION_ENVIRONMENT_GEN2"
+    # Match the API's eight in-process slots while bounded autoscaling is tried.
+    max_instance_request_concurrency = 8
+    # Also bound zero-traffic tagged candidates, which do not share service max.
+    scaling {
+      min_instance_count = 0
+      max_instance_count = 2
+    }
+    timeout = "30s"
     containers {
       image = var.application.image_digest
       args = concat([

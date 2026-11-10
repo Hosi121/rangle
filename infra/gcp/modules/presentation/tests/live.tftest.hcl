@@ -43,7 +43,7 @@ run "live_uses_existing_private_index_without_changing_capacity" {
     error_message = "Live metadata must use the fixed private index object."
   }
   assert {
-    condition     = google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1 && google_cloud_run_v2_service.app[0].template[0].max_instance_request_concurrency == 40 && google_storage_bucket_iam_member.catalog_reader.role == "roles/storage.objectViewer"
+    condition     = google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 2 && google_cloud_run_v2_service.app[0].template[0].max_instance_request_concurrency == 8 && google_storage_bucket_iam_member.catalog_reader.role == "roles/storage.objectViewer"
     error_message = "Enabling live must preserve capacity limits and the existing read-only storage grant."
   }
   assert {

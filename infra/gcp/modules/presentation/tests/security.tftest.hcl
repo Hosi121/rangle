@@ -77,7 +77,7 @@ run "all_public_backends_enforce_the_correct_policy" {
     error_message = "The media path regex must preserve current published URLs, including root attribution, without allowing listing or neighboring/private namespaces."
   }
   assert {
-    condition     = google_compute_backend_bucket.media.enable_cdn && google_compute_backend_bucket.media.cdn_policy[0].default_ttl == 86400 && google_compute_backend_bucket.live_index[0].cdn_policy[0].default_ttl == 1 && google_cloud_run_v2_service.app[0].scaling[0].min_instance_count == 0 && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1 && var.deadline == "2026-11-14T15:00:00Z"
+    condition     = google_compute_backend_bucket.media.enable_cdn && google_compute_backend_bucket.media.cdn_policy[0].default_ttl == 86400 && google_compute_backend_bucket.live_index[0].cdn_policy[0].default_ttl == 1 && google_cloud_run_v2_service.app[0].scaling[0].min_instance_count == 0 && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 2 && var.deadline == "2026-11-14T15:00:00Z"
     error_message = "Security policy attachments must preserve media caching, bounded capacity, and the approved shutdown deadline."
   }
 }

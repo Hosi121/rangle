@@ -73,8 +73,12 @@ run "configured_domain_bounded_app" {
     }
   }
   assert {
-    condition     = google_cloud_run_v2_service.app[0].ingress == "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" && !google_cloud_run_v2_service.app[0].default_uri_disabled && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1 && google_cloud_run_v2_service.app[0].scaling[0].min_instance_count == 0 && google_cloud_run_v2_service.app[0].template[0].max_instance_request_concurrency == 40
-    error_message = "Public app requests must enter through the LB; preserve managed callers and bounded scaling."
+    condition     = google_cloud_run_v2_service.app[0].ingress == "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" && !google_cloud_run_v2_service.app[0].default_uri_disabled && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 2 && google_cloud_run_v2_service.app[0].scaling[0].min_instance_count == 0 && google_cloud_run_v2_service.app[0].template[0].max_instance_request_concurrency == 8
+    error_message = "Public app requests must enter through the LB; keep provisional min0/max2 and concurrency8."
+  }
+  assert {
+    condition     = google_cloud_run_v2_service.app[0].template[0].scaling[0].min_instance_count == 0 && google_cloud_run_v2_service.app[0].template[0].scaling[0].max_instance_count == 2 && google_cloud_run_v2_service.app[0].template[0].containers[0].resources[0].limits == tomap({ cpu = "1", memory = "512Mi" }) && google_cloud_run_v2_service.app[0].template[0].containers[0].resources[0].cpu_idle && !google_cloud_run_v2_service.app[0].template[0].containers[0].resources[0].startup_cpu_boost && google_cloud_run_v2_service.app[0].template[0].timeout == "30s"
+    error_message = "Bound tagged app revisions too, retaining request billing, 1 CPU/512MiB, and the 30s timeout."
   }
   assert {
     condition     = google_cloud_run_v2_service.app[0].template[0].volumes[0].gcs[0].read_only && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "https://media.presentation.example.com") && google_cloud_run_v2_service.app[0].template[0].containers[0].startup_probe[0].http_get[0].path == "/healthz"
