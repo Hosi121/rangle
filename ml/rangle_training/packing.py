@@ -211,17 +211,26 @@ def compress_temporal_smallest(payload):
 
 
 def decode_temporal(payload):
-    import gzip
-    import io
+    import zlib
 
     count, _, _, _, compressed = temporal_header(payload)
     if not compressed:
         return payload
     expected = count * TEMPORAL_STRIDE
-    with gzip.GzipFile(fileobj=io.BytesIO(payload[TEMPORAL_HEADER_BYTES:])) as source:
-        columns = source.read(expected + 1)
-    if len(columns) != expected:
-        raise ValueError("Decompressed temporal size differs from its declaration")
+    # One native gzip member, including its CRC/ISIZE, must consume all input.
+    # GzipFile would silently accept extra members and trailing NUL padding.
+    decoder = zlib.decompressobj(wbits=31)
+    try:
+        columns = decoder.decompress(payload[TEMPORAL_HEADER_BYTES:], expected + 1)
+    except zlib.error as error:
+        raise ValueError("Invalid temporal gzip checksum or stream") from error
+    if (
+        len(columns) != expected
+        or not decoder.eof
+        or decoder.unused_data
+        or decoder.unconsumed_tail
+    ):
+        raise ValueError("Invalid temporal gzip size, termination or trailing bytes")
     rows = (
         np.frombuffer(columns, dtype=np.uint8).reshape(TEMPORAL_STRIDE, count).T.copy()
     )

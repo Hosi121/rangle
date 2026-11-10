@@ -17,7 +17,11 @@ for (const row of corpus.cases) {
   if (!['rgs', 'scene', 'bundle', 'clock'].includes(row.profile)) continue;
   test(`shared contract ${row.id} (${row.profile})`, async () => {
     const run = async () => {
-      const bytes = await read(row.file);
+      let bytes = await read(row.file);
+      if (row.recipe?.kind === 'pad-to-size') {
+        const padded = Buffer.alloc(row.recipe.bytes);
+        bytes.copy(padded); bytes = padded;
+      }
       if (row.profile === 'rgs') {
         const raw = await decodeTemporal(buffer(bytes));
         prepareTemporal(raw);

@@ -193,12 +193,17 @@ func temporalModel(data []byte, frames int, fps float64) ([]byte, error) {
 		}
 		raw = data
 	} else {
+		// RFC 1952 reserves the upper three flags. Go's gzip reader ignores
+		// them, while the producer/viewer native decoders reject them.
+		if len(data) < header+18 || data[header+3]&0xe0 != 0 {
+			return nil, fmt.Errorf("invalid RGS1 gzip header")
+		}
 		compressed := bytes.NewReader(data[header:])
 		reader, err := gzip.NewReader(compressed)
 		if err != nil {
 			return nil, fmt.Errorf("invalid RGS1 gzip: %w", err)
 		}
-		reader.Multistream(false)
+		reader.Multistream(false) // Canonical Z1 is exactly one gzip member.
 		columns, err := io.ReadAll(io.LimitReader(reader, count*stride+1))
 		closeErr := reader.Close()
 		if err != nil || closeErr != nil || int64(len(columns)) != count*stride || compressed.Len() != 0 {

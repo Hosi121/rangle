@@ -21,7 +21,7 @@ async function loadPending() {
       if (digest !== data.sha256) throw new Error('Model digest mismatch');
     }
     if (abort.signal.aborted || hidden) return;
-    const decoded = await decodeTemporal(bytes.buffer);
+    const decoded = await decodeTemporal(bytes.buffer, { signal: abort.signal });
     if (abort.signal.aborted || hidden) return;
     const { motion, ...model } = prepareTemporal(decoded);
     sorter = new TemporalSorter(motion);

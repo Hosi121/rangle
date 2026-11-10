@@ -30,7 +30,7 @@
 | [生成API](generation.md)・[結果掲載](generated-publication.md)・[掲載UI](generation-publication-ui.md) | preset、job、公開操作 |
 | [資産公開](asset-publication.md)・[不変catalog](catalog-snapshots.md) | 許諾・bytes検証、配置・切替・復帰 |
 | [配信部品の契約](streaming-contract.md)・[HTTP選択](http-delivery-decision.md) | GoのHTTP/ABR基準実装 |
-| [言語間fixture](../testdata/contracts/v1/README.md) | schema、50入力、consumer差分 |
+| [言語間fixture](../testdata/contracts/v1/README.md)・[gzip契約](rgs-gzip-contract.md) | schema、74入力、単一member・末尾余剰の採否 |
 
 ## ML・データ
 
