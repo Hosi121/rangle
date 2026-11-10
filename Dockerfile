@@ -24,13 +24,16 @@ ARG RANGLE_PREVIEW_URL=
 ARG RANGLE_SCENE_URL=
 ARG RANGLE_LIVE_MEDIA_ORIGIN=
 COPY apps/web/ ./
-RUN npm run build --prefix viewer \
+COPY scripts/precompress-web.mjs scripts/precompress-web.test.mjs /src/scripts/
+RUN node --test /src/scripts/precompress-web.test.mjs \
+    && npm run build --prefix viewer \
     && flutter --suppress-analytics build web --release --no-pub --no-web-resources-cdn \
        --dart-define=RANGLE_API_URL="${RANGLE_API_URL}" \
        --dart-define=RANGLE_DEMO="${RANGLE_DEMO}" \
        --dart-define=RANGLE_PREVIEW_URL="${RANGLE_PREVIEW_URL}" \
        --dart-define=RANGLE_SCENE_URL="${RANGLE_SCENE_URL}" \
-       --dart-define=RANGLE_LIVE_MEDIA_ORIGIN="${RANGLE_LIVE_MEDIA_ORIGIN}"
+       --dart-define=RANGLE_LIVE_MEDIA_ORIGIN="${RANGLE_LIVE_MEDIA_ORIGIN}" \
+    && node /src/scripts/precompress-web.mjs build/web
 
 FROM golang:1.27.3-bookworm AS go-build
 WORKDIR /src

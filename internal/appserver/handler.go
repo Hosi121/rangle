@@ -35,12 +35,15 @@ type asset struct {
 	data     []byte
 	name     string
 	modified time.Time
+	gzip     *gzipAsset
+	ui       bool
 }
 
 // Handler pins descriptors for its startup allowlist, without loading frame
 // bodies into RAM. Replacing a file or introducing a symlink cannot redirect a
 // request to a new file; restart to publish a rebuilt UI or changed manifest.
 // Existing regular files may still change in place and are revalidated by mtime.
+// Precompressed UI representations additionally require byte-identity checks.
 // Call Close after all HTTP requests have drained, normally after Server.Shutdown.
 type Handler struct {
 	assets     map[string]asset
@@ -93,7 +96,7 @@ func (h *Handler) loadUI(name string, previewPaths []string) error {
 		}
 		for _, entry := range entries {
 			relative := path.Join(prefix, entry.Name())
-			if !validRelative(relative) || strings.HasSuffix(entry.Name(), ".local.md") || strings.HasSuffix(entry.Name(), ".private.md") || prefix == "" && (entry.Name() == "samples" || entry.Name() == "healthz") {
+			if !validRelative(relative) || strings.HasSuffix(strings.ToLower(entry.Name()), ".gz") || strings.HasSuffix(entry.Name(), ".local.md") || strings.HasSuffix(entry.Name(), ".private.md") || prefix == "" && (entry.Name() == "samples" || entry.Name() == "healthz") {
 				continue
 			}
 			if entry.Type()&os.ModeSymlink != 0 {
@@ -115,6 +118,12 @@ func (h *Handler) loadUI(name string, previewPaths []string) error {
 					url = "/"
 				}
 				if err := h.addFile(root, relative, url); err != nil {
+					return err
+				}
+				item := h.assets[url]
+				item.ui = !uiMedia(relative)
+				h.assets[url] = item
+				if err := h.attachGzip(root, relative, url); err != nil {
 					return err
 				}
 			}
@@ -272,6 +281,10 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	info, err := item.file.Stat()
 	if err != nil {
 		http.Error(w, "asset unavailable", http.StatusInternalServerError)
+		return
+	}
+	if item.ui {
+		serveUIFile(w, r, item, info)
 		return
 	}
 	http.ServeContent(w, r, item.name, info.ModTime(), io.NewSectionReader(item.file, 0, info.Size()))
