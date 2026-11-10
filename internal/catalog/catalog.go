@@ -14,12 +14,14 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Hosi121/rangle/internal/sports"
 	"github.com/Hosi121/rangle/internal/stream"
 )
 
 const maxCatalogBytes = 16 << 20
 
 type clip struct {
+	Context     *sports.Context `json:"context,omitempty"`
 	Title       string          `json:"title"`
 	Sport       string          `json:"sport"`
 	Description string          `json:"description"`
@@ -98,6 +100,13 @@ func Load(source io.Reader) (*Catalog, error) {
 				return nil, fmt.Errorf("clip %q has an invalid media URL", id)
 			}
 		}
+	}
+	contexts := make([]*sports.Context, len(document.Clips))
+	for i, c := range document.Clips {
+		contexts[i] = c.Context
+	}
+	if err := sports.ValidateCollection(contexts); err != nil {
+		return nil, fmt.Errorf("catalog context: %w", err)
 	}
 	// Ignore whitespace differences in the publisher's JSON when making cursors.
 	canonical, err := json.Marshal(document)

@@ -1,4 +1,5 @@
 import '../viewer/playback_state.dart';
+import 'sports_context.dart';
 
 /// Feed metadata is separate from media rendering and the transport manifest.
 class Clip {
@@ -12,8 +13,10 @@ class Clip {
     this.tags = const [],
     this.revision = '',
     this.playbackMapping,
+    this.context,
   });
 
+  final SportsContext? context;
   final String id;
   final String title;
   final String sport;

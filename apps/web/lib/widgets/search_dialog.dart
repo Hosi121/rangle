@@ -50,8 +50,8 @@ class _SearchDialogState extends State<_SearchDialog> {
               controller: _input,
               autofocus: true,
               decoration: const InputDecoration(
-                labelText: 'キーワード・ハッシュタグ',
-                hintText: '例：バスケットボール、#自由視点',
+                labelText: '選手・チーム・会場・ハッシュタグ',
+                hintText: '試合名、団体名などでも検索',
               ),
               textInputAction: TextInputAction.search,
               onFieldSubmitted: (_) => _submit(),

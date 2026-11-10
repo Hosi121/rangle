@@ -210,6 +210,14 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
     }
   }
 
+  void _filterQuery(String query) {
+    setState(() {
+      _query = query;
+      _tag = '';
+    });
+    _reload();
+  }
+
   void _filterTag(String tag) {
     setState(() {
       _tag = tag;
@@ -337,6 +345,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                     onSearch: () =>
                         _search(clips.expand((clip) => clip.tags).toSet()),
                     onTag: _filterTag,
+                    onQuery: _filterQuery,
                     onOpenClip: _openHistoryClip,
                     onClearSearch: _clearSearch,
                     filterLabel: _tag.isEmpty ? _query : '#$_tag',
@@ -372,6 +381,7 @@ class _HighlightFeed extends StatefulWidget {
     required this.onSearch,
     required this.onLive,
     required this.onTag,
+    required this.onQuery,
     required this.onOpenClip,
     required this.onClearSearch,
     required this.filterLabel,
@@ -385,7 +395,7 @@ class _HighlightFeed extends StatefulWidget {
   final AccountController? account;
   final ClipShareAction shareAction;
   final VoidCallback onSearch, onClearSearch, onLive;
-  final ValueChanged<String> onTag, onOpenClip;
+  final ValueChanged<String> onTag, onQuery, onOpenClip;
   final String filterLabel;
   final bool initialFreeView;
 
@@ -529,6 +539,7 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                                 account: widget.account,
                                 shareAction: widget.shareAction,
                                 onTag: widget.onTag,
+                                onQuery: widget.onQuery,
                                 onFreeViewChanged: (value) =>
                                     setState(() => _freeView = value),
                                 onNext:

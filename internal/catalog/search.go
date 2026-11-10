@@ -16,7 +16,7 @@ type searchEntry struct {
 
 func newSearchEntry(view clipView) searchEntry {
 	entry := searchEntry{
-		text: strings.ToLower(strings.Join([]string{view.Title, view.Sport, view.Description, strings.Join(view.Tags, " ")}, " ")),
+		text: strings.ToLower(strings.Join([]string{view.Title, view.Sport, view.Description, strings.Join(view.Tags, " "), view.Context.SearchText()}, " ")),
 		tags: make(map[string]bool, len(view.Tags)),
 	}
 	for _, tag := range view.Tags {

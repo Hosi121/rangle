@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+
+	"github.com/Hosi121/rangle/internal/sports"
 )
 
 func TestReadConfigRejectsUnboundedOrAmbiguousInput(t *testing.T) {
@@ -64,5 +66,30 @@ func TestVertexResourceNamesStayInTheConfiguredProjectAndRegion(t *testing.T) {
 		if v.validName(name) {
 			t.Fatalf("accepted %s", name)
 		}
+	}
+}
+
+func TestPublicationKeepsReviewedSportsContext(t *testing.T) {
+	cfg := testConfig()
+	cfg.Presets[0].Context = &sports.Context{Publisher: &sports.Organization{ID: "example", Name: "Example Sports", Kind: "company"}, Event: &sports.Event{ID: "sample", Name: "Training", Kind: "training"}}
+	if err := cfg.Validate(); err != nil {
+		t.Fatal(err)
+	}
+	p, ok := cfg.preset(cfg.Presets[0].ID)
+	if !ok {
+		t.Fatal("missing preset")
+	}
+	job := Job{ID: strings.Repeat("a", 32), Snapshot: p}
+	clip := publicClip(job, cfg.MediaOrigin)
+	if clip.Context.Publisher.ID != "example" || clip.Context.Event.Kind != "training" {
+		t.Fatal("publication dropped sporting context")
+	}
+	cfg.Presets[0].Context.Publisher.Name = "Changed later"
+	if clip.Context.Publisher.Name != "Example Sports" || p.Context.Publisher.Name != "Example Sports" {
+		t.Fatal("config mutation changed immutable publication context")
+	}
+	p.Context.Publisher.Kind = "person"
+	if p.Context.Validate() == nil {
+		t.Fatal("personal publisher accepted")
 	}
 }
