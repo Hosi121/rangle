@@ -131,6 +131,7 @@ Future<void> mount(
   List<HandoffViewer> videos,
   List<HandoffViewer> scenes, {
   bool active = true,
+  bool initialFreeView = false,
   ValueChanged<bool>? changed,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
@@ -146,6 +147,7 @@ Future<void> mount(
           key: const ValueKey('active-slot'),
           clip: source,
           active: active,
+          initialFreeView: initialFreeView,
           viewerFactory: (_) {
             final viewer = HandoffViewer(
               position: const Duration(milliseconds: 560),
@@ -172,6 +174,56 @@ Future<void> tap(WidgetTester tester, String label) async {
 }
 
 void main() {
+  for (final frames in [1, 20]) {
+    testWidgets(
+      'direct $frames-frame result presents its first frame and retains later handoff time',
+      (tester) async {
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final videos = <HandoffViewer>[], scenes = <HandoffViewer>[];
+        await mount(
+          tester,
+          clip(id: 'generated-0123456789abcdef0123456789abcdef'),
+          videos,
+          scenes,
+          initialFreeView: true,
+        );
+        expect(videos, isEmpty);
+        final scene = scenes.single..frames = frames;
+        scene.prepared();
+        await tester.pumpAndSettle();
+        expect(scene.requests, hasLength(1));
+        expect(scene.requests.single.position, Duration.zero);
+        expect(scene.requests.single.playing, isFalse);
+        expect(scene.drawn, isEmpty);
+        expect(find.text('自由視点を読み込んでいます'), findsOneWidget);
+        scene.complete();
+        await tester.pumpAndSettle();
+        expect(scene.drawn, [0]);
+        expect(find.text('自由視点を読み込んでいます'), findsNothing);
+
+        final position = frames > 1
+            ? const Duration(milliseconds: 400)
+            : Duration.zero;
+        scene.emit(position, frames > 1);
+        await tap(tester, '動画に戻る');
+        expect(videos.single.requests.single.position, position);
+        expect(videos.single.requests.single.playing, frames > 1);
+        videos.single.complete();
+        await tester.pumpAndSettle();
+        await tap(tester, '自由視点で見る');
+        expect(scene.requests, hasLength(2));
+        expect(scene.requests.last.position, position);
+        scene.complete();
+        await tester.pumpAndSettle();
+        expect(scene.requests, hasLength(2));
+        expect(scene.value.position, position);
+        expect(scene.value.playing, frames > 1);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   test('anchors map seconds directly, round to source samples and clamp the last sample rather than normalize durations', () {
     const timeline = ViewerTimeline(frameCount: 20, frameRate: 25);
     expect(timeline.frameAt(const Duration(milliseconds: 560)), 14);

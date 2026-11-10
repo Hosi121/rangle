@@ -627,6 +627,11 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                             thumbnailSource: clip.previewUrl,
                             continuity: true,
                             mapping: clip.playbackMapping,
+                            // Direct result links have no video handoff to
+                            // request the first frame after preparation.
+                            playback: _freeView && !_hasEntered
+                                ? const PlaybackState(Duration.zero, false)
+                                : null,
                             onPrepared: (timeline) {
                               _sceneTimeline = timeline;
                               if (_entering) unawaited(_alignScene());
