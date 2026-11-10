@@ -33,6 +33,16 @@ class PolicyRegexTests(unittest.TestCase):
     def test_all_deployed_policy_regex_literals_have_zero_capture_groups(self):
         check_no_capture_groups(SOURCE.read_text())
 
+    def test_password_throttle_covers_both_identity_namespaces(self):
+        pattern = next(p for p in policy_patterns(SOURCE.read_text())
+                       if "publisher-auth/login" in p)
+        for path in ("/api/v1/auth/login", "/api/v1/auth/register",
+                     "/api/v1/publisher-auth/login"):
+            self.assertIsNotNone(re.fullmatch(pattern, path), path)
+        for path in ("/api/v1/publisher-auth/logout", "/other/login",
+                     "/api/v1/auth/login/extra"):
+            self.assertIsNone(re.fullmatch(pattern, path), path)
+
     def test_regression_to_a_capturing_group_is_detected(self):
         source = SOURCE.read_text()
         self.assertIn("matches('^(?:", source)

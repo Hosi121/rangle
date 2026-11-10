@@ -4,18 +4,24 @@ import (
 	"context"
 	"sort"
 	"sync"
+
+	"github.com/Hosi121/rangle/internal/publisher"
 )
 
 // MemoryStore is for tests and explicit local demos. Cloud deployments must use
 // persistent storage; no interaction survives a MemoryStore process restart.
 type MemoryStore struct {
-	mu       sync.Mutex
-	accounts map[string]Account
-	sessions map[string]Session
-	likes    map[string]map[string]bool
-	comments map[string]map[string]Comment
-	cheers   map[string]map[string]CheerBatch
-	history  map[string]map[string]CheeredClip
+	publishers    map[publisher.ID]publisher.Account
+	staff         map[publisher.ID]map[publisher.StaffID]StaffRecord
+	staffNames    map[publisher.ID]map[string]publisher.StaffID
+	staffSessions map[string]StaffSession
+	mu            sync.Mutex
+	accounts      map[string]Account
+	sessions      map[string]Session
+	likes         map[string]map[string]bool
+	comments      map[string]map[string]Comment
+	cheers        map[string]map[string]CheerBatch
+	history       map[string]map[string]CheeredClip
 }
 
 func NewMemoryStore() *MemoryStore {

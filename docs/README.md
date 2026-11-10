@@ -27,7 +27,7 @@
 | --- | --- |
 | [APIと版付き資産](api-delivery.md) | catalog、manifest、Range/ETag/cache |
 | [ページング](feed-pagination.md)・[過負荷](api-overload.md) | cursorと要求制限 |
-| [アカウント/交流](accounts.md)・[保存先](community-storage.md)・[スポーツのドメイン](sports-domain.md) | 認証・声援履歴・投稿団体・試合・選手・会場 |
+| [アカウント/交流](accounts.md)・[保存先](community-storage.md)・[ドメイン](sports-domain.md)・[担当者認証](publisher-auth.md) | 認証・声援履歴・投稿団体・試合・選手・会場 |
 | [生成API](generation.md)・[結果掲載](generated-publication.md)・[掲載UI](generation-publication-ui.md) | preset、job、公開操作 |
 | [資産公開](asset-publication.md)・[不変catalog](catalog-snapshots.md) | 許諾・bytes検証、配置・切替・復帰 |
 | [独立区間の公開](segmented-publication.md) | 複数model/metricsの承認・size/SHA・時刻整合 |

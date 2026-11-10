@@ -51,7 +51,7 @@ run "all_public_backends_enforce_the_correct_policy" {
     error_message = "Use separate per-peer auth/write/read limits, never a shared global limit or a spoofable forwarded-IP key."
   }
   assert {
-    condition     = one([for rule in google_compute_security_policy.app[0].rule : rule.match[0].expr[0].expression if rule.priority == 1000]) == "request.method == 'POST' && request.path.urlDecode().matches('^/api/v1/auth/(?:login|register)$')" && one([for rule in google_compute_security_policy.app[0].rule : rule.match[0].expr[0].expression if rule.priority == 1100]) == "request.path.urlDecode().startsWith('/api/') && request.method.matches('^(?:POST|PUT|DELETE)$')" && one([for rule in google_compute_security_policy.app[0].rule : rule.match[0].expr[0].expression if rule.priority == 1200]) == "request.path.urlDecode().startsWith('/api/') && request.method.matches('^(?:GET|HEAD)$')"
+    condition     = one([for rule in google_compute_security_policy.app[0].rule : rule.match[0].expr[0].expression if rule.priority == 1000]) == "request.method == 'POST' && request.path.urlDecode().matches('^/api/v1/(?:auth/(?:login|register)|publisher-auth/login)$')" && one([for rule in google_compute_security_policy.app[0].rule : rule.match[0].expr[0].expression if rule.priority == 1100]) == "request.path.urlDecode().startsWith('/api/') && request.method.matches('^(?:POST|PUT|DELETE)$')" && one([for rule in google_compute_security_policy.app[0].rule : rule.match[0].expr[0].expression if rule.priority == 1200]) == "request.path.urlDecode().startsWith('/api/') && request.method.matches('^(?:GET|HEAD)$')"
     error_message = "Auth must match its strict limit before ordinary mutations; public reads need their own polling limit."
   }
   assert {

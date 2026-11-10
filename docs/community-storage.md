@@ -16,6 +16,10 @@ runtimeには `datastore.databases.get` と `datastore.entities.{get,list,create
 | `accounts/{username}/cheered_clips/{clip}` | 声援受付時の動画ラベル・最後の送信日時（本人専用） |
 | `clips/{clip}/cheer_receipts/{id}` | 再送用receipt（`expires_at` は受付の7日後） |
 | `clips/{clip}/cheer_shards/{shard}` | 声援の48区間集計、32shard |
+| `publisher_accounts/{account}` | 団体の公開プロフィール・内部状態 |
+| `publisher_accounts/{account}/staff_accounts/{staff}` | 団体内担当者・password hash・資格情報世代 |
+| `publisher_accounts/{account}/staff_names/{username}` | 団体内の担当者名からIDへの一意索引 |
+| `staff_sessions/{sha256_cookie}` | 担当者principal・資格情報世代・`expires_at` |
 | `sessions/{sha256_cookie}` | session・Timestamp型 `expires_at` |
 | `clips/{clip}/likes/{username}` | 利用者ごとのいいね |
 | `clips/{clip}/comments/{id}` | 投稿者・本文・日時 |

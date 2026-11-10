@@ -37,6 +37,16 @@ resource "google_firestore_field" "sessions_expiry" {
   index_config {}
 }
 
+resource "google_firestore_field" "staff_sessions_expiry" {
+  count      = local.community_enabled ? 1 : 0
+  project    = var.project_id
+  database   = google_firestore_database.community[0].name
+  collection = "staff_sessions"
+  field      = "expires_at"
+  ttl_config {}
+  index_config {}
+}
+
 # Minimum document CRUD/query/aggregation and transaction permissions from
 # https://docs.cloud.google.com/firestore/native/docs/security/iam
 resource "google_project_iam_custom_role" "community" {
