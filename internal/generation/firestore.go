@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"github.com/Hosi121/rangle/internal/publisher"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -105,6 +106,17 @@ func (s *FirestoreStore) AdmitScoped(ctx context.Context, p Principal, preset Pr
 	ref := s.jobs().Doc(requestJobID(owner, nonce))
 	err = s.client.RunTransaction(ctx, func(ctx context.Context, tx *firestore.Transaction) error {
 		created = false
+		var fence PublisherLifecycle
+		if p.Kind == "staff" {
+			doc, e := tx.Get(s.lifecycleDoc(p.Account.ID))
+			fence, e = decodeLifecycle(doc, e, p.Account.ID)
+			if e != nil {
+				return e
+			}
+			if fence.State != publisher.Active {
+				return ErrNotFound
+			}
+		}
 		old, err := decodeJob(tx.Get(ref))
 		if err == nil {
 			if !p.owns(old) || old.Preset != preset.ID {
@@ -142,6 +154,13 @@ func (s *FirestoreStore) AdmitScoped(ctx context.Context, p Principal, preset Pr
 			return ErrBusy
 		}
 		job = Job{ID: ref.ID, Owner: owner, PublisherAccountID: p.accountID(), CreatedBy: p.actor(), Preset: preset.ID, Snapshot: preset, State: Submitting, CreatedAt: now, UpdatedAt: now}
+		if p.Kind == "staff" {
+			fence.Revision++
+			fence.UpdatedAt = now
+			if err := tx.Set(s.lifecycleDoc(p.Account.ID), fence); err != nil {
+				return err
+			}
+		}
 		if err := tx.Create(ref, job); err != nil {
 			return err
 		}
@@ -254,6 +273,16 @@ func (s *FirestoreStore) SetPublication(ctx context.Context, owner, id string, p
 		}
 		if job.Owner != owner {
 			return ErrNotFound
+		}
+		if job.PublisherAccountID != "" {
+			doc, e := tx.Get(s.lifecycleDoc(job.PublisherAccountID))
+			fence, e := decodeLifecycle(doc, e, job.PublisherAccountID)
+			if e != nil {
+				return e
+			}
+			if fence.State != publisher.Active {
+				return ErrNotFound
+			}
 		}
 		if job.State != Succeeded {
 			return ErrConflict

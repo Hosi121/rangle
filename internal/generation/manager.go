@@ -93,6 +93,11 @@ func newManager(service *Service, cfg ManagerConfig, validate tokenValidator) (h
 		return nil, err
 	}
 	mux.Handle("/api/v1/operations/publishers/{account}/generation/", grants)
+	deletion, err := newPublisherDeletionHandler(service, func(r *http.Request) (Principal, error) { return managerPrincipal(r, service.now()) })
+	if err != nil {
+		return nil, err
+	}
+	mux.Handle("/api/v1/operations/publishers/{account}/deletion", deletion)
 	mux.Handle("/api/v1/clips/{clip}", jobs.ClipHandler(http.NotFoundHandler()))
 	mux.HandleFunc("GET "+publicClipsPath, func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" {

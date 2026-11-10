@@ -15,6 +15,8 @@ type MemoryStore struct {
 	staff         map[publisher.ID]map[publisher.StaffID]StaffRecord
 	staffNames    map[publisher.ID]map[string]publisher.StaffID
 	staffSessions map[string]StaffSession
+	deletions     map[publisher.ID]PublisherDeletion
+	deletedClips  map[string]publisher.ID
 	mu            sync.Mutex
 	accounts      map[string]Account
 	sessions      map[string]Session

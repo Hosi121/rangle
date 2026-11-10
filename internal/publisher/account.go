@@ -23,6 +23,7 @@ const (
 )
 
 type Account struct {
+	DeletionRequested bool `json:"-" firestore:"deletion_requested,omitempty"`
 	// Status is private lifecycle state. Public catalog profiles omit it and
 	// therefore cannot act as authoritative account records for authorization.
 	Status Status `json:"-" firestore:"status,omitempty"`

@@ -62,4 +62,12 @@ run "public_process_has_no_vertex_trainer_or_generation_database_capability" {
     condition     = google_firestore_database.generation[0].point_in_time_recovery_enablement == "POINT_IN_TIME_RECOVERY_ENABLED" && google_firestore_database.generation[0].delete_protection_state == "DELETE_PROTECTION_ENABLED" && google_firestore_backup_schedule.generation_daily[0].retention == "604800s"
     error_message = "Generation counters and publication history need protected persistent storage and seven-day recovery."
   }
+  assert {
+    condition     = google_project_iam_custom_role.generation_output_list[0].permissions == toset(["storage.objects.list"]) && google_project_iam_custom_role.generation_output_delete[0].permissions == toset(["storage.objects.delete"]) && google_project_iam_custom_role.generation_cache_cleanup[0].permissions == toset(["compute.urlMaps.invalidateCache", "compute.globalOperations.get"])
+    error_message = "Cleanup must not acquire object restore/create, bucket administration or load balancer mutation permissions."
+  }
+  assert {
+    condition     = google_storage_bucket_iam_member.generation_output_delete[0].member == "serviceAccount:${google_service_account.generation_manager[0].email}" && google_storage_bucket_iam_member.generation_output_delete[0].bucket == google_storage_bucket.private["media"].name && strcontains(google_storage_bucket_iam_member.generation_output_delete[0].condition[0].expression, "/objects/generated/") && strcontains(google_storage_bucket_iam_member.generation_output_delete[0].condition[0].expression, "/objects/live/") && strcontains(google_storage_bucket_iam_member.generation_output_delete[0].condition[0].expression, "request.time < timestamp('2026-11-14T15:00:00Z')") && contains(google_cloud_run_v2_service.generation[0].template[0].containers[0].args, "-generation-cleanup-url-map")
+    error_message = "Only the manager may delete derived generated/live output prefixes, before the existing deadline."
+  }
 }

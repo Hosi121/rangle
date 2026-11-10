@@ -68,6 +68,9 @@ func (s *Service) SetPublicationFor(ctx context.Context, p Principal, id string,
 		return Job{}, ErrPublisherForbidden
 	}
 	owner := p.ownerKey()
+	if err := s.principalAccess(ctx, p); err != nil {
+		return Job{}, err
+	}
 	if !requestID.MatchString(id) {
 		return Job{}, ErrNotFound
 	}
@@ -352,6 +355,9 @@ func (s *Service) CompletedClip(ctx context.Context, id string) (catalog.PublicC
 	}
 	if job.ID != raw || job.State != Succeeded || job.Snapshot.ID == "" || job.Snapshot.ModeName() == "live" {
 		return catalog.PublicClip{}, ErrNotFound
+	}
+	if err := s.publisherAccess(ctx, job.PublisherAccountID); err != nil {
+		return catalog.PublicClip{}, err
 	}
 	return publicClip(job, s.Config.MediaOrigin), nil
 }

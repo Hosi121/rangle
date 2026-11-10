@@ -72,7 +72,7 @@ func (s *MemoryStore) RecordCheers(_ context.Context, clip string, batch CheerBa
 			s.history[batch.UserID] = map[string]CheeredClip{}
 		}
 		if old, ok := s.history[batch.UserID][clip]; !ok || batch.CreatedAt.After(old.LastCheeredAt) {
-			s.history[batch.UserID][clip] = CheeredClip{batch.Clip, batch.CreatedAt}
+			s.history[batch.UserID][clip] = CheeredClip{Clip: batch.Clip, LastCheeredAt: batch.CreatedAt}
 		}
 	}
 	return nil
@@ -153,7 +153,7 @@ func (s *FirestoreStore) RecordCheers(ctx context.Context, clip string, batch Ch
 			counts.Bins[i] += n
 		}
 		if updateHistory {
-			if err := tx.Set(history, CheeredClip{batch.Clip, batch.CreatedAt}); err != nil {
+			if err := tx.Set(history, CheeredClip{Clip: batch.Clip, LastCheeredAt: batch.CreatedAt}); err != nil {
 				return err
 			}
 		}

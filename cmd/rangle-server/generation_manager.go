@@ -67,6 +67,14 @@ func newGenerationManager(cfg config, logger *slog.Logger) (app *application, er
 		service = &generation.Service{Config: settings, Store: database, Provider: provider, Logger: logger}
 	}
 	service.ReservedClipID = func(id string) bool { return reserved[id] }
+	if cfg.GenerationCleanupURLMap != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		service.Cleanup, err = generation.NewCloudAssetCleanup(ctx, settings, cfg.GenerationCleanupURLMap)
+		if err != nil {
+			return app, err
+		}
+	}
 	app.Handler, err = generation.NewManager(service, managerConfig)
 	if err == nil && cfg.ServingRevision != "" {
 		next := app.Handler
