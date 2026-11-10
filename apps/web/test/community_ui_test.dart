@@ -15,6 +15,8 @@ import 'support/fake_viewer.dart';
 class CommunityFixture {
   Map<String, String>? user;
   bool liked = false, rejectLogin = false, loseFirstCommentResponse = false;
+  List<Map<String, Object?>> history = [];
+  bool historyFails = false;
   final cheerBins = List.filled(48, 0);
   final cheerReceipts = <String>{};
   Future<http.Response>? delayedCheers;
@@ -42,6 +44,10 @@ class CommunityFixture {
     if (path.endsWith('/auth/logout')) {
       user = null;
       return http.Response('', 204);
+    }
+    if (path.endsWith('/me/cheered-clips')) {
+      if (historyFails) return reply({'error': 'service_unavailable'}, 503);
+      return reply({'clips': history, 'next_cursor': ''});
     }
     if (path.endsWith('/cheers')) {
       if (request.method == 'POST') {
@@ -142,6 +148,53 @@ Future<void> login(WidgetTester tester) async {
 }
 
 void main() {
+  testWidgets('account history opens the selected clip in the feed', (
+    tester,
+  ) async {
+    final fixture = CommunityFixture()
+      ..user = {'id': 'viewer', 'name': 'Viewer'}
+      ..history = [
+        {
+          'clip': {'id': 'demo-03', 'title': '応援した動画', 'sport': 'バスケットボール'},
+          'last_cheered_at': '2026-11-10T00:00:00Z',
+        },
+      ];
+    await pumpCommunity(tester, fixture);
+    await tester.tap(find.byTooltip('アカウント'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('声援を送った動画'));
+    await tester.pumpAndSettle();
+    expect(find.text('応援した動画'), findsOneWidget);
+    await tester.tap(find.text('応援した動画'));
+    await tester.pumpAndSettle();
+    expect(find.text('バスケットボール 03'), findsOneWidget);
+    expect(find.text('声援を送った動画'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets('a removed history clip leaves the current feed usable', (
+    tester,
+  ) async {
+    final fixture = CommunityFixture()
+      ..user = {'id': 'viewer', 'name': 'Viewer'}
+      ..history = [
+        {
+          'clip': {'id': 'removed', 'title': '公開終了', 'sport': 'バスケットボール'},
+          'last_cheered_at': '2026-11-10T00:00:00Z',
+        },
+      ];
+    await pumpCommunity(tester, fixture);
+    await tester.tap(find.byTooltip('アカウント'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('声援を送った動画'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('公開終了'));
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('検索'), findsOneWidget);
+    expect(find.text('VRU Basketball'), findsOneWidget);
+    expect(find.textContaining('この動画を開けませんでした'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('late anonymous cheer totals cannot overwrite local applause', (
     tester,
   ) async {

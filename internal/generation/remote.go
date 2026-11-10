@@ -85,22 +85,30 @@ func (c *Remote) PublicClips(ctx context.Context) ([]catalog.PublicClip, error) 
 }
 
 func (c *Remote) CompletedClipExists(ctx context.Context, id string) (bool, error) {
-	id, ok := strings.CutPrefix(id, "generated-")
-	if !ok || !requestID.MatchString(id) {
+	_, err := c.CompletedClip(ctx, id)
+	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
-	code, _, payload, err := c.call(ctx, http.MethodGet, "/api/v1/clips/generated-"+id, "", "", nil)
+	return err == nil, err
+}
+
+func (c *Remote) CompletedClip(ctx context.Context, id string) (catalog.PublicClip, error) {
+	raw, ok := strings.CutPrefix(id, "generated-")
+	if !ok || !requestID.MatchString(raw) {
+		return catalog.PublicClip{}, ErrNotFound
+	}
+	code, _, payload, err := c.call(ctx, http.MethodGet, "/api/v1/clips/"+id, "", "", nil)
 	if err != nil {
-		return false, err
+		return catalog.PublicClip{}, err
 	}
 	if code == 404 {
-		return false, nil
+		return catalog.PublicClip{}, ErrNotFound
 	}
 	var clip catalog.PublicClip
-	if code != 200 || json.Unmarshal(payload, &clip) != nil || clip.ID != "generated-"+id || clip.ValidateGenerated() != nil {
-		return false, fmt.Errorf("generation completed clip unavailable")
+	if code != 200 || json.Unmarshal(payload, &clip) != nil || clip.ID != id || clip.ValidateGenerated() != nil {
+		return clip, fmt.Errorf("generation completed clip unavailable")
 	}
-	return true, nil
+	return clip, nil
 }
 
 type RemoteHandler struct {

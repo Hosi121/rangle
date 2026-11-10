@@ -46,6 +46,22 @@ class CommentPage {
   final String nextCursor;
 }
 
+class CheeredClip {
+  CheeredClip.fromJson(Map<String, dynamic> data)
+    : id = (data['clip'] as Map<String, dynamic>)['id'] as String,
+      title = (data['clip'] as Map<String, dynamic>)['title'] as String,
+      sport = (data['clip'] as Map<String, dynamic>)['sport'] as String,
+      lastCheeredAt = DateTime.parse(data['last_cheered_at'] as String);
+  final String id, title, sport;
+  final DateTime lastCheeredAt;
+}
+
+class CheerHistoryPage {
+  const CheerHistoryPage(this.clips, this.nextCursor);
+  final List<CheeredClip> clips;
+  final String nextCursor;
+}
+
 class CommunityFailure implements Exception {
   const CommunityFailure(this.code);
   final String code;
@@ -124,6 +140,27 @@ class CommunityApi {
       );
   Future<void> logout() async {
     await request('POST', 'auth/logout');
+  }
+
+  Future<CheerHistoryPage> cheeredClips({String cursor = ''}) async {
+    final url = Uri(
+      path: 'me/cheered-clips',
+      queryParameters: cursor.isEmpty ? null : {'cursor': cursor},
+    );
+    final data = await request('GET', url.toString());
+    final rows = data['clips'], next = data['next_cursor'];
+    if (rows is! List ||
+        rows.length > 20 ||
+        next is! String ||
+        next.length > 256) {
+      throw const FormatException('Invalid cheer history.');
+    }
+    return CheerHistoryPage(
+      List.unmodifiable(
+        rows.map((row) => CheeredClip.fromJson(row as Map<String, dynamic>)),
+      ),
+      next,
+    );
   }
 
   Future<Engagement> engagement(String clip) async => Engagement.fromJson(

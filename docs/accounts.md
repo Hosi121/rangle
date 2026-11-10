@@ -1,9 +1,10 @@
 # アカウントと交流 API
 
-閲覧・検索・共有はログイン不要。ユーザーID・パスワードで登録／ログインし、いいね・コメントを変更する。OAuth client・メール送信の設定は不要。
+閲覧・検索・共有はログイン不要。ユーザーID・パスワードで登録／ログインし、いいね・声援・コメントを送る。[声援履歴](#声援の履歴)はアカウント画面から開く。OAuth client・メール送信の設定は不要。
 
 | API | 用途 |
 | --- | --- |
+| `GET /api/v1/me/cheered-clips?cursor=...` | 本人の声援履歴を新しい順に20件ずつ取得 |
 | `GET /api/v1/auth/me` | ログイン状態・機能の有効状態 |
 | `POST /api/v1/auth/register` | `{username, name, password}` で登録・ログイン |
 | `POST /api/v1/auth/login` | `{username, password}` でログイン |
@@ -13,9 +14,8 @@
 | `GET /api/v1/clips/{id}/comments?cursor=...` | 新しい順に20件ずつ取得 |
 | `POST /api/v1/clips/{id}/comments` | `{text, request_id}` で投稿 |
 | `DELETE /api/v1/clips/{id}/comments/{comment}` | 自分のコメントを削除 |
-| `GET` / `POST /api/v1/clips/{id}/cheers` | [声援と再生位置ごとの熱量](immersive-ui.md#声援と熱量バー)。2026-11-10調査で公開router未接続を発見。修正/配備は[#127](https://github.com/Hosi121/rangle/issues/127)で追跡 |
+| `GET` / `POST /api/v1/clips/{id}/cheers` | [声援と再生位置ごとの熱量](immersive-ui.md#声援と熱量バー) |
 
-2026-11-10の調査時点では、[community handler](../internal/community/handler.go)にある声援APIが公開[application router](../cmd/rangle-server/application.go)へ未登録で、既存clipへのGETも404だった。公開POSTの書き込み確認は行っていない。既存実装を公開経路へ接続し、認証/CSRF・同じrequest_idの再送・件数上限をapplication経由で確認する。現在の修正と配備段階は#127を正本とする。
 
 | 入力 | 制約 |
 | --- | --- |
@@ -36,6 +36,12 @@ FIRESTORE_EMULATOR_HOST=127.0.0.1:8787 go test -race ./internal/community
 ```
 
 emulator未指定時は外部DBへ接続せず、このintegration testだけskipする。アカウント再設定・メール確認・管理者モデレーションは未実装。
+
+## 声援の履歴
+
+アカウント →「声援を送った動画」から再訪する。本人のセッションだけからユーザーを決め、最後に声援を受け付けた日時の降順・同時刻はclip IDの降順に20件返す。動画名と競技は受付時の情報を保存し、一覧表示時に動画ごとの問い合わせを行わない。公開終了した動画を開けなくても元のフィードを保つ。
+
+receipt・集計shard・`accounts/{user}/cheered_clips/{clip}` は同じtransactionで更新する。同じrequest IDの再送は重複も並び替えも起こさない。履歴は本人専用の `no-store` 応答で、cursorも本人に結び付く。履歴に7日TTLは適用しない。旧receiptにはユーザー情報がないため遡及復元しない。receiptの `expires_at` は受付の7日後。TTL未設定の環境では自動削除されないため、保持日数そのものを保証する値ではない。
 
 ## 管理アカウント
 

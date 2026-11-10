@@ -117,18 +117,11 @@ func (s *Service) PublicClips(ctx context.Context) ([]catalog.PublicClip, error)
 // CompletedClipExists matches public generated-detail eligibility independently
 // of feed membership. It performs one known-ID lookup and never lists jobs.
 func (s *Service) CompletedClipExists(ctx context.Context, id string) (bool, error) {
-	raw, ok := strings.CutPrefix(id, "generated-")
-	if !ok || !requestID.MatchString(raw) {
-		return false, nil
-	}
-	job, err := s.Store.Get(ctx, raw)
+	_, err := s.CompletedClip(ctx, id)
 	if errors.Is(err, ErrNotFound) {
 		return false, nil
 	}
-	if err != nil {
-		return false, err
-	}
-	return job.ID == raw && job.State == Succeeded && job.Snapshot.ID != "" && job.Snapshot.ModeName() != "live", nil
+	return err == nil, err
 }
 
 func (p Publication) validProofs() bool {
@@ -331,4 +324,21 @@ func validateTemporalOutput(data []byte, frames int, fps float64) error {
 		return fmt.Errorf("invalid generated temporal frame count")
 	}
 	return publication.ValidateTemporalModel(data, frames, fps)
+}
+
+// CompletedClip returns the same public metadata as known-ID clip detail. Feed
+// withdrawal does not erase a completed clip's existing shared-link eligibility.
+func (s *Service) CompletedClip(ctx context.Context, id string) (catalog.PublicClip, error) {
+	raw, ok := strings.CutPrefix(id, "generated-")
+	if !ok || !requestID.MatchString(raw) {
+		return catalog.PublicClip{}, ErrNotFound
+	}
+	job, err := s.Store.Get(ctx, raw)
+	if err != nil {
+		return catalog.PublicClip{}, err
+	}
+	if job.ID != raw || job.State != Succeeded || job.Snapshot.ID == "" || job.Snapshot.ModeName() == "live" {
+		return catalog.PublicClip{}, ErrNotFound
+	}
+	return publicClip(job, s.Config.MediaOrigin), nil
 }

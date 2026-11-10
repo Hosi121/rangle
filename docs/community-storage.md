@@ -1,6 +1,6 @@
 # 交流データの保存先
 
-アカウント・セッション・いいね・コメントはTokyoのFirestore Native/Standard `rangle-stg` へ保存する。ブラウザはGo APIのHttpOnly cookie、[生成台帳](generation-infrastructure.md)は別DBを使う。
+アカウント・セッション・いいね・声援・コメントはTokyoのFirestore Native/Standard `rangle-stg` へ保存する。ブラウザはGo APIのHttpOnly cookie、[生成台帳](generation-infrastructure.md)は別DBを使う。
 
 ## 有効化
 
@@ -13,6 +13,9 @@ runtimeには `datastore.databases.get` と `datastore.entities.{get,list,create
 | path | 内容 |
 | --- | --- |
 | `accounts/{username}` | password hash・公開プロフィール |
+| `accounts/{username}/cheered_clips/{clip}` | 声援受付時の動画ラベル・最後の送信日時（本人専用） |
+| `clips/{clip}/cheer_receipts/{id}` | 再送用receipt（`expires_at` は受付の7日後） |
+| `clips/{clip}/cheer_shards/{shard}` | 声援の48区間集計、32shard |
 | `sessions/{sha256_cookie}` | session・Timestamp型 `expires_at` |
 | `clips/{clip}/likes/{username}` | 利用者ごとのいいね |
 | `clips/{clip}/comments/{id}` | 投稿者・本文・日時 |

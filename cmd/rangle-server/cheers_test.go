@@ -228,3 +228,23 @@ func TestApplicationCheersUnavailableWithoutCommunity(t *testing.T) {
 		t.Fatalf("disabled community became a catalog lookup: %d %s", w.Code, w.Body.String())
 	}
 }
+
+func TestApplicationCheerHistoryUsesCatalogLabels(t *testing.T) {
+	app := cheerApplication(t, community.NewMemoryStore(), nil)
+	cookie := cheerMember(t, app)
+	bins := make([]int64, community.CheerBinCount)
+	bins[8] = 1
+	w := cheerRequest(app, "POST", "/api/v1/clips/demo/cheers", cheerPayload(t, bins), cookie, nil)
+	if w.Code != 200 {
+		t.Fatal(w.Code, w.Body.String())
+	}
+	w = cheerRequest(app, "GET", "/api/v1/me/cheered-clips", "", cookie, nil)
+	result := w.Result()
+	defer result.Body.Close()
+	var page struct {
+		Clips []community.CheeredClip `json:"clips"`
+	}
+	if result.StatusCode != 200 || result.Header.Get("Cache-Control") != "no-store" || json.NewDecoder(result.Body).Decode(&page) != nil || len(page.Clips) != 1 || page.Clips[0].Clip.ID != "demo" || page.Clips[0].Clip.Title == "" || page.Clips[0].Clip.Title == "demo" {
+		t.Fatalf("routed history: status=%d body=%s", result.StatusCode, w.Body.String())
+	}
+}

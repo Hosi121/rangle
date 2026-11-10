@@ -32,6 +32,7 @@ type clip struct {
 // Catalog is a validated startup snapshot. Input order is the public feed order.
 type Catalog struct {
 	clips        []clip
+	byID         map[string]int
 	snapshot     string
 	sourceSHA256 string
 }
@@ -65,6 +66,7 @@ func Load(source io.Reader) (*Catalog, error) {
 		return nil, fmt.Errorf("catalog requires version 1 and a clips array")
 	}
 	seen := make(map[string]bool, len(document.Clips))
+	byID := make(map[string]int, len(document.Clips))
 	for i, entry := range document.Clips {
 		if strings.TrimSpace(entry.Title) == "" || len(entry.Title) > 256 ||
 			strings.TrimSpace(entry.Sport) == "" || len(entry.Sport) > 128 ||
@@ -90,6 +92,7 @@ func Load(source io.Reader) (*Catalog, error) {
 			return nil, fmt.Errorf("duplicate clip ID %q", id)
 		}
 		seen[id] = true
+		byID[id] = i
 		for _, value := range []string{entry.PreviewURL, entry.SceneURL} {
 			if value != "" && !validMediaURL(value) {
 				return nil, fmt.Errorf("clip %q has an invalid media URL", id)
@@ -103,7 +106,7 @@ func Load(source io.Reader) (*Catalog, error) {
 	}
 	sum := sha256.Sum256(canonical)
 	sourceSum := sha256.Sum256(data)
-	return &Catalog{clips: document.Clips, snapshot: hex.EncodeToString(sum[:]), sourceSHA256: hex.EncodeToString(sourceSum[:])}, nil
+	return &Catalog{clips: document.Clips, byID: byID, snapshot: hex.EncodeToString(sum[:]), sourceSHA256: hex.EncodeToString(sourceSum[:])}, nil
 }
 
 // SourceSHA256 identifies the original JSON bytes, including whitespace. It is
@@ -162,4 +165,14 @@ func validMediaURL(value string) bool {
 	return u.Host == "" && strings.HasPrefix(value, "/") && !strings.HasPrefix(value, "//") &&
 		u.RawQuery == "" && !u.ForceQuery && u.EscapedPath() == u.Path && path.Clean(u.Path) == u.Path &&
 		!strings.Contains(u.Path, "\\")
+}
+
+// Metadata returns catalog-owned labels without fetching assets or resolving URLs.
+func (c *Catalog) Metadata(id string) (PublicClip, bool) {
+	i, ok := c.byID[id]
+	if !ok {
+		return PublicClip{}, false
+	}
+	entry := c.clips[i]
+	return PublicClip{ID: id, Title: entry.Title, Sport: entry.Sport}, true
 }

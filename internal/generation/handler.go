@@ -251,21 +251,12 @@ func (h *Handler) ClipHandler(fallback http.Handler) http.Handler {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 		defer cancel()
-		job, err := h.service.Store.Get(ctx, id)
+		clip, err := h.service.CompletedClip(ctx, "generated-"+id)
 		if err != nil {
 			h.fail(w, r, err)
 			return
 		}
-		if job.State != Succeeded || job.Snapshot.ModeName() == "live" {
-			h.fail(w, r, ErrNotFound)
-			return
-		}
-		preset := job.Snapshot
-		if preset.ID == "" {
-			h.fail(w, r, ErrNotFound)
-			return
-		}
-		h.write(w, r, 200, publicClip(job, h.service.Config.MediaOrigin))
+		h.write(w, r, 200, clip)
 	})
 }
 

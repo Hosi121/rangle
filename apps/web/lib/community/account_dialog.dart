@@ -4,11 +4,13 @@ import '../widgets/viewer_modal.dart';
 
 import 'account_controller.dart';
 import 'community_api.dart';
+import 'cheer_history_dialog.dart';
 
 Future<bool> showAccountDialog(
   BuildContext context,
-  AccountController? account,
-) async {
+  AccountController? account, {
+  ValueChanged<String>? onOpenClip,
+}) async {
   if (account == null) {
     ScaffoldMessenger.of(context)
         .showSnackBar(const SnackBar(content: Text('現在ログインを利用できません。')));
@@ -16,13 +18,14 @@ Future<bool> showAccountDialog(
   }
   await showViewerDialog<void>(
     context: context,
-    builder: (_) => _AccountDialog(account: account),
+    builder: (_) => _AccountDialog(account: account, onOpenClip: onOpenClip),
   );
   return account.user != null;
 }
 
 class _AccountDialog extends StatefulWidget {
-  const _AccountDialog({required this.account});
+  const _AccountDialog({required this.account, this.onOpenClip});
+  final ValueChanged<String>? onOpenClip;
   final AccountController account;
   @override
   State<_AccountDialog> createState() => _AccountDialogState();
@@ -106,6 +109,27 @@ class _AccountDialogState extends State<_AccountDialog> {
                     style: Theme.of(context).textTheme.titleMedium,
                   ),
                   Text('@${user.id}'),
+                  if (widget.onOpenClip != null)
+                    ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.celebration_outlined),
+                      title: const Text('声援を送った動画'),
+                      trailing: const Icon(Icons.chevron_right),
+                      onTap: () async {
+                        final owner = widget.account.user?.id;
+                        final clip = await showCheerHistory(
+                          context,
+                          widget.account,
+                        );
+                        if (!context.mounted ||
+                            clip == null ||
+                            widget.account.user?.id != owner) {
+                          return;
+                        }
+                        Navigator.pop(context);
+                        widget.onOpenClip!(clip);
+                      },
+                    ),
                   const SizedBox(height: 24),
                   OutlinedButton(
                     onPressed: _busy
