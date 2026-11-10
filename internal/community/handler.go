@@ -70,11 +70,13 @@ func NewHandler(cfg Config) *Handler {
 	mux.HandleFunc("GET /api/v1/publisher-auth/me", h.staffMe)
 	mux.HandleFunc("POST /api/v1/publisher-auth/login", h.staffLogin)
 	mux.HandleFunc("POST /api/v1/publisher-auth/logout", h.staffLogout)
+	mux.HandleFunc("PUT /api/v1/publisher-auth/password", h.changeStaffPassword)
 	for _, prefix := range []string{"/api/v1/publishers/", "/api/v1/operations/publishers/"} {
 		operator := prefix == "/api/v1/operations/publishers/"
 		mux.HandleFunc("GET "+prefix+"{account}/staff", func(w http.ResponseWriter, r *http.Request) { h.listStaff(w, r, operator) })
 		mux.HandleFunc("POST "+prefix+"{account}/staff", func(w http.ResponseWriter, r *http.Request) { h.createStaff(w, r, operator) })
 		mux.HandleFunc("PUT "+prefix+"{account}/staff/{staff}", func(w http.ResponseWriter, r *http.Request) { h.updateStaff(w, r, operator) })
+		mux.HandleFunc("PUT "+prefix+"{account}/staff/{staff}/password", func(w http.ResponseWriter, r *http.Request) { h.resetStaffPassword(w, r, operator) })
 	}
 	mux.HandleFunc("GET /api/v1/me/cheered-clips", h.cheerHistory)
 	mux.HandleFunc("POST /api/v1/auth/register", h.register)
