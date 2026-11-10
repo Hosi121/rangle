@@ -62,6 +62,8 @@ CSRF・本文上限・同時hash数・ログイン頻度制限を適用する。
 
 団体管理者は `GET/PUT /api/v1/publishers/{account}/deletion-request` で要求を確認・変更する。PUTは `{requested: true|false, confirmation: "団体ID"}`。要求だけでは利用を停止しない。rangle運営が `DELETE /api/v1/operations/publishers/{account}/deletion` に `{confirmation: "団体ID"}` を送り、実行する。同じURLのGETで進捗を確認・再開できる。削除中からの復帰・IDの再利用は行わない。
 
+団体管理者はアカウントメニューの「団体の削除」から依頼・撤回し、運営は「団体管理」の対象団体から確定する。団体IDの一致を確認して送信し、削除中は状態を定期確認する。画面を閉じた場合も「削除の状況」から再開できる。個人の声援履歴では、削除済み動画の行と日時を残し、再生操作を無効にする。
+
 公開サーバーはcommunity DBの状態と削除要求ID、private managerは所有ジョブと処理段階を保存する。削除開始は生成受付と同じ団体別文書をtransactionで更新し、所有ジョブを確定して公開registryから除外する。新しい生成・公開・担当者操作を拒否し、生成済み動画の詳細・交流APIも参照不能にする。遅れて届いた受付も対象から漏れない。
 
 処理はジョブ終了確認 → 所有資産削除 → CDN無効化。受付結果が不明なGPUジョブは終了扱いにせず、照合・取消を待つ。`generated/{job}/`、`live/{job}/`、`live-index/{job}.json` だけを導出し、各オブジェクトのgeneration一致で削除する。再一覧で空を確認し、固定media hostのキャッシュ無効化がDONEになるまで完了にしない。進捗の世代照合と固定requestIdで並行ポーリング・応答消失に対応する。管理画面の確認と既存の認証済みschedulerが有限量ずつ進める。

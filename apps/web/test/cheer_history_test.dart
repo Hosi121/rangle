@@ -16,6 +16,36 @@ Map<String, Object> row(String id) => {
 http.Response reply(Object data, [int status = 200]) =>
     http.Response(jsonEncode(data), status);
 void main() {
+  testWidgets('deleted video keeps its history row without a playback action', (
+    tester,
+  ) async {
+    final client = MockClient(
+      (_) async => reply({
+        'clips': [
+          {...row('deleted'), 'deleted': true},
+        ],
+        'next_cursor': '',
+      }),
+    );
+    final account = AccountController(
+      CommunityApi(
+        endpoint: Uri.parse('https://example.test/api/v1/'),
+        client: client,
+      ),
+    )..user = const AccountUser('viewer', 'Viewer');
+    addTearDown(account.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: CheerHistoryDialog(account: account)),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('削除済み動画'), findsOneWidget);
+    final tile = tester.widget<ListTile>(find.byType(ListTile));
+    expect(tile.enabled, isFalse);
+    expect(tile.onTap, isNull);
+    expect(find.byIcon(Icons.chevron_right), findsNothing);
+  });
   testWidgets('history retries a failed page and continues with its cursor', (
     tester,
   ) async {

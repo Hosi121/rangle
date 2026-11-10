@@ -51,9 +51,11 @@ class CheeredClip {
     : id = (data['clip'] as Map<String, dynamic>)['id'] as String,
       title = (data['clip'] as Map<String, dynamic>)['title'] as String,
       sport = (data['clip'] as Map<String, dynamic>)['sport'] as String,
-      lastCheeredAt = DateTime.parse(data['last_cheered_at'] as String);
+      lastCheeredAt = DateTime.parse(data['last_cheered_at'] as String),
+      deleted = data['deleted'] as bool? ?? false;
   final String id, title, sport;
   final DateTime lastCheeredAt;
+  final bool deleted;
 }
 
 class CheerHistoryPage {

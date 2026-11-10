@@ -8,6 +8,7 @@ import '../community/community_api.dart';
 import '../widgets/rangle_header.dart';
 import '../widgets/viewer_viewport.dart';
 import 'publisher_api.dart';
+import 'publisher_deletion_screen.dart';
 import 'publisher_forms.dart';
 import 'publisher_staff_screen.dart';
 
@@ -98,6 +99,19 @@ class _OperationsPublishersScreenState
     }
   }
 
+  Future<void> _open(PublisherEntry entry) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute(
+        builder: (_) => PublisherOperationsDetail(
+          api: _api,
+          entry: entry,
+          onAuthenticationExpired: widget.account.expired,
+        ),
+      ),
+    );
+    if (mounted) await _load();
+  }
+
   @override
   Widget build(BuildContext context) => ViewerViewport(
     child: Scaffold(
@@ -151,21 +165,10 @@ class _OperationsPublishersScreenState
                     child: ListTile(
                       title: Text(entry.account.name),
                       subtitle: Text(
-                        '${entry.account.id} · ${entry.statusLabel}',
+                        '${entry.account.id} · ${entry.statusLabel}${entry.deletionRequested ? ' · 削除依頼あり' : ''}',
                       ),
                       trailing: const Icon(Icons.chevron_right),
-                      onTap: _busy
-                          ? null
-                          : () => Navigator.of(context).push<void>(
-                              MaterialPageRoute(
-                                builder: (_) => PublisherOperationsDetail(
-                                  api: _api,
-                                  entry: entry,
-                                  onAuthenticationExpired:
-                                      widget.account.expired,
-                                ),
-                              ),
-                            ),
+                      onTap: _busy ? null : () => _open(entry),
                     ),
                   ),
                 if (_cursor.isNotEmpty)
@@ -205,6 +208,7 @@ class _PublisherOperationsDetailState extends State<PublisherOperationsDetail> {
   bool _loading = true, _busy = false;
   String? _error;
   int _epoch = 0;
+  bool _deleting = false;
   @override
   void initState() {
     super.initState();
@@ -299,7 +303,38 @@ class _PublisherOperationsDetailState extends State<PublisherOperationsDetail> {
                 Text(
                   '${widget.entry.account.id} · ${widget.entry.statusLabel}',
                 ),
-                if (widget.entry.manageable) ...[
+                const SizedBox(height: 24),
+                OutlinedButton.icon(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          final state = await Navigator.of(context)
+                              .push<String>(
+                                MaterialPageRoute(
+                                  builder: (_) => PublisherDeletionScreen(
+                                    api: widget.api,
+                                    account: widget.entry.account,
+                                    operator: true,
+                                    onAuthenticationExpired:
+                                        widget.onAuthenticationExpired,
+                                  ),
+                                ),
+                              );
+                          if (mounted &&
+                              (state == 'deleting' || state == 'deleted')) {
+                            setState(() {
+                              _deleting = true;
+                              _epoch++;
+                              _inputs = [];
+                            });
+                          }
+                        },
+                  icon: const Icon(Icons.delete_outline),
+                  label: Text(
+                    widget.entry.manageable && !_deleting ? '団体の削除' : '削除の状況',
+                  ),
+                ),
+                if (widget.entry.manageable && !_deleting) ...[
                   const SizedBox(height: 24),
                   OutlinedButton.icon(
                     onPressed: _busy
