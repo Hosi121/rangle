@@ -8,7 +8,7 @@
 | --- | --- |
 | feed/catalog | 検索・タグ・20件継続取得、ETag、stale cursor復旧、不変snapshotと掲載registry。[ページング](feed-pagination.md)・[catalog](catalog-snapshots.md) |
 | 配信 | HTTPSのGo UI/APIとprivate GCS/CDN、Range・SHA照合、model直接取得。[API](api-delivery.md)・[公開preflight](asset-publication.md) |
-| 生成 | 共通前処理、静的3DGS・動的4DGS、scene-last保存、有限台帳。[生成](generation.md)・[品質](training-quality.md) |
+| 生成 | 共通前処理、静的3DGS・動的4DGS、scene-last保存、有限台帳、団体所有の生成・取消・公開。[生成](generation.md)・[担当者API](publisher-auth.md)・[品質](training-quality.md) |
 | 掲載・交流 | owner掲載/取り下げ、未掲載の成功済み共有リンクでも交流可。[掲載](generated-publication.md)・[アカウント](accounts.md) |
 | 同期・権限 | IAM必須managerと別DB、専用OIDC同期、最大10 attempts/同時1件/期限。[生成基盤](generation-infrastructure.md)・[適用記録](security-review.md) |
 | 運用・release | 8要求の処理枠、timeout/slog、WAF・読取制限、監査・backup、両serviceの候補検証/復帰/receipt。[過負荷](api-overload.md)・[CI/CD](cicd.md)・[監視](observability.md) |
