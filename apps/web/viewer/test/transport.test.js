@@ -5,6 +5,8 @@ import { TransportABR } from '../src/transport-abr.js';
 import { TransportPlayback } from '../src/transport-playback.js';
 import { parseManifest } from '../src/session.js';
 import { createHash } from 'node:crypto';
+import { SegmentCache } from '../src/segment-cache.js';
+import { MemoryStorage, MemoryLocks } from './segment-cache-fixture.js';
 
 test('transport reads irregular chunks exactly and rejects short or overflowing bodies', async () => {
   const expected = Uint8Array.from({ length: 256 }, (_, i) => i);
@@ -57,7 +59,7 @@ test('Go collapse/recovery vector and excluded samples have identical decisions'
   });
   assert.throws(() => new TransportABR(parseTransport(manifest(), source), { maxDecodedBytes: 1 }).select({ segmentIndex: 0 }));
 });
-function playbackFixture(tamper = false, legacy = false) {
+function playbackFixture(tamper = false, legacy = false, segmentCache) {
   const raw = manifest(2); raw.representations = [raw.representations[0]];
   if (legacy) { raw.codec = 'rangle-temporal-rgs1'; raw.representations[0].segments.length = 1; raw.representations[0].segments[0].duration_seconds = 1.5; }
   const r = raw.representations[0], bodies = new Map(), requests = [], events = [], rendered = [];
@@ -74,8 +76,8 @@ function playbackFixture(tamper = false, legacy = false) {
     async load(m,o){rendered.push({m,o});}, async replace(m,o){rendered.push({m,o});return true;},
     async seek(frame){this.frame=frame;}, cancelReplacement(){}, async dispose(){this.disposed=true;} };
   const playback = new TransportPlayback({ createViewer(){}, notify:m=>events.push(m), parseScene:parseManifest,
-    requestFrame(){return 1;}, cancelFrame(){}, createTemporal(){return temporal;},
-    async fetchAsset(url, options){requests.push({url,options});return new Response(bodies.get(url),{status:200});} });
+    requestFrame(){return 1;}, cancelFrame(){}, createTemporal(){return temporal;}, ...(segmentCache ? { segmentCache } : {}),
+    async fetchAsset(url, options){requests.push({url,options});return new Response(bodies.get(url),{status:200,headers:{'Cache-Control':'public,max-age=600',Age:'0'}});} });
   return { playback, manifest:parseTransport(raw,source), requests, events, rendered, temporal };
 }
 test('real loader fetches manifest-selected segments, verifies hashes, maps global seek and owns disposal', async () => {
@@ -188,5 +190,62 @@ test('explicit cancellation invalidates an awaited prefetch and retains the disp
   assert.equal(f.rendered.length,1); assert.equal(f.playback.index,0);
   assert.equal(f.playback.position,0); assert.equal(f.playback.clock.value(),0);
   assert.ok(!f.events.some(e=>e.presentationId!==undefined || e.type==='error'));
+  await f.playback.dispose();
+});
+
+test('new viewer reuses verified encoded bytes while keeping cached speed out of ABR', async () => {
+  const storage = new MemoryStorage(), locks = new MemoryLocks();
+  const first = playbackFixture(false, true, new SegmentCache({ storage, locks }));
+  await first.playback.load(first.manifest, { source }); assert.ok(first.playback.abr.fast > 0);
+  structuredClone(first.rendered[0].o.bytes, { transfer: [first.rendered[0].o.bytes] });
+  await first.playback.dispose();
+  const next = playbackFixture(false, true, new SegmentCache({ storage, locks }));
+  await next.playback.load(next.manifest, { source });
+  assert.equal(next.requests.filter(r => r.url.endsWith('.rgs')).length, 0);
+  assert.equal(next.rendered.length, 1); assert.equal(next.playback.abr.fast, undefined); assert.equal(next.playback.abr.slow, undefined);
+  await next.playback.dispose();
+});
+test('corrupt cache bytes are evicted and fetched again before rendering', async () => {
+  const storage = new MemoryStorage(), locks = new MemoryLocks();
+  const first = playbackFixture(false, true, new SegmentCache({ storage, locks }));
+  await first.playback.load(first.manifest, { source }); await first.playback.dispose();
+  storage.entries.values().next().value.bytes[0] ^= 255;
+  const next = playbackFixture(false, true, new SegmentCache({ storage, locks }));
+  await next.playback.load(next.manifest, { source });
+  assert.equal(next.requests.filter(r => r.url.endsWith('.rgs')).length, 1);
+  assert.equal(next.rendered.length, 1); assert.deepEqual([...new Uint8Array(next.rendered[0].o.bytes)], [0,1,2,3]);
+  assert.ok(next.playback.abr.fast > 0); await next.playback.dispose();
+});
+test('unavailable cache never fails a successful verified model transfer', async () => {
+  const storage = new MemoryStorage(); storage.failPut = true;
+  const first = playbackFixture(false, true, new SegmentCache({ storage, locks: new MemoryLocks() }));
+  await first.playback.load(first.manifest, { source });
+  assert.equal(first.rendered.length, 1); assert.ok(first.playback.abr.fast > 0); assert.equal(storage.entries.size, 0);
+  assert.ok(!first.events.some(e => e.type === 'error')); await first.playback.dispose();
+});
+
+test('an already cancelled acquisition never starts another network request', async () => {
+  let calls = 0;
+  const playback = new TransportPlayback({ fetchAsset: async () => { calls++; return new Response(new Uint8Array(4)); } });
+  const stop = new AbortController(); stop.abort();
+  await assert.rejects(playback.read('https://media.test/model.rgs', 4, stop.signal), { name: 'AbortError' });
+  assert.equal(calls, 0);
+});
+
+test('a model whose public response expires during transfer is displayed but never cached', async t => {
+  let now = 1000; t.mock.method(Date, 'now', () => now);
+  const storage = new MemoryStorage(), locks = new MemoryLocks();
+  const f = playbackFixture(false, true, new SegmentCache({ storage, locks }));
+  const fetch = f.playback.fetchAsset;
+  f.playback.fetchAsset = async (url, options) => {
+    const response = await fetch(url, options);
+    if (!url.endsWith('.rgs')) return response;
+    return { status: 200, headers: new Headers({ 'Cache-Control': 'public,max-age=1', Age: '0' }), body: { getReader() {
+      const reader = response.body.getReader();
+      return { async read() { now += 5000; return reader.read(); }, cancel: () => reader.cancel(), releaseLock: () => reader.releaseLock() };
+    } } };
+  };
+  await f.playback.load(f.manifest, { source });
+  assert.equal(f.rendered.length, 1); assert.equal(storage.entries.size, 0); assert.ok(f.playback.abr.fast > 0);
   await f.playback.dispose();
 });

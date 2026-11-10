@@ -54,7 +54,7 @@ run "configured_domain_media_and_budget" {
   assert {
     condition = { for header in one([for matcher in google_compute_url_map.https[0].path_matcher : matcher if matcher.name == "media"]).header_action[0].response_headers_to_add : header.header_name => { value = header.header_value, replace = header.replace } } == {
       Access-Control-Allow-Origin   = { value = "*", replace = true }
-      Access-Control-Expose-Headers = { value = "Accept-Ranges, Cache-Control, Content-Length, Content-Range, Content-Type, ETag, Last-Modified", replace = true }
+      Access-Control-Expose-Headers = { value = "Accept-Ranges, Age, Cache-Control, Content-Length, Content-Range, Content-Type, Date, ETag, Last-Modified", replace = true }
     }
     error_message = "CDN-generated responses need one public CORS policy with the headers used by browser and Worker readers."
   }

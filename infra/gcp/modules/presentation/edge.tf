@@ -107,7 +107,7 @@ resource "google_compute_url_map" "https" {
       }
       response_headers_to_add {
         header_name  = "Access-Control-Expose-Headers"
-        header_value = "Accept-Ranges, Cache-Control, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
+        header_value = "Accept-Ranges, Age, Cache-Control, Content-Length, Content-Range, Content-Type, Date, ETag, Last-Modified"
         replace      = true
       }
     }
