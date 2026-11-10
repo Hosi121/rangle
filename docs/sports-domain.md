@@ -44,7 +44,7 @@
 | `GET /api/v1/generation/jobs`・`GET /api/v1/generation/jobs/{job}` | 団体のジョブのみ | 同左 | 運営権限で扱う範囲 |
 | `DELETE /api/v1/generation/jobs/{job}` | 団体のジョブのみ | 同左 | 同上 |
 | `PUT /api/v1/generation/jobs/{job}/publication` | 団体の結果を公開・取り下げ | 同左 | 公開・停止の運用 |
-| 担当者の作成・権限変更・無効化（未接続） | — | 団体内のみ | 引継ぎ等の運用 |
+| 担当者の作成・権限変更・無効化 | — | 団体内のみ | 引継ぎ等の運用 |
 | 団体の削除要求（未接続） | — | 可 | 削除手続きの運用 |
 | 実験用 `/api/v1/private-scenes/**` | — | — | 運営専用 |
 | 撮影構成・入力の登録、実行identity・GPU予算の設定 | — | — | 運営専用 |
@@ -53,10 +53,10 @@
 
 ## 実装との対応
 
-Goは `publisher.Account`・団体内の `StaffAccount`・権限を含まない `StaffPrincipal` を定義する。`Account.Allows` は上の団体RBACのドメインルールで、HTTPやDBには未接続。認可では公開プロフィールでなく現在の団体・担当者レコードを読み直す。旧 `AdminUser` / `is_admin` は互換のため残し、意味をrangle運営に限定する。
+Goは `publisher.Account`・団体内の `StaffAccount`・権限を含まない `StaffPrincipal` を定義する。`Account.Allows` は上の団体RBACのドメインルールで、担当者管理APIとDB transactionの認可へ接続済み。生成APIへの接続は次段階。認可では公開プロフィールでなく現在の団体・担当者レコードを読み直す。旧 `AdminUser` / `is_admin` は互換のため残し、意味をrangle運営に限定する。
 
 既存ジョブの `Owner` は個人IDのため、単に運営チェックを緩めるだけでは団体へ開放できない。接続時に団体所有者と操作主体を別項目で保持し、認証・セッション、ジョブの検索・冪等性・公開操作、private managerへの転送まで同じ団体スコープで検証する。旧ジョブを担当者名の一致などで団体へ自動移管しない。
 
 初版の公開 `context` は[架空の入力例](../testdata/sports/context.json)と同じ形で、運営確認済みcatalog／生成presetへ任意設定する。公開プロフィールに担当者・資格情報・権限・団体の内部状態を含めない。試合等のIDと表示名を持ち、同じ設定内で同じIDに矛盾する情報があれば拒否する。団体名・試合・選手・チーム・会場を検索と「概要」へ反映し、公開時点の情報を保持する。
 
-本人の[声援履歴](accounts.md#声援の履歴)は交流DBへ保存する。仕様はGoの団体境界・RBAC・オフボーディングのテストとGo/Dart共通fixtureで確認する。担当者管理・生成APIへの団体認可・削除フロー・実ブラウザ確認は次段階。
+本人の[声援履歴](accounts.md#声援の履歴)は交流DBへ保存する。仕様はGoの団体境界・RBAC・オフボーディングのテストとGo/Dart共通fixtureで確認する。担当者管理は専用APIに接続済み。生成APIへの団体認可・削除フロー・実ブラウザ確認は次段階。

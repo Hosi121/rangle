@@ -17,4 +17,18 @@
 
 CSRF・本文上限・同時hash数・ログイン頻度制限を適用する。Cloud Armorの既存auth制限へ担当者loginを追加し、`staff_sessions.expires_at` のTTLとindex免除をIaC定義へ追加した。TTLの削除を待たずGoで期限を検査する。別DB・IAM権限は追加しない。IaCの実適用は別途確認する。
 
-担当者管理、団体による生成・公開APIの利用は次の接続段階。今回の認証だけでは生成APIや運営専用previewへのアクセスは増えない。認証のフロントUIは未接続。GoのAPI/race・Firestore emulator、Terraform mockで検証し、実ブラウザ・本番担当者アカウントの作成は行っていない。
+担当者管理は下記APIへ接続する。団体による生成・公開APIの利用は次の接続段階で、生成APIや運営専用previewへのアクセスは増えない。認証のフロントUIは未接続。GoのAPI/race・Firestore emulator、Terraform mockで検証し、実ブラウザ・本番担当者アカウントの作成は行っていない。
+
+## 担当者の管理
+
+| API | 団体担当者の経路 |
+| --- | --- |
+| `GET /api/v1/publishers/{account}/staff?cursor=...` | 団体管理者が20件ずつ一覧を取得。担当者IDの昇順 |
+| `POST /api/v1/publishers/{account}/staff` | 団体管理者が `{username, password, role}` で担当者を追加 |
+| `PUT /api/v1/publishers/{account}/staff/{staff}` | 団体管理者が `{role, disabled}` を設定。両方必須 |
+
+運営は同じ操作を `/api/v1/operations/publishers/{account}/staff[/{staff}]` から行う。運営Cookieと担当者Cookieを相互の代用にせず、経路で認証主体を明確にする。団体の投稿担当 `editor` は担当者管理を行えない。他団体を指定した要求は拒否し、一覧cursorも団体に結び付ける。
+
+作成時は担当者名の一意性をtransactionで検査する。変更時は団体・操作主体・対象担当者を同じtransactionで読み、現在の役割と資格情報世代を再検査する。受付後に管理者権限を失った要求もコミットしない。権限・無効化状態の変更では資格情報世代を進め、古いセッションを失効させる。同じ設定の再送では世代を進めない。
+
+最後の有効な管理者も無効化できる。団体と動画は残し、運営が別の管理者を作成して引継ぐ。担当者名・IDは上書き・再割当せず、無効化した担当者は監査のため残す。団体削除・資格情報再設定・一般向け登録・認証/管理UI・生成APIの団体所有への移行は別段階。
