@@ -3,12 +3,13 @@ import { TransportABR } from './transport-abr.js';
 import { PlaybackClock } from './playback-clock.js';
 import { strictJson } from './strict-json.js';
 import { handoffTimeline } from './playback-handoff.js';
+import { publicSegmentCache, segmentCacheAge } from './segment-cache.js';
 
 function abortable(promise, signal) {
   return new Promise((resolve, reject) => {
     const abort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
-    if (signal.aborted) return abort();
-    signal.addEventListener('abort', abort, { once: true });
+    if (signal.aborted) abort();
+    else signal.addEventListener('abort', abort, { once: true });
     Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
   });
 }
@@ -17,19 +18,20 @@ function abortable(promise, signal) {
 export class TransportPlayback {
   constructor({ createViewer, notify, fetchAsset = (...args) => fetch(...args), parseScene,
     createTemporal = options => new TemporalSession(options), requestFrame = cb => requestAnimationFrame(cb),
-    cancelFrame = id => cancelAnimationFrame(id), abrConfig = {}, transferTimeoutMs = 60000 }) {
-    Object.assign(this, { createViewer, notify, fetchAsset, parseScene, createTemporal, requestFrame, cancelFrame, abrConfig, transferTimeoutMs });
+    cancelFrame = id => cancelAnimationFrame(id), abrConfig = {}, transferTimeoutMs = 60000, segmentCache = publicSegmentCache }) {
+    Object.assign(this, { createViewer, notify, fetchAsset, parseScene, createTemporal, requestFrame, cancelFrame, abrConfig, transferTimeoutMs, segmentCache });
     this.paused = false; this.disposed = false; this.epoch = 0; this.inits = new Map(); this.index = -1;
     this.position = 0; this.currentId = ''; this.abort = new AbortController();
   }
-  async read(url, size, signal) {
+  async read(url, size, signal, onResponse) {
     if (!Number.isSafeInteger(size) || size <= 0 || size > 32 * 1024 * 1024) throw Error('Transport asset exceeds bounds');
+    signal.throwIfAborted();
     const controller = new AbortController(), abort = () => controller.abort(signal.reason);
     if (signal.aborted) abort(); else signal.addEventListener('abort', abort, { once: true });
     const timeout = setTimeout(() => controller.abort(new DOMException('Transport transfer timed out', 'TimeoutError')), this.transferTimeoutMs);
     let reader;
     try {
-      // Bypass browser copies for transfer samples; CDN payloads still cross the network.
+      // Cache Storage hits bypass this path. Misses are real transfers for ABR.
       const pending = this.fetchAsset(url, { signal: controller.signal, redirect: 'error', credentials: 'omit', cache: 'no-store' });
       const response = await abortable(Promise.resolve(pending).then(response => {
         if (controller.signal.aborted) { void response.body?.cancel().catch(() => {}); throw controller.signal.reason; }
@@ -37,6 +39,7 @@ export class TransportPlayback {
       }), controller.signal);
       reader = response.body?.getReader();
       if (response.status !== 200 || !reader) throw Error('Transport asset request failed');
+      onResponse?.(response);
       // The manifest fixes the bounded length. Fill one destination without
       // retaining every received chunk alongside a later concatenation buffer.
       const result = new Uint8Array(size); let bytes = 0;
@@ -71,11 +74,28 @@ export class TransportPlayback {
   async acquire(index, bufferSeconds, signal) {
     const decision = this.abr.select({ segmentIndex: index, currentId: this.currentId, bufferSeconds, initCached: new Set(this.inits.keys()) });
     const r = decision.representation, scene = await this.init(r, signal), segment = r.segments[index];
-    const started = performance.now(), bytes = await this.read(segment.url, segment.size_bytes, signal);
-    const seconds = (performance.now() - started) / 1000;
-    const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x => x.toString(16).padStart(2, '0')).join('');
-    if (signal.aborted || digest !== segment.sha256) throw Error('Transport segment hash mismatch');
-    if (Number.isFinite(seconds) && seconds > 0) this.abr.observe({ bytes: bytes.length, seconds });
+    const verified = async bytes => {
+      if (!(bytes instanceof Uint8Array) || bytes.byteLength !== segment.size_bytes) return false;
+      const digest = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map(x => x.toString(16).padStart(2, '0')).join('');
+      signal.throwIfAborted(); return digest === segment.sha256;
+    };
+    let bytes = await this.segmentCache?.get(segment, signal);
+    if (bytes && !await verified(bytes)) { await this.segmentCache.remove(segment, signal); bytes = null; }
+    const cacheHit = !!bytes;
+    if (!cacheHit) {
+      let expiresAt = 0;
+      const started = performance.now();
+      bytes = await this.read(segment.url, segment.size_bytes, signal, response => {
+        const receivedAt = Date.now(), delay = (performance.now() - started) / 1000;
+        expiresAt = receivedAt + Math.floor(segmentCacheAge(response, delay, receivedAt) * 1000);
+      });
+      const seconds = (performance.now() - started) / 1000;
+      if (!await verified(bytes)) throw Error('Transport segment hash mismatch');
+      await this.segmentCache?.put(segment, bytes, signal, expiresAt);
+      signal.throwIfAborted();
+      if (Number.isFinite(seconds) && seconds > 0) this.abr.observe({ bytes: bytes.length, seconds });
+    }
+    signal.throwIfAborted();
     return { decision, r, scene: { ...scene, temporal: { url: segment.url } }, segment, bytes: bytes.buffer };
   }
   async load(manifest, options = {}) {

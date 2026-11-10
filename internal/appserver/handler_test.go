@@ -72,6 +72,9 @@ func TestHTTPFilesAndConditionalRequests(t *testing.T) {
 			if test.name == "range" && response.Header.Get("Content-Range") != "bytes 2-5/10" {
 				t.Fatal(response.Header)
 			}
+			if test.name == "invalid range" && response.Header.Get("Content-Range") != "bytes */10" {
+				t.Fatal("media 416 lost its unsatisfied range", response.Header)
+			}
 			if test.name == "frame HEAD" && response.Header.Get("Content-Length") != "10" {
 				t.Fatal(response.Header)
 			}
