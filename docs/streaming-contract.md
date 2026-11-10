@@ -1,6 +1,6 @@
 # rangle 配信部品の初期契約
 
-Goのmanifest・HTTP・ABR基準実装の契約。[実再生](temporal-playback.md)・[packing](gaussian-compression.md)・[言語間fixture](../testdata/contracts/v1/README.md)とは分ける。合成入力は4DGS映像ではなく、実ABR再生・HLS/DASH準拠・スマートフォン性能は未検証。
+Goのmanifest・HTTP・ABR基準実装の契約。[実再生](temporal-playback.md)・[packing](gaussian-compression.md)・[言語間fixture](../testdata/contracts/v1/README.md)とは分ける。合成入力は4DGS映像ではなく、[実client接続](transport-playback.md)は合成HTTP/browserまで検証し、実品質ラダーのABR/QoE・HLS/DASH準拠・スマートフォン性能は未検証。
 
 ## 共通の型
 

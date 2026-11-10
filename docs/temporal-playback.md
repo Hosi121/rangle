@@ -1,6 +1,6 @@
 # 自由視点の連続再生
 
-時間モデルを一度読み、同じmeshの時間uniformと描画順を更新する。再生中も視点を動かせ、seekでHTTP取得/mesh交換をしない。対象は[FTGS-inspired学習モデル](gaussian-training.md)で、一般4DGS互換は保証せず、ABRは未接続。版付きHTTP資産として配信する。
+時間モデルを一度読み、同じmeshの時間uniformと描画順を更新する。再生中も視点を動かせ、同じmodel内のseekではHTTP取得/mesh交換をしない。対象は[FTGS-inspired学習モデル](gaussian-training.md)で、一般4DGS互換は保証しない。manifest付きclipは[transport再生](transport-playback.md)から選択・検証して渡す。複数区間profileでは境界を跨ぐと独立modelを取得・交換し、RGS1自体のlocal時計は変えない。版付きHTTP資産として配信する。
 
 ## シーンとバイナリ形式
 
