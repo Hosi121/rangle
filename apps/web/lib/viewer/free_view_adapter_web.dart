@@ -51,6 +51,7 @@ class _FreeViewAdapter extends ViewerAdapter {
   int _frameCount = 0;
   int _requestedFrame = 0;
   Timer? _timeout;
+  Duration get _loadingTimeout => Duration(seconds: live ? 30 : 60);
   bool _deferFirstFrame = false, _prepared = false;
   Map<String, String>? _transportIdentity;
   @override
@@ -110,7 +111,7 @@ class _FreeViewAdapter extends ViewerAdapter {
     if (!_prepared || _restoreTarget == null || _restoration == null) return;
     _requestedFrame = _timeline!.frameAt(_restoreTarget!.position);
     _timeout?.cancel();
-    _timeout = Timer(const Duration(seconds: 30), _fail);
+    _timeout = Timer(_loadingTimeout, _fail);
     _send('present', {
       'presentationId': _presentationId,
       'frame': _requestedFrame,
@@ -123,7 +124,7 @@ class _FreeViewAdapter extends ViewerAdapter {
 
   @override
   Future<void> initialize() async {
-    if (!live || _visible) _timeout = Timer(const Duration(seconds: 30), _fail);
+    if (!live || _visible) _timeout = Timer(_loadingTimeout, _fail);
     await _initialized.future;
   }
 
@@ -241,7 +242,7 @@ class _FreeViewAdapter extends ViewerAdapter {
         case 'loading':
           _timeout?.cancel();
           if (!live || _visible) {
-            _timeout = Timer(const Duration(seconds: 30), _fail);
+            _timeout = Timer(_loadingTimeout, _fail);
           }
           _value = ViewerValue(
             status: _hasReadyFrame ? ViewerStatus.ready : ViewerStatus.loading,
@@ -395,7 +396,7 @@ class _FreeViewAdapter extends ViewerAdapter {
       );
       notifyListeners();
       _timeout?.cancel();
-      _timeout = Timer(const Duration(seconds: 30), _fail);
+      _timeout = Timer(_loadingTimeout, _fail);
       _send('seek', {'frame': frame});
     }
   }
@@ -415,7 +416,7 @@ class _FreeViewAdapter extends ViewerAdapter {
     _visible = true;
     if (live) _updates.visible(true);
     if (live && !_hasReadyFrame) {
-      _timeout = Timer(const Duration(seconds: 30), _fail);
+      _timeout = Timer(_loadingTimeout, _fail);
     }
     _applyVisibility();
     _send('resume');

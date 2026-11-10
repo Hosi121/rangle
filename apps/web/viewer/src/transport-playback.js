@@ -17,7 +17,7 @@ function abortable(promise, signal) {
 export class TransportPlayback {
   constructor({ createViewer, notify, fetchAsset = (...args) => fetch(...args), parseScene,
     createTemporal = options => new TemporalSession(options), requestFrame = cb => requestAnimationFrame(cb),
-    cancelFrame = id => cancelAnimationFrame(id), abrConfig = {}, transferTimeoutMs = 30000 }) {
+    cancelFrame = id => cancelAnimationFrame(id), abrConfig = {}, transferTimeoutMs = 60000 }) {
     Object.assign(this, { createViewer, notify, fetchAsset, parseScene, createTemporal, requestFrame, cancelFrame, abrConfig, transferTimeoutMs });
     this.paused = false; this.disposed = false; this.epoch = 0; this.inits = new Map(); this.index = -1;
     this.position = 0; this.currentId = ''; this.abort = new AbortController();
