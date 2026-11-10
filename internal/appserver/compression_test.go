@@ -156,6 +156,47 @@ func TestUICompressedHEADConditionalAndRanges(t *testing.T) {
 	}
 }
 
+func TestCompressedPreconditionErrorsAreReadableOverHTTP(t *testing.T) {
+	config, _, _ := gzipFixture(t)
+	h := openCompressed(t, config)
+	server := httptest.NewServer(h)
+	defer server.Close()
+	for _, condition := range []struct{ name, value string }{
+		{"If-Match", `"another-representation"`},
+		{"If-Unmodified-Since", testModified.Add(-time.Hour).Format(http.TimeFormat)},
+	} {
+		for _, explicitEncoding := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/explicit-gzip=%t", condition.name, explicitEncoding), func(t *testing.T) {
+				request, err := http.NewRequest("GET", server.URL+"/demo/main.dart.js", nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				request.Header.Set(condition.name, condition.value)
+				if explicitEncoding {
+					request.Header.Set("Accept-Encoding", "gzip")
+				}
+				// With no explicit header Go negotiates and decodes gzip itself.
+				// The other mode exposes the raw framing/encoding headers.
+				response, err := server.Client().Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, readErr := io.ReadAll(response.Body)
+				response.Body.Close()
+				if readErr != nil {
+					t.Fatalf("could not read 412 body: %v (headers=%v)", readErr, response.Header)
+				}
+				if response.StatusCode != http.StatusPreconditionFailed || len(body) != 0 ||
+					response.ContentLength != 0 || response.Header.Get("Content-Encoding") != "" ||
+					response.Header.Get("Content-Range") != "" || response.Header.Get("Cache-Control") != "no-store" ||
+					response.Header.Get("Vary") != "Accept-Encoding" {
+					t.Fatalf("412 status=%d length=%d body=%q headers=%v", response.StatusCode, response.ContentLength, body, response.Header)
+				}
+			})
+		}
+	}
+}
+
 func TestSidecarsCannotPublishPathsOrCompressMedia(t *testing.T) {
 	config, _, _ := gzipFixture(t)
 	for _, name := range []string{"model.rgs", "model.splat", "preview.webm", "font.woff2", ".hidden.js", "samples/private.js", "orphan.js.gz"} {

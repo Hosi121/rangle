@@ -290,13 +290,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, item.name, info.ModTime(), io.NewSectionReader(item.file, 0, info.Size()))
 }
 
-// ServeContent clears caching headers on some error paths; intercept the final
-// status so errors, including invalid Range responses, always remain no-store.
+// ServeContent's precondition failures bypass its usual error helper. Discard
+// success-body encoding/framing on every error, including empty 412 responses,
+// and keep errors no-store. A 416 retains its unsatisfied Content-Range.
 type errorCacheWriter struct{ http.ResponseWriter }
 
 func (w errorCacheWriter) WriteHeader(status int) {
 	if status >= 400 {
 		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Del("Content-Encoding")
+		w.Header().Del("Content-Length")
+		w.Header().Del("Accept-Ranges")
+		if status != http.StatusRequestedRangeNotSatisfiable {
+			w.Header().Del("Content-Range")
+		}
 	}
 	w.ResponseWriter.WriteHeader(status)
 }
