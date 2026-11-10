@@ -107,7 +107,11 @@ Future<AccountController> _show(
   await tester.pumpWidget(
     MaterialApp(
       home: MediaQuery(
-        data: MediaQueryData(size: size, textScaler: TextScaler.linear(scale)),
+        data: MediaQueryData(
+          size: size,
+          textScaler: TextScaler.linear(scale),
+          disableAnimations: true,
+        ),
         child: GenerationScreen(
           account: account,
           api: fixture.api,

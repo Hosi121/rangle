@@ -12,6 +12,7 @@ import (
 )
 
 type Service struct {
+	ProgressReader ProgressReader
 	Cleanup        AssetCleanup
 	MediaClient    *http.Client
 	ReservedClipID func(string) bool
@@ -123,6 +124,13 @@ func (s *Service) Get(ctx context.Context, owner, id string) (Job, error) {
 	return s.GetFor(ctx, OperatorPrincipal(owner), id)
 }
 func (s *Service) GetFor(ctx context.Context, p Principal, id string) (Job, error) {
+	job, err := s.getFor(ctx, p, id)
+	if err != nil {
+		return Job{}, err
+	}
+	return s.withProgress(ctx, job), nil
+}
+func (s *Service) getFor(ctx context.Context, p Principal, id string) (Job, error) {
 	if !p.allows(publisher.ReadGeneration) {
 		return Job{}, ErrPublisherForbidden
 	}
@@ -163,7 +171,7 @@ func (s *Service) CancelFor(ctx context.Context, p Principal, id string) (Job, e
 	if !p.allows(publisher.CancelGeneration) {
 		return Job{}, ErrPublisherForbidden
 	}
-	job, err := s.GetFor(ctx, p, id)
+	job, err := s.getFor(ctx, p, id)
 	if err != nil || job.State.Terminal() || job.State == Cancelling {
 		return job, err
 	}

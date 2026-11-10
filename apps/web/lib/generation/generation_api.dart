@@ -66,11 +66,17 @@ class GenerationJob {
       state = data['state'] as String,
       mode = _mode(data['mode']),
       published = data['published'] as bool? ?? false,
-      createdAt = DateTime.parse(data['created_at'] as String);
+      createdAt = DateTime.parse(data['created_at'] as String),
+      progress = data['progress'] == null
+          ? null
+          : GenerationProgress.fromJson(
+              data['progress'] as Map<String, dynamic>,
+            );
   final String id, preset, state, mode;
   final DateTime createdAt;
   final Uri? viewerUrl;
   final bool published;
+  final GenerationProgress? progress;
   bool get isLive => mode == 'live';
 
   bool get active =>
@@ -90,6 +96,43 @@ class GenerationJob {
     'cancelled' => '生成を中止しました',
     _ => '状態を確認してください',
   };
+}
+
+class GenerationProgress {
+  GenerationProgress.fromJson(Map<String, dynamic> data)
+    : stage = data['stage'] as String,
+      completed = data['completed_steps'] as int? ?? 0,
+      total = data['total_steps'] as int? ?? 0,
+      observedAt = DateTime.parse(data['observed_at'] as String),
+      etaSeconds = data['eta_seconds'] as int?,
+      stale = data['stale'] as bool {
+    if (!const ['preparing', 'training', 'finalizing'].contains(stage) ||
+        completed < 0 ||
+        total < completed ||
+        total > 1000000 ||
+        stage == 'training' && (total == 0 || completed == 0) ||
+        stage != 'training' && (total != 0 || completed != 0) ||
+        etaSeconds != null &&
+            (etaSeconds! <= 0 ||
+                etaSeconds! > 1800 ||
+                stage != 'training' ||
+                stale)) {
+      throw const FormatException('Invalid generation progress.');
+    }
+  }
+  final String stage;
+  final int completed, total;
+  final DateTime observedAt;
+  final int? etaSeconds;
+  final bool stale;
+  double? get fraction => stage == 'training' ? completed / total : null;
+  String? get etaLabel {
+    final seconds = etaSeconds;
+    if (seconds == null || stale) return null;
+    return seconds >= 60
+        ? '学習の残り目安：約${(seconds / 60).ceil()}分'
+        : '学習の残り目安：約${(seconds / 10).ceil() * 10}秒';
+  }
 }
 
 /// Uses the existing same-origin HttpOnly session cookie, with no new auth state.

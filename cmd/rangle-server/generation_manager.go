@@ -65,6 +65,12 @@ func newGenerationManager(cfg config, logger *slog.Logger) (app *application, er
 			return app, err
 		}
 		service = &generation.Service{Config: settings, Store: database, Provider: provider, Logger: logger}
+		progress, err := generation.NewLogProgressReader(ctx, settings)
+		if err != nil {
+			return app, err
+		}
+		progress.Logger = logger
+		service.ProgressReader = progress
 	}
 	service.ReservedClipID = func(id string) bool { return reserved[id] }
 	if cfg.GenerationCleanupURLMap != "" {

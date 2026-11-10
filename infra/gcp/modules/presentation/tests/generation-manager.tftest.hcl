@@ -70,4 +70,8 @@ run "public_process_has_no_vertex_trainer_or_generation_database_capability" {
     condition     = google_storage_bucket_iam_member.generation_output_delete[0].member == "serviceAccount:${google_service_account.generation_manager[0].email}" && google_storage_bucket_iam_member.generation_output_delete[0].bucket == google_storage_bucket.private["media"].name && strcontains(google_storage_bucket_iam_member.generation_output_delete[0].condition[0].expression, "/objects/generated/") && strcontains(google_storage_bucket_iam_member.generation_output_delete[0].condition[0].expression, "/objects/live/") && strcontains(google_storage_bucket_iam_member.generation_output_delete[0].condition[0].expression, "request.time < timestamp('2026-11-14T15:00:00Z')") && contains(google_cloud_run_v2_service.generation[0].template[0].containers[0].args, "-generation-cleanup-url-map")
     error_message = "Only the manager may delete derived generated/live output prefixes, before the existing deadline."
   }
+  assert {
+    condition     = google_logging_log_view.generation_progress[0].name == "generation-progress" && google_logging_log_view.generation_progress[0].filter == "source(\"projects/rangle-example\") AND resource.type=\"ml_job\" AND log_id(\"workerpool0-0\")" && google_logging_log_view_iam_member.generation_progress[0].role == "roles/logging.viewAccessor" && google_logging_log_view_iam_member.generation_progress[0].member == "serviceAccount:${google_service_account.generation_manager[0].email}" && google_logging_log_view_iam_member.generation_progress[0].condition[0].expression == "request.time < timestamp('2026-11-14T15:00:00Z')"
+    error_message = "Only the private manager may read the dedicated worker log view, within the presentation deadline."
+  }
 }
