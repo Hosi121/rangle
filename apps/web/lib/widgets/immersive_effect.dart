@@ -94,6 +94,7 @@ class ImmersiveEffect extends StatelessWidget {
 class _EmberPainter extends CustomPainter {
   _EmberPainter(this.time, this.charge);
   final double time, charge;
+  final _paint = Paint();
   @override
   void paint(Canvas canvas, Size size) {
     for (var i = 0; i < 72; i++) {
@@ -107,7 +108,7 @@ class _EmberPainter extends CustomPainter {
           Rect.fromLTWH(x, y, i % 3 == 0 ? 2 : 3, i % 5 == 0 ? 9 : 4),
           const Radius.circular(2),
         ),
-        Paint()..color = const Color(0xFFFFBC62).withValues(alpha: opacity),
+        _paint..color = const Color(0xFFFFBC62).withValues(alpha: opacity),
       );
     }
   }
