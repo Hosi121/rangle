@@ -17,7 +17,7 @@
 
 CSRF・本文上限・同時hash数・ログイン頻度制限を適用する。Cloud Armorの既存auth制限へ担当者loginを追加し、`staff_sessions.expires_at` のTTLとindex免除をIaC定義へ追加した。TTLの削除を待たずGoで期限を検査する。別DB・IAM権限は追加しない。IaCの実適用は別途確認する。
 
-担当者管理は下記APIへ接続する。団体による生成・公開APIの利用は次の接続段階で、生成APIや運営専用previewへのアクセスは増えない。認証のフロントUIは未接続。GoのAPI/race・Firestore emulator、Terraform mockで検証し、実ブラウザ・本番担当者アカウントの作成は行っていない。
+担当者管理と団体用の生成・公開APIへ接続済み。認証のフロントUIは未接続。GoのAPI/race・Firestore emulator、Terraform mockで検証し、実ブラウザ・本番担当者アカウントの作成は行っていない。
 
 ## 担当者の管理
 
@@ -31,4 +31,20 @@ CSRF・本文上限・同時hash数・ログイン頻度制限を適用する。
 
 作成時は担当者名の一意性をtransactionで検査する。変更時は団体・操作主体・対象担当者を同じtransactionで読み、現在の役割と資格情報世代を再検査する。受付後に管理者権限を失った要求もコミットしない。権限・無効化状態の変更では資格情報世代を進め、古いセッションを失効させる。同じ設定の再送では世代を進めない。
 
-最後の有効な管理者も無効化できる。団体と動画は残し、運営が別の管理者を作成して引継ぐ。担当者名・IDは上書き・再割当せず、無効化した担当者は監査のため残す。団体削除・資格情報再設定・一般向け登録・認証/管理UI・生成APIの団体所有への移行は別段階。
+最後の有効な管理者も無効化できる。団体と動画は残し、運営が別の管理者を作成して引継ぐ。担当者名・IDは上書き・再割当せず、無効化した担当者は監査のため残す。団体削除・資格情報再設定・一般向け登録・認証/管理UIは別段階。
+
+## 団体の生成・公開
+
+団体担当者は `/api/v1/publishers/{account}/generation` 配下を利用する。`administrator` と `editor` が使え、毎回現在の団体・担当者・資格情報世代を検査する。別団体のURL・ジョブは404。一般ユーザーや運営のCookieで代用できない。既存 `/api/v1/generation` は運営用ジョブの経路として維持する。
+
+| API（上記prefixからの相対パス） | 操作 |
+| --- | --- |
+| `GET /presets` | 当該団体に許可された入力だけを表示 |
+| `POST /jobs` | `{preset, request_id}` で生成。再送キーは団体単位 |
+| `GET /jobs`・`GET /jobs/{job}` | 団体が所有するジョブを参照 |
+| `DELETE /jobs/{job}` | 団体のジョブを取消 |
+| `PUT /jobs/{job}/publication` | `{published: true/false}` で公開・取り下げ |
+
+運営がpresetの `publisher_accounts` へ団体IDを設定するまで入力は表示・受付されない。作成者が脱退してもジョブは残り、他の有効な担当者が引き継ぐ。全団体・運営で既存のGPU予算・同時実行枠・期限を共有する。公開時の資産検証、公開済みフィードと限定しない既存の生成結果deep linkの挙動は維持する。
+
+公開runtimeは認証結果を短寿命の `X-Rangle-Principal` としてprivate managerへ送る。managerはCloud Run IAMと、指定runtimeのGoogle署名・audienceを検証してから採用する。ブラウザの同名headerやCookieは転送しない。旧runtime用 `X-Rangle-Owner` は運営IDに限って受け、両headerの併記は拒否する。managerを先に更新することで旧runtimeも動く。新しいDB/IAM権限や共有secretは追加しない。失効は新規リクエストの受付で反映し、既に受付済みの操作までDBをまたいで巻き戻す仕組みではない。

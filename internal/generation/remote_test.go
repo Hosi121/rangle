@@ -48,7 +48,7 @@ func remoteFixture(t *testing.T, service *Service) (*Remote, *countedTokens) {
 	client := server.Client()
 	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	tokens := &countedTokens{}
-	return &Remote{base: server.URL, client: client, tokens: tokens}, tokens
+	return &Remote{base: server.URL, client: client, tokens: tokens, Now: service.now}, tokens
 }
 
 func TestRemotePublicFeedDetailAndEngagementSurviveWithdrawal(t *testing.T) {

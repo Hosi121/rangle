@@ -22,6 +22,7 @@ type Remote struct {
 	base   string
 	client *http.Client
 	tokens oauth2.TokenSource
+	Now    func() time.Time
 }
 
 func NewRemote(ctx context.Context, base string) (*Remote, error) {
@@ -37,6 +38,22 @@ func NewRemote(ctx context.Context, base string) (*Remote, error) {
 }
 
 func (c *Remote) call(ctx context.Context, method, path, owner, contentType string, body io.Reader) (int, http.Header, []byte, error) {
+	return c.callAs(ctx, method, path, owner, "", contentType, body)
+}
+
+func (c *Remote) callPrincipal(ctx context.Context, method, path string, p Principal, contentType string, body io.Reader) (int, http.Header, []byte, error) {
+	now := time.Now()
+	if c.Now != nil {
+		now = c.Now()
+	}
+	assertion, err := encodePrincipal(p, now)
+	if err != nil {
+		return 0, nil, nil, err
+	}
+	return c.callAs(ctx, method, path, "", assertion, contentType, body)
+}
+
+func (c *Remote) callAs(ctx context.Context, method, path, owner, assertion, contentType string, body io.Reader) (int, http.Header, []byte, error) {
 	request, err := http.NewRequestWithContext(ctx, method, c.base+path, body)
 	if err != nil {
 		return 0, nil, nil, err
@@ -49,6 +66,9 @@ func (c *Remote) call(ctx context.Context, method, path, owner, contentType stri
 	request.Header.Set(serviceAuthorizationHeader, "Bearer "+token.AccessToken)
 	if owner != "" {
 		request.Header.Set(ownerHeader, owner)
+	}
+	if assertion != "" {
+		request.Header.Set(principalHeader, assertion)
 	}
 	if contentType != "" {
 		request.Header.Set("Content-Type", contentType)
@@ -152,6 +172,62 @@ func NewRemoteHandler(remote *Remote, user func(*http.Request) (string, error)) 
 	return h, nil
 }
 
+// NewPublisherRemoteHandler authenticates staff at the public edge. It maps
+// registered routes to fixed manager paths, never forwards a browser URL or
+// credentials, and leaves admission/storage capabilities at the manager.
+func NewPublisherRemoteHandler(remote *Remote, auth func(*http.Request) (Principal, error)) (*RemoteHandler, error) {
+	if remote == nil || auth == nil {
+		return nil, ErrInvalid
+	}
+	h := &RemoteHandler{remote: remote}
+	authorize := publisherAuthority(auth)
+	mux := http.NewServeMux()
+	for _, route := range []string{"GET /presets", "GET /jobs", "POST /jobs", "GET /jobs/{job}", "DELETE /jobs/{job}", "PUT /jobs/{job}/publication"} {
+		method, suffix, _ := strings.Cut(route, " ")
+		mux.HandleFunc(method+" /api/v1/publishers/{account}/generation"+suffix, func(w http.ResponseWriter, r *http.Request) {
+			p, err := authorize(r)
+			switch {
+			case errors.Is(err, ErrNotFound):
+				remoteError(w, r, 404, "not_found")
+				return
+			case errors.Is(err, ErrPublisherForbidden):
+				remoteError(w, r, 403, "publisher_access_denied")
+				return
+			case err != nil:
+				remoteError(w, r, 503, "generation_unavailable")
+				return
+			case p.Kind == "":
+				remoteError(w, r, 401, "not_authenticated")
+				return
+			}
+			path := "/api/v1/generation" + suffix
+			if strings.Contains(suffix, "{job}") {
+				id := r.PathValue("job")
+				if !requestID.MatchString(id) {
+					remoteError(w, r, 404, "not_found")
+					return
+				}
+				path = strings.Replace(path, "{job}", id, 1)
+			}
+			if r.URL.RawQuery != "" {
+				if strings.Contains(suffix, "{job}") {
+					remoteError(w, r, 404, "not_found")
+				} else {
+					remoteError(w, r, 400, "invalid_request")
+				}
+				return
+			}
+			h.forwardAs(w, r, path, "", &p)
+		})
+	}
+	protected := http.NewCrossOriginProtection().Handler(mux)
+	h.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		protected.ServeHTTP(w, r)
+	})
+	return h, nil
+}
+
 func remoteError(w http.ResponseWriter, r *http.Request, code int, message string) {
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -163,6 +239,10 @@ func remoteError(w http.ResponseWriter, r *http.Request, code int, message strin
 }
 
 func (h *RemoteHandler) forward(w http.ResponseWriter, r *http.Request, owner string) {
+	h.forwardAs(w, r, r.URL.RequestURI(), owner, nil)
+}
+
+func (h *RemoteHandler) forwardAs(w http.ResponseWriter, r *http.Request, path, owner string, principal *Principal) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 4096))
 	if err != nil {
 		remoteError(w, r, 400, "invalid_request")
@@ -170,7 +250,14 @@ func (h *RemoteHandler) forward(w http.ResponseWriter, r *http.Request, owner st
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
-	code, headers, payload, err := h.remote.call(ctx, r.Method, r.URL.RequestURI(), owner, r.Header.Get("Content-Type"), bytes.NewReader(body))
+	var code int
+	var headers http.Header
+	var payload []byte
+	if principal != nil {
+		code, headers, payload, err = h.remote.callPrincipal(ctx, r.Method, path, *principal, r.Header.Get("Content-Type"), bytes.NewReader(body))
+	} else {
+		code, headers, payload, err = h.remote.call(ctx, r.Method, path, owner, r.Header.Get("Content-Type"), bytes.NewReader(body))
+	}
 	if err != nil {
 		remoteError(w, r, 503, "generation_unavailable")
 		return

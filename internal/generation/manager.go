@@ -19,7 +19,6 @@ const ownerHeader = "X-Rangle-Owner"
 const publicClipsPath = "/internal/generation/public-clips"
 
 var tokenSubject = regexp.MustCompile(`^[0-9]{6,32}$`)
-var forwardedOwner = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
 
 // ManagerConfig explicitly pins the one public runtime whose authenticated
 // account IDs this service trusts. The runtime receives no ledger or Vertex
@@ -81,13 +80,9 @@ func newManager(service *Service, cfg ManagerConfig, validate tokenValidator) (h
 	if err := cfg.Validate(service.Config); err != nil {
 		return nil, err
 	}
-	jobs, err := NewHandler(service, func(r *http.Request) (string, error) {
-		values := r.Header.Values(ownerHeader)
-		if len(values) != 1 || !forwardedOwner.MatchString(values[0]) {
-			return "", ErrForbidden
-		}
-		return values[0], nil
-	})
+	jobs, err := newPrincipalHandler(service, func(r *http.Request) (Principal, error) {
+		return managerPrincipal(r, service.now())
+	}, "/api/v1/generation")
 	if err != nil {
 		return nil, err
 	}
