@@ -37,17 +37,17 @@ export class TransportPlayback {
       }), controller.signal);
       reader = response.body?.getReader();
       if (response.status !== 200 || !reader) throw Error('Transport asset request failed');
-      const chunks = []; let bytes = 0;
+      // The manifest fixes the bounded length. Fill one destination without
+      // retaining every received chunk alongside a later concatenation buffer.
+      const result = new Uint8Array(size); let bytes = 0;
       while (true) {
         const part = await abortable(reader.read(), controller.signal);
         if (part.done) break;
+        if (part.value.length > size - bytes) throw Error('Transport asset size mismatch');
+        result.set(part.value, bytes);
         bytes += part.value.length;
-        if (bytes > size) throw Error('Transport asset size mismatch');
-        chunks.push(part.value);
       }
       if (bytes !== size || controller.signal.aborted) throw Error('Transport asset size mismatch');
-      const result = new Uint8Array(bytes); let offset = 0;
-      for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; }
       return result;
     } finally {
       clearTimeout(timeout); signal.removeEventListener('abort', abort);
