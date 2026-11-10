@@ -34,6 +34,7 @@ class ClipCard extends StatefulWidget {
     this.account,
     this.onTag,
     this.onQuery,
+    this.onViewPublisher,
     this.shareAction = shareClip,
     this.initialFreeView = false,
     super.key,
@@ -46,6 +47,7 @@ class ClipCard extends StatefulWidget {
   final AccountController? account;
   final ValueChanged<String>? onTag;
   final ValueChanged<String>? onQuery;
+  final ValueChanged<String>? onViewPublisher;
   final ClipShareAction shareAction;
   @override
   State<ClipCard> createState() => _ClipCardState();
@@ -446,6 +448,12 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
           if (clip.context case final details?)
             SportsContextDetails(
               context: details,
+              onViewPublisher: widget.onViewPublisher == null
+                  ? null
+                  : (id) {
+                      Navigator.pop(context);
+                      widget.onViewPublisher!(id);
+                    },
               onSearch: widget.onQuery == null
                   ? null
                   : (query) {

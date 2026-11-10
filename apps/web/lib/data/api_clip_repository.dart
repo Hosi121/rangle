@@ -11,10 +11,11 @@ import 'clip_repository.dart';
 /// Loads one bounded public feed page. Media URLs come from the API catalog.
 class ApiClipRepository
     implements PagedClipRepository, RefreshableClipRepository {
-  ApiClipRepository({required this.endpoint, this.client});
+  ApiClipRepository({required this.endpoint, this.client, this.publisherId});
 
   final String endpoint;
   final http.Client? client;
+  final String? publisherId;
   int _cacheEpoch = 0, _validatedCacheEpoch = 0;
 
   @override
@@ -39,6 +40,10 @@ class ApiClipRepository
   }) async {
     if (limit < 1 || limit > 50) {
       throw const FormatException('Invalid feed page size.');
+    }
+    if (publisherId != null &&
+        !RegExp(r'^[a-z0-9][a-z0-9_-]{0,63}$').hasMatch(publisherId!)) {
+      throw const FormatException('Invalid publisher ID.');
     }
     if (cursor != null && (cursor.isEmpty || cursor.length > 128)) {
       throw const FormatException('Invalid feed cursor.');
@@ -75,6 +80,7 @@ class ApiClipRepository
             'limit': '$limit',
             if (query.isNotEmpty) 'q': query,
             if (tag.isNotEmpty) 'tag': tag,
+            'publisher': ?publisherId,
             'cursor': ?cursor,
           },
         ),
@@ -155,7 +161,7 @@ class ApiClipRepository
                     '/assets/basketball/baseline6000-reference270/full/scene.json' ||
                 (RegExp(r'^generated-[a-f0-9]{32}$').hasMatch(id) &&
                     scene.path == '/generated/${id.substring(10)}/scene.json'));
-        return Clip(
+        final clip = Clip(
           id: id,
           title: text('title'),
           sport: text('sport'),
@@ -175,6 +181,10 @@ class ApiClipRepository
               ? SportsContext.fromJson(row['context'] as Map<String, dynamic>)
               : throw const FormatException('Invalid sporting context.'),
         );
+        if (publisherId != null && clip.context?.publisher?.id != publisherId) {
+          throw const FormatException('Publisher clip mismatch.');
+        }
+        return clip;
       }
 
       final nextCursor = document['next_cursor'];

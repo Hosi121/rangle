@@ -3,6 +3,9 @@ import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
+import '../data/api_clip_repository.dart';
+import '../data/clip_repository.dart';
+
 class AccountUser {
   const AccountUser(this.id, this.name) : isAdmin = false;
   const AccountUser._fromResponse(this.id, this.name, this.isAdmin);
@@ -76,6 +79,7 @@ class CommunityFailure implements Exception {
     'invalid_comment' => 'コメントは1〜500文字で入力してください。',
     'forbidden' => 'この操作はできません。',
     'service_unavailable' => '現在この機能を利用できません。',
+    'publisher_not_found' => 'この団体は現在表示できません。',
     _ => '接続を確認して、もう一度お試しください。',
   };
 }
@@ -123,6 +127,13 @@ class CommunityApi {
   }
 
   Future<Map<String, dynamic>> session() => request('GET', 'auth/me');
+
+  Future<ClipPage> publisherClips(String id, {String? cursor}) =>
+      ApiClipRepository(
+        endpoint: endpoint.resolve('clips').toString(),
+        publisherId: id,
+        client: _client,
+      ).loadPage(cursor: cursor);
   Future<AccountUser> login(String id, String password) async =>
       AccountUser.fromJson(
         (await request('POST', 'auth/login', {

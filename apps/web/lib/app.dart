@@ -16,6 +16,7 @@ import 'generation/open_result.dart';
 import 'publishers/publisher_api.dart';
 import 'publishers/publisher_home.dart';
 import 'publishers/operations_publishers_screen.dart';
+import 'publishers/public_publisher_screen.dart';
 import 'sharing/share_clip.dart';
 import 'live/live_api.dart';
 import 'widgets/search_dialog.dart';
@@ -37,6 +38,7 @@ class ClipFeedScreen extends StatefulWidget {
     this.generation,
     this.initialGeneration = false,
     this.initialPublisher = false,
+    this.initialPublicPublisherId,
     this.publisher,
     this.initialClipId,
     this.live,
@@ -52,6 +54,7 @@ class ClipFeedScreen extends StatefulWidget {
   final GenerationApi? generation;
   final bool initialGeneration;
   final bool initialPublisher;
+  final String? initialPublicPublisherId;
   final PublisherApi? publisher;
   final String? initialClipId;
   final LiveApi? live;
@@ -70,6 +73,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   Future<void>? _accountReady;
   String _query = '', _tag = '';
   bool _generationOpen = false, _historyOpening = false;
+  bool _publisherPageOpen = false;
 
   @override
   void initState() {
@@ -85,7 +89,8 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
     }
     if (widget.initialLiveId != null ||
         widget.initialGeneration ||
-        widget.initialPublisher) {
+        widget.initialPublisher ||
+        widget.initialPublicPublisherId != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(_openRequestedPage());
       });
@@ -99,6 +104,10 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   Future<void> _openRequestedPage() async {
     await _accountReady;
     if (!mounted) return;
+    if (widget.initialPublicPublisherId case final id?) {
+      await _viewPublisher(id);
+      return;
+    }
     if (widget.initialPublisher) {
       await _openGeneration(publisher: true);
       return;
@@ -113,6 +122,20 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
 
   Future<void> _openLive([String? id]) =>
       _openGeneration(liveViewer: true, liveId: id);
+
+  Future<void> _viewPublisher(String id) async {
+    final account = _account;
+    if (account == null || _publisherPageOpen || _generationOpen) return;
+    setState(() => _publisherPageOpen = true);
+    final clip = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => PublicPublisherScreen(id: id, account: account),
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _publisherPageOpen = false);
+    if (clip != null) await _openHistoryClip(clip);
+  }
 
   Future<void> _openGeneration({
     bool liveViewer = false,
@@ -279,7 +302,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => _generationOpen
+  Widget build(BuildContext context) => _generationOpen || _publisherPageOpen
       ? const SizedBox.expand()
       : _account?.user?.isAdmin == true && widget.initialClipId == null
       ? GenerationScreen(
@@ -378,6 +401,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                     account: _account,
                     shareAction: widget.shareAction,
                     onOpenPublisher: () => _openGeneration(publisher: true),
+                    onViewPublisher: _viewPublisher,
                     onSearch: () =>
                         _search(clips.expand((clip) => clip.tags).toSet()),
                     onTag: _filterTag,
@@ -421,6 +445,7 @@ class _HighlightFeed extends StatefulWidget {
     required this.onOpenClip,
     required this.onClearSearch,
     required this.onOpenPublisher,
+    required this.onViewPublisher,
     required this.filterLabel,
     this.initialFreeView = false,
     super.key,
@@ -433,6 +458,7 @@ class _HighlightFeed extends StatefulWidget {
   final ClipShareAction shareAction;
   final VoidCallback onSearch, onClearSearch, onLive, onOpenPublisher;
   final ValueChanged<String> onTag, onQuery, onOpenClip;
+  final ValueChanged<String> onViewPublisher;
   final String filterLabel;
   final bool initialFreeView;
 
@@ -577,6 +603,9 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                                 shareAction: widget.shareAction,
                                 onTag: widget.onTag,
                                 onQuery: widget.onQuery,
+                                onViewPublisher: widget.account == null
+                                    ? null
+                                    : widget.onViewPublisher,
                                 onFreeViewChanged: (value) =>
                                     setState(() => _freeView = value),
                                 onNext:
@@ -676,6 +705,7 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                                     widget.account,
                                     onOpenClip: widget.onOpenClip,
                                     onOpenPublisher: widget.onOpenPublisher,
+                                    onViewPublisher: widget.onViewPublisher,
                                   ),
                                   icon: Icon(
                                     widget.account!.user == null
