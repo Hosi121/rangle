@@ -38,6 +38,12 @@ Go1.27.3、固定CPU・GOMAXPROCS=1、合成100clip、200ms×5回を前後交替
 
 ソケット/TLS/CDN/Firestoreを含まないhandler測定。起動時の生成・保持と引き換えの改善で、配信p99・同時視聴数は示さない。HTTP契約テスト・Go race/vetで検証した。
 
+## UI圧縮と端末でのモデル再利用
+
+Web release buildのJS/Wasm等をgzipで配信し、公開VODの検証済みencoded modelは固定2枠・各16MiB以下でviewerをまたいで再利用する。cache hitはABR帯域sampleへ混ぜず、失効・改ざん・容量不足は通常取得へ戻す。[配備](stg-deployment.md#webアプリ本体の圧縮配信)・[取得とcache](transport-playback.md#取得交換取消)を参照。
+
+#125の完了はCDNのHTTP/CORS/cache-key契約の確認で、UI圧縮やA→B→Aの再訪を含んでいなかった。後続のPR137ではABRの実転送計測に`no-store`を採用したため、この再訪cacheを別途実装した。モデルの実品質ラダー、端末全体のCPU/GPU peak、CDN人気分布・hit率/origin負荷は引き続き未検証。
+
 ## 残る検証
 
 - 10万CCUのSLO・実端末・段階負荷・cold origin集中、実負荷下の版混在/復帰は未検証。[#20](https://github.com/Hosi121/rangle/issues/20)・[#35](https://github.com/Hosi121/rangle/issues/35)

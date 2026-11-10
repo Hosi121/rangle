@@ -58,6 +58,14 @@ rollbackはまず旧正常revisionへtrafficを戻します。**traffic復帰だ
 
 catalogのreadonly mount・versioning・新規作成限定の公開順は[Terraform共通契約](../infra/gcp/README.md#catalog-と公開工程)に従う。presentationのpreview/sceneはmedia originの絶対URLを使い、domain確定後にcatalog SHAを再計算する。Terraformはuploadしない。[mount](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts)、[FUSE制約](https://docs.cloud.google.com/storage/docs/cloud-storage-fuse/overview#limitations)
 
+## Webアプリ本体の圧縮配信
+
+DockerはFlutter release buildの後に`node scripts/precompress-web.mjs build/web`を実行し、JS/Wasm等の公開UIにgzip sidecarを作る。Goは元fileの許可リストに対応するsidecarだけをpinし、起動時に有限の展開一致を検証する。`.gz` URLの直接公開や媒体の書換えは行わない。各gzip要求でも元とsidecarのstreaming SHA/更新状態を照合し、破損や更新があればidentityへ戻す。各元fileは32MiB以下で、body全体をRAMへcacheせず、requestごとの圧縮も行わない。
+
+`Accept-Encoding`を解釈し、gzip/identityに`Vary: Accept-Encoding`を付ける。HEADと条件付きGETを維持し、Rangeはidentityが許可される場合に元bytesを返す。identity拒否時はgzip全体、利用可能な表現がなければ406。エラー応答へ成功時のgzip Encoding/Lengthを引き継がない。media CDNのdynamic compression無効設定は維持する。ローカルHTTPで主要4fileの約10.26MB→3.43MBと展開SHA一致を確認した値は、通信時間や実端末の性能向上の主張ではない。
+
+端末でのVODモデル再利用は[transport再生](transport-playback.md)の固定2枠cacheを使う。media matcherは既存の公開CORS metadataに`Age`/`Date`を追加し、鮮度が不明な応答を保存しない。#125で確認したCDNのHTTP/cache-key/CORS契約と、アプリ本体の圧縮・A→B→Aでの端末cache再利用は、それぞれ検証結果を残す。CDN hit率/origin負荷（#126）・端末全体の実測予算（#29）は別途受入が必要。
+
 ## Terraform と CI
 
 - Terraform **1.17.1** / Google provider **8.10.0** とlockを固定。Firebase/google-betaは使わない。旧Hosting Adminは対象memberだけ除去し、APIは `disable_on_destroy=false` で維持する。他project resourceをimport/削除しない。
