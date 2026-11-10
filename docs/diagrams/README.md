@@ -1,6 +1,6 @@
 # アーキテクチャ図の再生成
 
-[全体](overview.html)・[ML](ml-pipeline.html)・[配信](delivery.html)・[監視](observability.html)の4図。HTMLが閲覧/PNG出力の正本で、アイコン・フォントを内包する。旧`cloud-architecture.svg/png/py`は2026-11-08の配備図。
+[全体](overview.html)・[ML](ml-pipeline.html)・[配信](delivery.html)・[監視](observability.html)の4図。HTMLが閲覧/PNG出力の正本で、アイコン・フォントを内包する。
 
 2026-11-10の実環境とstg実装を反映。[構成の説明と確認範囲](../cloud-architecture.md#今回の照合範囲)を参照。
 
@@ -27,7 +27,7 @@ HTMLは1600×900 CSS pixels、PNGは3200×1800。light/darkの8枚を生成す�
 
 ## 内容・配置からHTMLを作り直す
 
-[stack-diagram](https://github.com/caru-ini/stack-diagram)のcommit `5af3b095fff7109c905c5284dc510dc06588bade`を使用。`build-architecture-views.py`で座標/内容を変更し、toolのtemplate/geometryと`build.py`で埋め込む。HTMLを直接直した場合もrecipeへ反映する。
+[stack-diagram](https://github.com/caru-ini/stack-diagram)のcommit `5af3b095fff7109c905c5284dc510dc06588bade`を使用。`build-architecture-views.py`で座標/内容を変更し、toolのtemplate/geometryと`build.py`で埋め込む。HTMLを直接直した場合もrecipeへ反映する。テンプレートは、この4図で使うgroup/edgeのCSSだけを取り込む。
 
 ```bash
 python3 "$diagram_work/stack-diagram/skills/stack-diagram/scripts/fetch_icons.py" \

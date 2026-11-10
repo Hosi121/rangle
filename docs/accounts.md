@@ -35,13 +35,26 @@
 FIRESTORE_EMULATOR_HOST=127.0.0.1:8787 go test -race ./internal/community
 ```
 
-emulator未指定時は外部DBへ接続せず、このintegration testだけskipする。アカウント再設定・メール確認・管理者モデレーションは未実装。
+emulator未指定時は外部DBへ接続せず、このintegration testだけskipする。一般ユーザーのパスワード再設定・メール確認・管理者モデレーションは未実装。団体担当者の変更・再設定は[専用API](publisher-auth.md#パスワード変更再設定)を使う。
 
 ## 声援の履歴
 
 アカウント →「声援を送った動画」から再訪する。本人のセッションだけからユーザーを決め、最後に声援を受け付けた日時の降順・同時刻はclip IDの降順に20件返す。動画名と競技は受付時の情報を保存し、一覧表示時に動画ごとの問い合わせを行わない。公開終了した動画を開けなくても元のフィードを保つ。
 
 receipt・集計shard・`accounts/{user}/cheered_clips/{clip}` は同じtransactionで更新する。同じrequest IDの再送は重複も並び替えも起こさない。履歴は本人専用の `no-store` 応答で、cursorも本人に結び付く。履歴に7日TTLは適用しない。旧receiptにはユーザー情報がないため遡及復元しない。receiptの `expires_at` は受付の7日後。TTL未設定の環境では自動削除されないため、保持日数そのものを保証する値ではない。
+
+## 団体ページとフォロー
+
+概要の投稿団体名、または `/demo/?organization=<id>` から団体プロフィールと公開動画一覧を開く。一般ユーザーはログイン後に無料でフォローし、アカウントの一覧から再訪できる。フォローは投稿権限や団体担当者への所属を付与しない。
+
+| API | 用途 |
+| --- | --- |
+| `GET /api/v1/publishers/{id}` | 有効な団体の公開プロフィール（id/name/kind） |
+| `GET /api/v1/clips?publisher={id}` | その団体の公開動画。検索・cursorと併用可 |
+| `GET` / `PUT` / `DELETE /api/v1/publishers/{id}/subscription` | 本人のフォロー確認・設定・解除 |
+| `GET /api/v1/me/subscriptions?cursor=...` | 本人のフォロー一覧を20件ずつ取得 |
+
+担当者・資格情報・内部状態は公開しない。フォロー状態・一覧は本人のセッションで認可し、`no-store`で返す。団体管理・削除は[団体担当者の仕様](publisher-auth.md)を参照。
 
 ## 管理アカウント
 

@@ -75,20 +75,6 @@ TerraformがIAM・mount・args・catalog・scaling、CIがimage/trafficを管理
 
 15分ごとのguardと2分ごとの生成同期が稼働する。予算USD300・期限2026-11-14 15:00 UTCを条件に、Scheduler/Workflowsが管理対象の資源を停止する。通知遅延やデータ保持を含む運用条件は[停止手順](stg-deployment.md#予算期限の停止)を参照。
 
-## 旧配備図（2026-11-08）
-
-初期の配信・配備のみを表し、ML/LIVE・manager・ログ監視を含まない。[SVG](diagrams/cloud-architecture.svg)・[PNG](diagrams/cloud-architecture.png)
-
-## 旧配備図の再生成
-
-```bash
-python3 docs/diagrams/cloud-architecture.py
-# PNGも更新する場合（CairoSVG 2.9.1が必要）
-python3 docs/diagrams/cloud-architecture.py --png
-```
-
-SVGは1920×1080、PNGは3840×2160。Googleの[公式アイコン](https://cloud.google.com/icons)を使用し、商標・アイコンはGoogle LLCに帰属する。新4図の手順は[図のREADME](diagrams/README.md)を参照。
-
 ## 参照した一次資料
 
 [LB/serverless NEG](https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless)・[CDN/private origin](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket#make_your_cloud_storage_bucket_private)・[GCS mount](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts)・[WIF](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)・[Budget通知](https://docs.cloud.google.com/billing/docs/how-to/budgets-programmatic-notifications)

@@ -9,7 +9,8 @@
 | feed/catalog | 検索・タグ・20件継続取得、ETag、stale cursor復旧、不変snapshotと掲載registry。[ページング](feed-pagination.md)・[catalog](catalog-snapshots.md) |
 | 配信 | HTTPSのGo UI/APIとprivate GCS/CDN、Range・SHA照合、model直接取得。[API](api-delivery.md)・[公開preflight](asset-publication.md) |
 | 生成 | 共通前処理、静的3DGS・動的4DGS、scene-last保存、有限台帳、団体所有の生成・取消・公開。[生成](generation.md)・[担当者API](publisher-auth.md)・[品質](training-quality.md) |
-| 掲載・交流 | owner掲載/取り下げ、未掲載の成功済み共有リンクでも交流可。[掲載](generated-publication.md)・[アカウント](accounts.md) |
+| 掲載・交流 | owner掲載/取り下げ、声援・本人履歴、未掲載の成功済み共有リンクでも交流可。[掲載](generated-publication.md)・[アカウント](accounts.md) |
+| 団体ページ | 公開プロフィール・公開動画一覧、一般ユーザーのフォローと本人の一覧。担当者の所属・権限とは別に保存。[アカウント](accounts.md#団体ページとフォロー) |
 | 同期・権限 | IAM必須managerと別DB、専用OIDC同期、最大10 attempts/同時1件/期限。[生成基盤](generation-infrastructure.md)・[適用記録](security-review.md) |
 | 運用・release | 8要求の処理枠、timeout/slog、WAF・読取制限、監査・backup、両serviceの候補検証/復帰/receipt。[過負荷](api-overload.md)・[CI/CD](cicd.md)・[監視](observability.md) |
 | ログ監視 | Tokyoの専用bucket/sink・30日保持・8 widgetsのdashboard。Go再配備後のseverity/message受信を確認し、[#33](https://github.com/Hosi121/rangle/issues/33)は完了。[受信記録](observability.md#go再配備後の受信確認) |
@@ -19,10 +20,6 @@
 | 私有model確認 | 管理者限定のローカルpreview。公開catalogには登録しない。[手順](private-preview.md) |
 
 公開Runのruntime設定と適用段階は[配備手順](stg-deployment.md)と[#24](https://github.com/Hosi121/rangle/issues/24)で管理する。配備・小規模疎通の成功を、10万CCUや実端末の容量根拠とはしない。素材ごとの来歴・校正・画質判断は継続する。
-
-## 声援の公開経路（#127）
-
-声援はcommunity handler・store・Flutter controllerに実装があるが、2026-11-10の調査時点では公開application routerへ未登録で、既存clipのGETが404になった。公開POSTの書き込み検証は未実施。接続修正、application入口の認証/CSRF・再送・上限の回帰確認、配備段階は[#127](https://github.com/Hosi121/rangle/issues/127)で追跡する。
 
 ## static catalog応答の事前生成
 

@@ -1,6 +1,6 @@
 # Gaussian再構成の画質と描画条件
 
-2026-11-07のVRUローカル実験。初期点群の増加で撮影視点付近は改善したが、大きなorbitでの選手・コートの崩れは残った。別素材の[UVG-GS比較](gaussian-training.md)、現workerの[学習比較](training-quality.md)とは条件が異なる。
+2026-11-07のVRUローカル実験。初期点群の増加で撮影視点付近は改善したが、大きなorbitでの選手・コートの崩れは残った。別素材の[UVG-GS比較](gaussian-training.md)、現workerの[学習比較](../training-quality.md)とは条件が異なる。
 
 ## 比較条件
 
@@ -31,7 +31,7 @@ VRU Basketball gz、先頭20frame/25fps、30 train、4 held-out×20frame＝80画
 
 ## ビューアの確認
 
-Windows Edge 156 / NVIDIA RTX PRO 500（ANGLE D3D11）で、CSS480×270/DPR1と、基準高さ270のCSS960×540/DPR1、CSS480×270/DPR2、CSS960×540/DPR2を比較。同カメラ・時刻の480×270 RGBAは4条件でbyte一致し、resize・frame19のmesh差替後も一致した。
+Windows Edge 156 / ローカルGPU（ANGLE D3D11）で、CSS480×270/DPR1と、基準高さ270のCSS960×540/DPR1、CSS480×270/DPR2、CSS960×540/DPR2を比較。同カメラ・時刻の480×270 RGBAは4条件でbyte一致し、resize・frame19のmesh差替後も一致した。
 
 実資産のAPI→動画→自由視点→時刻変更→orbit→動画復帰を390×844/1440×900で確認し、JS/WebGLエラー0。これは描画・操作の確認で、再構成精度やスマートフォン実機の速度・メモリ測定ではない。
 
@@ -39,4 +39,4 @@ Windows Edge 156 / NVIDIA RTX PRO 500（ANGLE D3D11）で、CSS480×270/DPR1と�
 
 配信`.splat`の再読込とexport前のCUDA描画にも大orbitで同様の崩れがあり、packingだけでは説明できない。撮影cameraはほぼ同一平面で、問題のorbitはその外側だった。原因は未特定で、撮影範囲内の補間と範囲外移動を分けて評価する。
 
-当時は離散frame選択UIを使用。[連続再生](temporal-playback.md)への移行後も、端末性能・初回表示・ABR・撮影範囲外の画質は別途検証が必要。
+当時は離散frame選択UIを使用。[連続再生](../temporal-playback.md)への移行後も、端末性能・初回表示・ABR・撮影範囲外の画質は別途検証が必要。

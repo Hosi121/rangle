@@ -2,6 +2,10 @@
 
 公開フィードから版付きmanifestとHTTP資産を取得する契約。認証は[アカウント](accounts.md)、snapshot切替は[catalog運用](catalog-snapshots.md)、容量・計測は[バックエンドの現状](backend-status.md)を参照。
 
+## 配信方式
+
+版付きの品質別資産をHTTPで取得する。既存のCDN・キャッシュ・Range要求を利用でき、APIと大容量モデルの配信を分離できるため。資産の分割・取得計画を改善しても同じ品質・端末条件で要件を満たせない場合に、通信方式を再検討する。
+
 ## 構成
 
 静的base catalogは起動時から終了まで固定し、新snapshotへの更新は再起動で反映する。生成結果の掲載registryは別の永続データで、掲載変更をfeedへ動的に統合する。同じcatalogとregistryを複数processで使え、掲載変更はETag/cursorも変える。一般的なcatalog編集・推薦は未実装。交流は別API・保存先を使う。
@@ -38,8 +42,9 @@ base catalogのclipのJSON/ETagは起動時に生成する。一覧は対象ペ�
 | cursor | 不透明。catalog/origin更新で失効すると400。先頭から再取得 |
 | query | 無効・重複・未定義は400 |
 | cache | 全利用者共通、`public, max-age=15, stale-while-revalidate=30`、body由来ETag。エラーは `no-store` |
-| `q` | title/sport/description/tagsの大小文字を区別しない部分一致。空白区切り全語、最大256bytes・8語 |
+| `q` | title/sport/description/tagsと公開context（団体・試合・選手・チーム・会場）の大小文字を区別しない部分一致。空白区切り全語、最大256bytes・8語 |
 | `tag` | `#`なしの完全一致。検索条件もcursorへ結び付ける |
+| `publisher` | 投稿団体IDの完全一致。検索・tagと併用でき、cursorにも結び付ける |
 | catalog `tags` | 任意、最大10個。各32文字以内、文字・数字・結合文字・`_`。未指定なら適合するsportを補う |
 
 共通metadataは `id/revision/title/sport/description`。transportを持つbase catalogのclipは `codec/manifest_url` と任意の `preview_url/scene_url` を返す。掲載済みの生成結果は `preview_url/scene_url` を返し、`codec/manifest_url` は持たない（[掲載契約](generated-publication.md#永続化とフィード)）。manifestは動画へ直接渡すURLではない。Flutterは `RANGLE_API_URL=/api/v1/clips` で動画・自由視点・時刻シークに使う（[起動手順](../apps/web/README.md#apiから動画自由視点を開く)）。対応RGS1 clipはmanifestのidentity・size/SHAを検証して[ABR/区間再生](transport-playback.md)へ接続する。実品質ラダー/実機性能は別途検証する。

@@ -1,6 +1,6 @@
 # 人物シーンでの動的Gaussian学習
 
-UVG-GS BlueSquatのローカル実験。輪郭・時刻別RGBD初期化・depth監督で人物領域PSNRは16.169→20.206 dBへ改善したが、未知視点の顔・手の崩れは残った。FreeTimeGS公式実装の再現や目標画質の達成ではない。現workerは[共同学習](dynamic-gs-training.md)を参照。
+UVG-GS BlueSquatのローカル実験。輪郭・時刻別RGBD初期化・depth監督で人物領域PSNRは16.169→20.206 dBへ改善したが、未知視点の顔・手の崩れは残った。FreeTimeGS公式実装の再現や目標画質の達成ではない。現workerは[共同学習](../dynamic-gs-training.md)を参照。
 
 ## 素材と評価条件
 
@@ -45,7 +45,7 @@ gsplat 1.5.3、視点非依存RGB、0.8 L1＋0.2 SSIMと小さな空間scale正�
 
 静的診断はframe 56、6,000step、初期50,000→64,546点。評価4画像で全体27.088 dB/人物19.230 dBとなり顔の崩れが残った。点数・stepが異なり原因特定の対照ではないが、時間変形だけに原因を限定できなかった。
 
-非公開ローカル環境のRTX PRO 500 Laptop（6GB）で測定。学習秒はcheckpoint保存を含み、準備・取得・評価を除く。実行順や同一マシンの影響を統制した速度比較ではない。snapshotは量子化済み実サイズ。
+非公開ローカルGPU（VRAM 6GB）で測定。学習秒はcheckpoint保存を含み、準備・取得・評価を除く。実行順や同一マシンの影響を統制した速度比較ではない。snapshotは量子化済み実サイズ。
 
 | 条件 | 学習秒 | 20frame合計bytes | 初回frame bytes |
 | --- | ---: | ---: | ---: |
@@ -58,7 +58,7 @@ gsplat 1.5.3、視点非依存RGB、0.8 L1＋0.2 SSIMと小さな空間scale正�
 
 ## 配信・表示への接続
 
-当時は20個の`.splat` snapshotを離散選択。RGBA8/quaternion8量子化を含み可逆ではない。後続の[連続再生](temporal-playback.md)は同じcheckpointを時間付きモデルとして配布する。
+当時は20個の`.splat` snapshotを離散選択。RGBA8/quaternion8量子化を含み可逆ではない。後続の[連続再生](../temporal-playback.md)は同じcheckpointを時間付きモデルとして配布する。
 
 基準/depth snapshotを25fpsで全取得すると約0.79/0.75 Gbps/人の計算で、モバイル帯域は未達。CDNだけでは端末取得量を減らせず、区間化・品質別資産・端末時刻評価が必要となる。
 
@@ -66,4 +66,4 @@ gsplat 1.5.3、視点非依存RGB、0.8 L1＋0.2 SSIMと小さな空間scale正�
 
 sceneの`camera.intrinsics`に縮小後width/height/fx/fy/cx/cy、`referenceImageHeight`に803を指定。仮想orbitの見え方と正解のあるcamera評価は分ける。
 
-Windows Edge / NVIDIA RTX PRO 500（ANGLE D3D11）、390×844/1440×900で候補・基準のAPI→動画→自由視点→frame 0/10/19→orbit→動画復帰を確認。JS/GLエラー0、離脱後Worker0。同bundleのVRU回帰でbuffer高さ803/270を維持した。スマートフォン実機の性能測定ではない。
+Windows Edge / ローカルGPU（ANGLE D3D11）、390×844/1440×900で候補・基準のAPI→動画→自由視点→frame 0/10/19→orbit→動画復帰を確認。JS/GLエラー0、離脱後Worker0。同bundleのVRU回帰でbuffer高さ803/270を維持した。スマートフォン実機の性能測定ではない。
