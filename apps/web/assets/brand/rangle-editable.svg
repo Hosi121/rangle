@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="1254" height="1254" viewBox="0 0 1254 1254">
+<title>RANGLE — reference reconstruction</title>
+<desc>Manually reconstructed editable vector paths from the supplied reference. Gradients approximate the original texture. Transparent background; eye whites are separate filled paths.</desc>
+<defs>
+ <linearGradient id="fire" x1="0" y1="0" x2="1" y2="0.85" gradientUnits="objectBoundingBox"><stop stop-color="#ff9500"/><stop offset=".5" stop-color="#ff6500"/><stop offset="1" stop-color="#fb4000"/></linearGradient>
+ <linearGradient id="shade" x1="0" y1="0" x2=".8" y2="1"><stop stop-color="#ff7100"/><stop offset="1" stop-color="#db3000"/></linearGradient>
+ <linearGradient id="iris-fill" x1="0" y1="1" x2=".7" y2="0"><stop stop-color="#ff9000"/><stop offset=".6" stop-color="#ff7000"/><stop offset="1" stop-color="#d43b00"/></linearGradient>
+</defs>
+<g id="flame" inkscape:groupmode="layer" inkscape:label="01 炎">
+ <path id="flame-silhouette" fill="url(#fire)" d="M385 679 L390 659 C364 603 372 545 426 452 L549 337 L501 438 C551 405 590 364 607 311 C619 274 608 255 580 255 L793 100 C734 197 714 246 750 344 L740 372 C774 349 801 318 819 277 C831 337 847 408 850 441 C851 483 837 539 817 578 L759 626 L803 617 C775 681 751 718 706 747 C670 770 569 805 490 845 L501 815 C498 792 480 761 455 735 L442 718 L402 667 Z"/>
+ <path id="flame-upper-facet" fill="url(#shade)" d="M793 100 C734 197 714 246 750 344 L722 341 L629 423 L472 508 L390 659 C414 567 503 497 598 431 L669 282 Z"/>
+ <path id="flame-brow-facet" fill="#ee4c00" d="M390 659 L472 508 L629 423 L722 341 L740 346 L740 372 C774 349 801 318 819 277 C814 325 801 362 779 394 L689 443 L721 440 L689 476 L809 446 L653 528 L554 559 Z"/>
+ <path id="flame-bottom-facet" fill="url(#shade)" d="M442 718 L448 661 L601 681 L568 693 Z M490 845 C561 782 652 733 752 682 C738 706 721 729 706 747 C670 770 569 805 490 845 Z"/>
+</g>
+<g id="eye" inkscape:groupmode="layer" inkscape:label="02 目">
+ <path id="eye-upper-cut" fill="#fff" d="M385 679 C418 610 464 552 518 517 C540 501 560 497 590 487 L721 440 L689 476 L809 446 C731 490 642 522 558 552 C488 578 428 623 385 679 Z"/>
+ <path id="eye-white" fill="#fff" d="M439 643 L484 623 L484 603 L527 580 C543 624 568 639 604 639 C651 638 690 588 678 535 L713 526 C717 539 716 558 711 571 C723 556 733 537 740 518 L770 505 C753 555 733 599 711 624 L590 725 C597 710 601 694 602 681 Z"/>
+ <path id="iris" fill="url(#iris-fill)" d="M527 580 L558 552 L634 526 L678 535 C690 588 651 638 604 639 C568 639 543 624 527 580 Z"/>
+ <path id="iris-shadow" fill="#d94a00" d="M527 580 L558 552 L634 526 L678 535 L681 554 L631 569 L541 609 Z" opacity=".5"/>
+ <path id="pupil" fill="#080909" d="M558 552 L616 532 L634 526 C643 536 647 551 645 565 C642 590 624 605 603 605 C574 605 553 584 558 552 Z"/>
+ <path id="pupil-highlight" fill="#fff" d="M610 554 L636 546 L623 570 L597 579 Z"/>
+</g>
+<g id="orbit" inkscape:groupmode="layer" inkscape:label="03 軌道線">
+ <path id="orbit-right" fill="url(#fire)" d="M862 476 C955 458 993 483 950 525 C920 555 844 594 759 626 C825 589 893 545 914 510 C933 481 902 479 862 476 Z"/>
+ <path id="orbit-left" fill="url(#fire)" d="M370 651 C300 690 270 731 302 746 C337 763 437 742 568 693 C454 724 369 744 338 725 C321 714 336 684 370 651 Z"/>
+ <path id="spark-right-upper" fill="url(#fire)" d="M885 422 L904 400 L992 374 Z"/>
+ <path id="spark-right-lower" fill="url(#fire)" d="M877 458 L915 435 L979 416 L964 429 Z"/>
+ <path id="spark-left" fill="url(#fire)" d="M283 662 L296 647 L354 629 Z"/>
+</g>
+<g id="wordmark" inkscape:groupmode="layer" inkscape:label="04 RANGLE 文字" fill="#080909">
+ <path id="R" fill-rule="evenodd" d="M157 885 H273 C299 885 315 899 315 922 V947 C315 967 303 977 282 981 L319 1034 H268 L232 981 H202 V1034 H157 Z M202 918 V949 H262 C268 949 271 947 271 941 V927 C271 921 268 918 262 918 Z"/>
+ <path id="A" d="M322 1034 L385 890 Q387 885 392 885 H433 Q438 885 440 891 L502 1034 H429 L397 994 H440 L412 929 L369 1034 Z"/>
+ <path id="N" d="M514 885 H550 Q557 885 562 892 L623 975 V885 H665 V1034 H628 Q621 1034 616 1027 L556 947 V1034 H514 Z"/>
+ <path id="G" d="M823 885 L804 920 H737 Q724 920 724 932 V986 Q724 998 736 998 H776 Q783 998 783 992 V975 H746 L760 942 H824 V997 Q824 1034 789 1034 H724 Q682 1034 682 993 V928 Q682 885 726 885 Z"/>
+ <path id="L" d="M842 885 H884 V998 H963 L950 1034 H842 Z"/>
+ <path id="E" d="M976 885 H1101 L1082 920 H1018 V943 H1094 L1076 977 H1018 V998 H1102 L1087 1034 H976 Z"/>
+</g>
+</svg>

@@ -1,0 +1,758 @@
+main:
+  params: [args]
+  steps:
+    - initialize:
+        assign:
+          - stop: false
+          - reason: "not_due"
+          - ack_ids: []
+          - errors: []
+          - observed_cost: null
+          - operation_name: null
+          - generation_result: null
+    - deadline:
+        switch:
+          - condition: $${sys.now() >= time.parse("${deadline}")}
+            steps:
+              - expired:
+                  assign:
+                    - stop: true
+                    - reason: "deadline"
+                  next: stop_decision
+    - pull_budget:
+        call: http.post
+        args:
+          url: "https://pubsub.googleapis.com/v1/${subscription}:pull"
+          auth: {type: OAuth2}
+          body:
+            maxMessages: 10
+            returnImmediately: true
+        result: pulled
+    - inspect_updates:
+        for:
+          value: received
+          in: $${default(map.get(pulled.body, "receivedMessages"), [])}
+          steps:
+            - decode_update:
+                assign:
+                  - update: $${json.decode(base64.decode(received.message.data))}
+            - match_owned_budget:
+                switch:
+                  - condition: $${map.get(update, "budgetDisplayName") != "${budget_display_name}"}
+                    next: collect_ack
+                  - condition: $${map.get(update, "currencyCode") != "${budget_currency}"}
+                    steps:
+                      - invalid_currency:
+                          raise: "Budget currency mismatch; do not silently convert amounts"
+            - evaluate_cost:
+                assign:
+                  - observed_cost: $${double(update.costAmount)}
+            - limit:
+                switch:
+                  - condition: $${observed_cost >= ${stop_amount}}
+                    steps:
+                      - reached:
+                          assign:
+                            - stop: true
+                            - reason: "budget"
+            - collect_ack:
+                assign:
+                  - ack_ids: $${list.concat(ack_ids, received.ackId)}
+    - stop_decision:
+        switch:
+          - condition: $${not stop}
+            next: acknowledge
+    - disable_deployer:
+        try:
+          call: http.post
+          args:
+            url: "https://iam.googleapis.com/v1/${deployer}:disable"
+            auth: {type: OAuth2}
+            body: {}
+        except:
+          as: error
+          steps:
+            - record_deployer_error:
+                assign:
+                  - errors: $${list.concat(errors, error)}
+    - delete_owned_edge:
+        for:
+          value: resource_path
+          in:
+            - "projects/${project_id}/global/forwardingRules/${edge_prefix}-http"
+            - "projects/${project_id}/global/forwardingRules/${edge_prefix}-https"
+            - "projects/${project_id}/global/addresses/${edge_prefix}-edge"
+          steps:
+            - delete_edge_resource:
+                try:
+                  call: delete_compute_resource
+                  args:
+                    resource_path: $${resource_path}
+                except:
+                  as: error
+                  steps:
+                    - record_edge_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+    - cleanup_owned_security:
+        try:
+          call: cleanup_security_policies
+        except:
+          as: error
+          steps:
+            - record_security_error:
+                assign:
+                  - errors: $${list.concat(errors, error)}
+    - stop_owned_generation_manager:
+        switch:
+          - condition: ${generation_manager_enabled}
+            steps:
+              - delete_manager:
+                  try:
+                    call: delete_owned_run_service
+                    args:
+                      service_path: "${generation_manager_service}"
+                  except:
+                    as: error
+                    steps:
+                      - record_manager_error:
+                          assign:
+                            - errors: $${list.concat(errors, error)}
+    # An unknown Run state must skip deletion without skipping GPU cancellation.
+    - stop_owned_service:
+        try:
+          steps:
+            - inspect_before_delete:
+                call: service_is_absent
+                args:
+                  url: "https://run.googleapis.com/v2/${service}"
+                result: already_absent
+            - skip_missing_service:
+                switch:
+                  - condition: $${already_absent}
+                    next: verify_service_absent
+            - delete_owned_service:
+                try:
+                  steps:
+                    - request_deletion:
+                        call: http.delete
+                        args:
+                          url: "https://run.googleapis.com/v2/${service}"
+                          auth: {type: OAuth2}
+                        result: deletion
+                    - remember_operation:
+                        assign:
+                          - operation_name: $${deletion.body.name}
+                except:
+                  as: error
+                  steps:
+                    - accept_absent_service:
+                        switch:
+                          - condition: $${map.get(error, "code") == 404}
+                            next: verify_service_absent
+                    - record_service_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+            - wait_for_deletion_operation:
+                call: wait_until_operation_done
+                args:
+                  operation_name: $${operation_name}
+                result: operation_ok
+            - verify_operation:
+                switch:
+                  - condition: $${not operation_ok}
+                    steps:
+                      - operation_failed:
+                          assign:
+                            - errors: $${list.concat(errors, "Owned service deletion operation failed or timed out")}
+            - verify_service_absent:
+                call: wait_until_absent
+                args:
+                  url: "https://run.googleapis.com/v2/${service}"
+                result: service_absent
+            - verify_deletion:
+                switch:
+                  - condition: $${not service_absent}
+                    steps:
+                      - deletion_failed:
+                          assign:
+                            - errors: $${list.concat(errors, "Service deletion was not confirmed")}
+        except:
+          as: error
+          steps:
+            - record_run_error:
+                assign:
+                  - errors: $${list.concat(errors, error)}
+    - cancel_owned_generation:
+        switch:
+          - condition: ${generation_enabled}
+            steps:
+              - cancel_jobs:
+                  try:
+                    call: cancel_generation_jobs
+                    result: generation_result
+                  except:
+                    as: error
+                    steps:
+                      - record_generation_error:
+                          assign:
+                            - errors: $${list.concat(errors, error)}
+    - pause_generation_sync:
+        switch:
+          - condition: ${generation_sync_enabled}
+            steps:
+              - pause_active_job_polling:
+                  try:
+                    call: http.post
+                    args:
+                      url: "https://cloudscheduler.googleapis.com/v1/${generation_sync_job}:pause"
+                      auth: {type: OAuth2}
+                      body: {}
+                  except:
+                    as: error
+                    steps:
+                      - missing_sync_job_is_already_stopped:
+                          switch:
+                            - condition: $${map.get(error, "code") != 404}
+                              steps:
+                                - record_sync_pause_error:
+                                    assign:
+                                      - errors: $${list.concat(errors, error)}
+    - stop_future_backup_schedules:
+        try:
+          call: cleanup_owned_backup_schedules
+        except:
+          as: error
+          steps:
+            - record_backup_schedule_error:
+                assign:
+                  - errors: $${list.concat(errors, error)}
+    - check_shutdown:
+        switch:
+          - condition: $${len(errors) > 0}
+            steps:
+              - prepare_failure_receipt:
+                  assign:
+                    - failure_receipt:
+                        reason: $${reason}
+                        observed_cost: $${observed_cost}
+                        currency: "${budget_currency}"
+                        time: $${time.format(sys.now())}
+                        errors: $${errors}
+                        generation: $${generation_result}
+              - persist_failure_receipt:
+                  try:
+                    call: http.post
+                    args:
+                      url: "https://storage.googleapis.com/upload/storage/v1/b/${receipt_bucket}/o"
+                      query:
+                        uploadType: "media"
+                        name: $${"guard/failures/" + sys.get_env("GOOGLE_CLOUD_WORKFLOW_EXECUTION_ID") + ".json"}
+                        ifGenerationMatch: "0"
+                      auth: {type: OAuth2}
+                      headers: {Content-Type: "application/json"}
+                      body: $${json.encode_to_string(failure_receipt)}
+                  except:
+                    as: receipt_error
+                    steps:
+                      - record_receipt_error:
+                          assign:
+                            - errors: $${list.concat(errors, "Failure receipt could not be stored")}
+              - shutdown_failed:
+                  raise: $${json.encode_to_string(errors)}
+    - prepare_receipt:
+        assign:
+          - receipt:
+              reason: $${reason}
+              observed_cost: $${observed_cost}
+              currency: "${budget_currency}"
+              time: $${time.format(sys.now())}
+              edge: "${edge_prefix}-edge"
+              service: "${service}"
+              generation: $${generation_result}
+    - persist_receipt:
+        try:
+          call: http.post
+          args:
+            url: "https://storage.googleapis.com/upload/storage/v1/b/${receipt_bucket}/o"
+            query:
+              uploadType: "media"
+              name: "guard/presentation-stop.json"
+              ifGenerationMatch: "0"
+            auth: {type: OAuth2}
+            headers: {Content-Type: "application/json"}
+            body: $${json.encode_to_string(receipt)}
+        except:
+          as: error
+          steps:
+            - existing_receipt:
+                switch:
+                  - condition: $${map.get(error, "code") == 412}
+                    next: acknowledge
+            - receipt_failed:
+                raise: $${error}
+    - acknowledge:
+        switch:
+          - condition: $${len(ack_ids) > 0}
+            steps:
+              - acknowledge_updates:
+                  call: http.post
+                  args:
+                    url: "https://pubsub.googleapis.com/v1/${subscription}:acknowledge"
+                    auth: {type: OAuth2}
+                    body:
+                      ackIds: $${ack_ids}
+    - pause_after_stop:
+        switch:
+          - condition: $${stop}
+            steps:
+              - pause_own_scheduler:
+                  call: http.post
+                  args:
+                    url: "https://cloudscheduler.googleapis.com/v1/${scheduler}:pause"
+                    auth: {type: OAuth2}
+                    body: {}
+    - result:
+        return:
+          stopped: $${stop}
+          reason: $${reason}
+          observed_cost: $${observed_cost}
+
+wait_until_absent:
+  params: [url]
+  steps:
+    - initialize:
+        assign:
+          - attempts: 0
+    - inspect:
+        try:
+          call: http.get
+          args:
+            url: $${url}
+            auth: {type: OAuth2}
+        except:
+          as: error
+          steps:
+            - missing:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - confirmed_absent:
+                          return: true
+            - unavailable:
+                return: false
+    - increment:
+        assign:
+          - attempts: $${attempts + 1}
+    - bounded_wait:
+        switch:
+          - condition: $${attempts >= 60}
+            steps:
+              - verification_timed_out:
+                  return: false
+    - wait:
+        call: sys.sleep
+        args: {seconds: 5}
+        next: inspect
+
+service_is_absent:
+  params: [url]
+  steps:
+    - inspect:
+        try:
+          call: http.get
+          args:
+            url: $${url}
+            auth: {type: OAuth2}
+        except:
+          as: error
+          steps:
+            - missing:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent:
+                          return: true
+            - unauthorized:
+                raise: $${error}
+    - present:
+        return: false
+
+wait_until_operation_done:
+  params: [operation_name]
+  steps:
+    - validate_name:
+        switch:
+          - condition: $${operation_name == null}
+            steps:
+              - missing_operation:
+                  return: false
+          - condition: $${not text.match_regex(operation_name, "^${operation_prefix}[A-Za-z0-9_-]+$")}
+            steps:
+              - foreign_operation:
+                  raise: "Unexpected Cloud Run operation resource name"
+    - initialize:
+        assign:
+          - attempts: 0
+    - inspect:
+        try:
+          call: http.get
+          args:
+            url: $${"https://run.googleapis.com/v2/" + operation_name}
+            auth: {type: OAuth2}
+          result: operation
+        except:
+          as: error
+          steps:
+            - operation_error:
+                return: false
+    - done:
+        switch:
+          - condition: $${default(map.get(operation.body, "done"), false)}
+            steps:
+              - successful:
+                  return: $${map.get(operation.body, "error") == null}
+    - increment:
+        assign:
+          - attempts: $${attempts + 1}
+    - bounded_wait:
+        switch:
+          - condition: $${attempts >= 120}
+            steps:
+              - operation_timed_out:
+                  return: false
+    - wait:
+        call: sys.sleep
+        args: {seconds: 5}
+        next: inspect
+
+delete_compute_resource:
+  params: [resource_path]
+  steps:
+    - owned_targets:
+        assign:
+          - allowed_targets:
+              - "projects/${project_id}/global/forwardingRules/${edge_prefix}-http"
+              - "projects/${project_id}/global/forwardingRules/${edge_prefix}-https"
+              - "projects/${project_id}/global/addresses/${edge_prefix}-edge"
+              - "projects/${project_id}/global/securityPolicies/${edge_prefix}-app-security"
+              - "projects/${project_id}/global/securityPolicies/${edge_prefix}-media-security"
+    - validate_target:
+        switch:
+          - condition: $${not (resource_path in allowed_targets)}
+            steps:
+              - foreign_target:
+                  raise: "Unexpected Compute shutdown target"
+    - inspect:
+        try:
+          call: http.get
+          args:
+            url: $${"https://compute.googleapis.com/compute/v1/" + resource_path}
+            auth: {type: OAuth2}
+        except:
+          as: error
+          steps:
+            - missing:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent:
+                          return: "absent"
+            - inspect_failed:
+                raise: $${error}
+    - request_delete:
+        try:
+          call: http.delete
+          args:
+            url: $${"https://compute.googleapis.com/compute/v1/" + resource_path}
+            auth: {type: OAuth2}
+          result: deletion
+        except:
+          as: error
+          steps:
+            - missing_after_inspect:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - already_deleted:
+                          return: "absent"
+            - delete_failed:
+                raise: $${error}
+    - wait_for_operation:
+        call: wait_compute_operation
+        args:
+          operation_name: $${deletion.body.name}
+    - complete:
+        return: "deleted"
+
+wait_compute_operation:
+  params: [operation_name]
+  steps:
+    - initialize:
+        assign:
+          - attempts: 0
+    - validate_operation:
+        switch:
+          - condition: $${not text.match_regex(operation_name, "^[A-Za-z0-9_-]+$")}
+            steps:
+              - invalid_operation:
+                  raise: "Unexpected Compute global operation name"
+    - inspect_operation:
+        call: http.get
+        args:
+          url: $${"https://compute.googleapis.com/compute/v1/projects/${project_id}/global/operations/" + operation_name}
+          auth: {type: OAuth2}
+        result: operation
+    - done:
+        switch:
+          - condition: $${operation.body.status == "DONE"}
+            steps:
+              - verify_result:
+                  switch:
+                    - condition: $${map.get(operation.body, "error") != null}
+                      steps:
+                        - operation_failed:
+                            raise: $${operation.body.error}
+              - complete:
+                  return: "done"
+    - increment:
+        assign:
+          - attempts: $${attempts + 1}
+    - bounded_wait:
+        switch:
+          - condition: $${attempts >= 60}
+            steps:
+              - timed_out:
+                  raise: "Compute global deletion operation timed out"
+    - wait:
+        call: sys.sleep
+        args: {seconds: 5}
+        next: inspect_operation
+
+delete_owned_run_service:
+  params: [service_path]
+  steps:
+    - owned_targets:
+        assign:
+          - allowed_targets: ["${service}", "${generation_manager_service}"]
+    - validate_target:
+        switch:
+          - condition: $${not (service_path in allowed_targets)}
+            steps:
+              - foreign_target:
+                  raise: "Unexpected Cloud Run shutdown target"
+    - inspect_before_delete:
+        call: service_is_absent
+        args:
+          url: $${"https://run.googleapis.com/v2/" + service_path}
+        result: already_absent
+    - skip_missing_service:
+        switch:
+          - condition: $${already_absent}
+            steps:
+              - absent:
+                  return: "absent"
+    - delete_service:
+        try:
+          call: http.delete
+          args:
+            url: $${"https://run.googleapis.com/v2/" + service_path}
+            auth: {type: OAuth2}
+          result: deletion
+        except:
+          as: error
+          steps:
+            - accept_absent_service:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent_after_inspect:
+                          return: "absent"
+            - deletion_failed:
+                raise: $${error}
+    - wait_for_operation:
+        call: wait_until_operation_done
+        args:
+          operation_name: $${deletion.body.name}
+        result: operation_ok
+    - verify_operation:
+        switch:
+          - condition: $${not operation_ok}
+            steps:
+              - operation_failed:
+                  raise: "Owned Run deletion operation failed or timed out"
+    - verify_absence:
+        call: wait_until_absent
+        args:
+          url: $${"https://run.googleapis.com/v2/" + service_path}
+        result: service_absent
+    - verify_deletion:
+        switch:
+          - condition: $${not service_absent}
+            steps:
+              - deletion_unconfirmed:
+                  raise: "Owned Run service deletion was not confirmed"
+    - complete:
+        return: "deleted"
+
+cleanup_security_policies:
+  steps:
+    # Never remove edge protection while either owned public entry point lives.
+    # A failed/unknown check aborts this cleanup, but main still stops Run/GPU.
+    - confirm_ingress_stopped:
+        for:
+          value: forwarding_rule
+          in:
+            - "projects/${project_id}/global/forwardingRules/${edge_prefix}-http"
+            - "projects/${project_id}/global/forwardingRules/${edge_prefix}-https"
+          steps:
+            - inspect_forwarding_rule:
+                call: service_is_absent
+                args:
+                  url: $${"https://compute.googleapis.com/compute/v1/" + forwarding_rule}
+                result: absent
+            - reject_active_ingress:
+                switch:
+                  - condition: $${not absent}
+                    steps:
+                      - ingress_still_active:
+                          raise: "Owned ingress still exists; preserve Armor protection"
+    - initialize:
+        assign:
+          - errors: []
+    - detach_policies:
+        for:
+          value: backend_path
+          in:
+            - "projects/${project_id}/global/backendServices/${edge_prefix}-app"
+            - "projects/${project_id}/global/backendServices/${edge_prefix}-candidate"
+            - "projects/${project_id}/global/backendBuckets/${edge_prefix}-media"
+            - "projects/${project_id}/global/backendBuckets/${edge_prefix}-live-index"
+          steps:
+            - detach_one_policy:
+                try:
+                  call: detach_owned_security_policy
+                  args:
+                    resource_path: $${backend_path}
+                except:
+                  as: error
+                  steps:
+                    - record_detach_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+    - delete_policies:
+        for:
+          value: policy_path
+          in:
+            - "projects/${project_id}/global/securityPolicies/${edge_prefix}-app-security"
+            - "projects/${project_id}/global/securityPolicies/${edge_prefix}-media-security"
+          steps:
+            - delete_one_policy:
+                try:
+                  call: delete_compute_resource
+                  args:
+                    resource_path: $${policy_path}
+                except:
+                  as: error
+                  steps:
+                    - record_policy_error:
+                        assign:
+                          - errors: $${list.concat(errors, error)}
+    - verify_cleanup:
+        switch:
+          - condition: $${len(errors) > 0}
+            steps:
+              - cleanup_failed:
+                  raise: $${json.encode_to_string(errors)}
+    - complete:
+        return: "deleted"
+
+detach_owned_security_policy:
+  params: [resource_path]
+  steps:
+    - owned_targets:
+        assign:
+          - targets:
+              "projects/${project_id}/global/backendServices/${edge_prefix}-app":
+                method: "setSecurityPolicy"
+                field: "securityPolicy"
+                policy: "projects/${project_id}/global/securityPolicies/${edge_prefix}-app-security"
+              "projects/${project_id}/global/backendServices/${edge_prefix}-candidate":
+                method: "setSecurityPolicy"
+                field: "securityPolicy"
+                policy: "projects/${project_id}/global/securityPolicies/${edge_prefix}-app-security"
+              "projects/${project_id}/global/backendBuckets/${edge_prefix}-media":
+                method: "setEdgeSecurityPolicy"
+                field: "edgeSecurityPolicy"
+                policy: "projects/${project_id}/global/securityPolicies/${edge_prefix}-media-security"
+              "projects/${project_id}/global/backendBuckets/${edge_prefix}-live-index":
+                method: "setEdgeSecurityPolicy"
+                field: "edgeSecurityPolicy"
+                policy: "projects/${project_id}/global/securityPolicies/${edge_prefix}-media-security"
+          - target: $${map.get(targets, resource_path)}
+    - validate_target:
+        switch:
+          - condition: $${target == null}
+            steps:
+              - foreign_target:
+                  raise: "Unexpected security policy detach target"
+    - inspect:
+        try:
+          call: http.get
+          args:
+            url: $${"https://compute.googleapis.com/compute/v1/" + resource_path}
+            auth: {type: OAuth2}
+          result: backend
+        except:
+          as: error
+          steps:
+            - accept_missing_backend:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent:
+                          return: "absent"
+            - inspection_failed:
+                raise: $${error}
+    - inspect_policy:
+        assign:
+          - policy: $${default(map.get(backend.body, target.field), "")}
+    - validate_policy:
+        switch:
+          - condition: $${policy == ""}
+            steps:
+              - already_detached:
+                  return: "absent"
+          - condition: $${not (policy in [target.policy, "https://www.googleapis.com/compute/v1/" + target.policy, "https://compute.googleapis.com/compute/v1/" + target.policy])}
+            steps:
+              - foreign_policy:
+                  raise: "Unexpected policy on owned backend; preserve it"
+    - detach:
+        try:
+          call: http.post
+          args:
+            url: $${"https://compute.googleapis.com/compute/v1/" + resource_path + "/" + target.method}
+            auth: {type: OAuth2}
+            body: {securityPolicy: ""}
+          result: mutation
+        except:
+          as: error
+          steps:
+            - accept_missing_after_inspect:
+                switch:
+                  - condition: $${map.get(error, "code") == 404}
+                    steps:
+                      - absent_after_inspect:
+                          return: "absent"
+            - detachment_failed:
+                raise: $${error}
+    - wait_for_operation:
+        call: wait_compute_operation
+        args:
+          operation_name: $${mutation.body.name}
+    - complete:
+        return: "detached"
+
+${generation_functions}
+
+${backup_functions}

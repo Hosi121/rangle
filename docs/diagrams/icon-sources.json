@@ -1,0 +1,177 @@
+{
+  "gcp": {
+    "source": "svgl",
+    "url": "https://svgl.app/library/google-cloud.svg",
+    "file": "gcp.svg",
+    "bytes": 1139,
+    "sha256": "e314a1d65f5035bdcebb84ed740ed0341cc5ba15ecf22fa2c1b10d39fbe18880"
+  },
+  "run": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/core-products-icons.zip#Unique Icons/Cloud Run/SVG/CloudRun-512-color-rgb.svg",
+    "file": "run.svg",
+    "bytes": 1415,
+    "sha256": "42a910e5d9f5a8685227f91623bf50c8c9259c556a41eb9a97157fd1e78b0cea"
+  },
+  "lb": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Networking/SVG/Networking-512-color-rgb.svg",
+    "file": "lb.svg",
+    "bytes": 2714,
+    "sha256": "c88d1b7d3bcba21ba984d92a7762e1f940b70d922f83449370870f76caaf5787"
+  },
+  "cdn": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Networking/SVG/Networking-512-color-rgb.svg",
+    "file": "cdn.svg",
+    "bytes": 2714,
+    "sha256": "c88d1b7d3bcba21ba984d92a7762e1f940b70d922f83449370870f76caaf5787"
+  },
+  "gcs": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/core-products-icons.zip#Unique Icons/Cloud Storage/SVG/Cloud_Storage-512-color.svg",
+    "file": "gcs.svg",
+    "bytes": 1398,
+    "sha256": "df42fc4b652cb133a4150bea7988aa965651d2c52fdfd141b6e8a359552eec8e"
+  },
+  "firestore": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Databases/SVG/Databases-512-color.svg",
+    "file": "firestore.svg",
+    "bytes": 2161,
+    "sha256": "f9ecdabe95c8c30cd6adabcb3e521f7fe462eacd63ce19021222a2a1b41a7266"
+  },
+  "vertex": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/core-products-icons.zip#Unique Icons/Vertex AI/SVG/VertexAI-512-color.svg",
+    "file": "vertex.svg",
+    "bytes": 1901,
+    "sha256": "17922247f3110026fd637c531d0604c67a00c9a58a6e152030f2242b9fd48a8e"
+  },
+  "registry": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/DevOps/SVG/DevOps-512-color.svg",
+    "file": "registry.svg",
+    "bytes": 955,
+    "sha256": "b08a5231acec916701acec3a2e0003cc3a4a29ddf3fc66f24f3c90e51d40587d"
+  },
+  "flutter": {
+    "source": "svgl",
+    "url": "https://svgl.app/library/flutter.svg",
+    "file": "flutter.svg",
+    "bytes": 548,
+    "sha256": "ae67e4eec7eed6a6580f7e63c71d17ba4125ffd85a8e9f30fe74b7a6e48916a7"
+  },
+  "go": {
+    "source": "explicit",
+    "url": "https://go.dev/images/go-logo-blue.svg",
+    "file": "go.svg",
+    "bytes": 1472,
+    "sha256": "c89d8c4a31dd4f6487e69bc3bdb6585a52466a393f6e8d863bfc1a0189bc213c"
+  },
+  "python": {
+    "source": "svgl",
+    "url": "https://svgl.app/library/python.svg",
+    "file": "python.svg",
+    "bytes": 1126,
+    "sha256": "e4d80b4ca9418d1ebb4ff880eb7cbe6896d60d61d9f44ead6723db29a4ed962e"
+  },
+  "pytorch": {
+    "source": "devicon",
+    "url": "https://raw.githubusercontent.com/devicons/devicon/master/icons/pytorch/pytorch-original.svg",
+    "file": "pytorch.svg",
+    "bytes": 404,
+    "sha256": "7fb9c244f59aa3261ed17d6166ef50d0f07e6e5bc4e5211ca53b6e4837e09e75"
+  },
+  "cloudflare": {
+    "source": "svgl",
+    "url": "https://svgl.app/library/cloudflare.svg",
+    "file": "cloudflare.svg",
+    "bytes": 1473,
+    "sha256": "b8dff311e8041942b6006c907fd44c5f3ae941bd88ec650e552fe3f727f5139c"
+  },
+  "githubactions": {
+    "source": "devicon",
+    "url": "https://raw.githubusercontent.com/devicons/devicon/master/icons/githubactions/githubactions-original.svg",
+    "file": "githubactions.svg",
+    "bytes": 2854,
+    "sha256": "3a2524052ccf301d1a239f20cfef98d655e060c51cc29c5e94c867913899a47e"
+  },
+  "admin": {
+    "source": "lucide",
+    "url": "https://cdn.jsdelivr.net/npm/lucide-static/icons/user-cog.svg",
+    "file": "admin.svg",
+    "bytes": 704,
+    "sha256": "c39ed961e21c09ff8e0f7faafe60e59173e03519df49913268b8d8dbbfe76d9d"
+  },
+  "source": {
+    "source": "lucide",
+    "url": "https://cdn.jsdelivr.net/npm/lucide-static/icons/clapperboard.svg",
+    "file": "source.svg",
+    "bytes": 509,
+    "sha256": "11ed92d2eb9be77220f274d28d5e360cd1884c100a5f9b2b28b9730566fcf51d"
+  },
+  "package": {
+    "source": "lucide",
+    "url": "https://cdn.jsdelivr.net/npm/lucide-static/icons/package-check.svg",
+    "file": "package.svg",
+    "bytes": 551,
+    "sha256": "d9dde323719732aa017b020f9ea23448348ac3bc90ffd895f17023396a735e53"
+  },
+  "worker": {
+    "source": "lucide",
+    "url": "https://cdn.jsdelivr.net/npm/lucide-static/icons/cpu.svg",
+    "file": "worker.svg",
+    "bytes": 661,
+    "sha256": "5f3cb53eb98f90a77cbc276a4feb3f960b421566797fa88e99bda5c5b1c1ff66"
+  },
+  "render": {
+    "source": "lucide",
+    "url": "https://cdn.jsdelivr.net/npm/lucide-static/icons/box.svg",
+    "file": "render.svg",
+    "bytes": 472,
+    "sha256": "4349560ce1a72658ba5d870c12b4185d3f7ecd638745954acce6a76befeead07"
+  },
+  "index": {
+    "source": "lucide",
+    "url": "https://cdn.jsdelivr.net/npm/lucide-static/icons/list-tree.svg",
+    "file": "index.svg",
+    "bytes": 432,
+    "sha256": "c28fb27e887174137f9c6a4e1f8fb773bb17840815c827c993c483ca8690e599"
+  },
+  "check": {
+    "source": "lucide",
+    "url": "https://cdn.jsdelivr.net/npm/lucide-static/icons/shield-check.svg",
+    "file": "check.svg",
+    "bytes": 495,
+    "sha256": "a5bc6a48f15cf1513d6b13d67491c8e2985f6d5e64694a07f58d339591589b2d"
+  },
+  "javascript": {
+    "source": "svgl",
+    "url": "https://svgl.app/library/javascript.svg",
+    "file": "javascript.svg",
+    "bytes": 1068,
+    "sha256": "35328c60cffee71518294d614325fad52f903b48b5b63ac5f59fe1997249942c"
+  },
+  "logging": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Observability/SVG/Observability-512-color.svg",
+    "file": "logging.svg",
+    "bytes": 1071,
+    "sha256": "f22fe17c2e91d65d3109e499bb3b5d8d60216f678bf9fa41c541de7d8254216a"
+  },
+  "monitoring": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Observability/SVG/Observability-512-color.svg",
+    "file": "monitoring.svg",
+    "bytes": 1071,
+    "sha256": "f22fe17c2e91d65d3109e499bb3b5d8d60216f678bf9fa41c541de7d8254216a"
+  },
+  "workflows": {
+    "source": "gcp",
+    "url": "https://services.google.com/fh/files/misc/category-icons.zip#Category Icons/Integration Services/SVG/IntegrationServices-512-color.svg",
+    "file": "workflows.svg",
+    "bytes": 1157,
+    "sha256": "f4a14bb1f46b6b8ec2dd8bd69d8e37e9fac8f161801b781cf6e1f41772fc2101"
+  }
+}

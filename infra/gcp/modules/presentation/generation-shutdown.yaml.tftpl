@@ -1,0 +1,122 @@
+# These functions are inert unless the main shutdown branch enables generation.
+cancel_generation_jobs:
+  steps:
+    - initialize:
+        assign:
+          - cutoff: $${sys.now() + 300}
+          - empty_sweeps: 0
+          - sweeps: 0
+    - scan:
+        call: scan_owned_generation_jobs
+        args:
+          cutoff: $${cutoff}
+        result: active
+    - count_sweep:
+        assign:
+          - sweeps: $${sweeps + 1}
+    - update_empty_count:
+        switch:
+          - condition: $${active == 0}
+            steps:
+              - empty:
+                  assign:
+                    - empty_sweeps: $${empty_sweeps + 1}
+        next: evaluate
+    - evaluate:
+        switch:
+          - condition: $${active != 0}
+            steps:
+              - reset_empty:
+                  assign:
+                    - empty_sweeps: 0
+          - condition: $${empty_sweeps >= 4}
+            steps:
+              - confirmed:
+                  return:
+                    empty_sweeps: $${empty_sweeps}
+                    sweeps: $${sweeps}
+    - enforce_cutoff:
+        switch:
+          - condition: $${sys.now() >= cutoff}
+            steps:
+              - expired:
+                  raise: "Owned Vertex jobs did not reach terminal state within the shutdown polling window"
+    - wait:
+        call: sys.sleep
+        args:
+          seconds: 10
+        next: scan
+
+scan_owned_generation_jobs:
+  params: [cutoff]
+  steps:
+    - initialize:
+        assign:
+          - page_token: ""
+          - pages: 0
+          - active: 0
+          - empty_labels: {}
+    - check_bound:
+        switch:
+          - condition: $${sys.now() >= cutoff or pages >= 20}
+            steps:
+              - expired:
+                  raise: "Vertex job listing exceeded its bounded shutdown window"
+    - list_jobs:
+        call: http.get
+        args:
+          url: "https://${region}-aiplatform.googleapis.com/v1/projects/${project_id}/locations/${region}/customJobs"
+          auth: {type: OAuth2}
+          timeout: 10
+          query:
+            filter: 'labels.application="rangle" AND labels.environment="presentation-stg" AND labels.rangle_job:*'
+            readMask: "name,state,labels"
+            pageSize: 100
+            pageToken: $${page_token}
+        result: listed
+    - inspect_jobs:
+        for:
+          value: job
+          in: $${default(map.get(listed.body, "customJobs"), [])}
+          steps:
+            - check_job_deadline:
+                switch:
+                  - condition: $${sys.now() >= cutoff}
+                    steps:
+                      - job_deadline_exceeded:
+                          raise: "Vertex job cancellation exceeded its bounded shutdown window"
+            - classify_job:
+                assign:
+                  - labels: $${default(map.get(job, "labels"), empty_labels)}
+                  - owned_environment: $${map.get(labels, "application") == "rangle" and map.get(labels, "environment") == "presentation-stg"}
+                  - valid_job_id: $${text.match_regex(default(map.get(labels, "rangle_job"), ""), "^[0-9a-f]{32}$")}
+                  - valid_resource_name: $${text.match_regex(default(map.get(job, "name"), ""), "^projects/(${project_id}|${project_number})/locations/${region}/customJobs/[A-Za-z0-9_-]+$")}
+                  - is_terminal: $${map.get(job, "state") in ["JOB_STATE_SUCCEEDED", "JOB_STATE_FAILED", "JOB_STATE_CANCELLED", "JOB_STATE_EXPIRED", "JOB_STATE_PARTIALLY_SUCCEEDED"]}
+            - owned_nonterminal:
+                switch:
+                  - condition: $${owned_environment and valid_job_id and valid_resource_name and not is_terminal}
+                    steps:
+                      - count_active:
+                          assign:
+                            - active: $${active + 1}
+                      - cancel_if_needed:
+                          switch:
+                            - condition: $${map.get(job, "state") != "JOB_STATE_CANCELLING"}
+                              steps:
+                                - request_cancel:
+                                    call: http.post
+                                    args:
+                                      url: $${"https://${region}-aiplatform.googleapis.com/v1/" + job.name + ":cancel"}
+                                      auth: {type: OAuth2}
+                                      timeout: 10
+                                      body: {}
+    - advance:
+        assign:
+          - pages: $${pages + 1}
+          - page_token: $${default(map.get(listed.body, "nextPageToken"), "")}
+    - next_page:
+        switch:
+          - condition: $${page_token != ""}
+            next: check_bound
+    - result:
+        return: $${active}

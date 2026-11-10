@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "header_bytes": 32,
+  "stride_bytes": 56,
+  "magic": [
+    "RANGL4D1",
+    "RANGL4Z1"
+  ],
+  "little_endian": true,
+  "fields": [
+    [
+      "count",
+      "u32",
+      8
+    ],
+    [
+      "stride",
+      "u32",
+      12
+    ],
+    [
+      "frameCount",
+      "u32",
+      16
+    ],
+    [
+      "frameRate",
+      "f32",
+      20
+    ],
+    [
+      "duration",
+      "f32",
+      24
+    ],
+    [
+      "flags",
+      "u32",
+      28
+    ]
+  ],
+  "primitive_count_max": 500000,
+  "wire_and_raw_bytes_max": 33554432,
+  "gzip_container": {
+    "members": 1,
+    "trailing_bytes": "forbidden, including NUL padding and empty members",
+    "method": 8,
+    "reserved_flags": 0,
+    "crc32_and_isize": "required and verified",
+    "fhcrc": "verified when present",
+    "decoded_bytes": "exactly count * stride_bytes"
+  }
+}

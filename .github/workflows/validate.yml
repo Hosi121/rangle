@@ -1,0 +1,107 @@
+name: Validate
+on:
+  workflow_call:
+permissions:
+  contents: read
+env:
+  CI: true
+jobs:
+  ml-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: python3 -m venv /tmp/rangle-contract-env
+      - run: |
+          /tmp/rangle-contract-env/bin/pip install --disable-pip-version-check --only-binary=:all: numpy==2.4.6
+      - run: PYTHONPATH=ml /tmp/rangle-contract-env/bin/python -m unittest discover -s ml/tests -v
+  go:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: go.mod
+      - run: go test -race ./...
+      - run: go vet ./...
+  web:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: apps/web/viewer/package-lock.json
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: '3.47.9'
+          channel: stable
+          cache: true
+      - run: npm ci --prefix viewer --no-audit --no-fund
+      - run: npm test --prefix viewer
+      - run: npm run build --prefix viewer
+      - run: flutter --suppress-analytics pub get --enforce-lockfile
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze --no-pub
+      - run: flutter test --no-pub
+  delivery:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: bash -n scripts/deploy-stg.sh scripts/check-deployment.sh
+      - run: shellcheck scripts/deploy-stg.sh scripts/check-deployment.sh
+      - name: Exercise migration and cloud metadata checks offline
+        run: |
+          python3 scripts/migrate-generation-ledger.test.py
+          python3 scripts/check-cloud-security.test.py
+      - run: python3 scripts/deploy-stg.test.py
+      - run: python3 scripts/publish-catalog.test.py
+      - run: python3 scripts/publish-live.test.py
+  terraform:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      TF_IN_AUTOMATION: true
+      TF_INPUT: false
+      TF_PLUGIN_CACHE_DIR: /tmp/rangle-terraform-plugin-cache
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check Cloud Armor regex restrictions offline
+        run: python3 infra/gcp/modules/presentation/tests/security_policy_regex_test.py
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: '1.17.1'
+          terraform_wrapper: false
+      - run: mkdir -p "$TF_PLUGIN_CACHE_DIR"
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ env.TF_PLUGIN_CACHE_DIR }}
+          key: tf-plugins-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('infra/gcp/**/.terraform.lock.hcl') }}
+      - name: Validate all locked roots, then run mock tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -d infra/gcp ]]; then
+            echo 'No GCP Terraform definitions in this revision.'
+            exit 0
+          fi
+          terraform fmt -check -recursive infra/gcp
+          while IFS= read -r -d '' lock; do
+            root=$(dirname "$lock")
+            terraform -chdir="$root" init -backend=false -input=false -lockfile=readonly
+            terraform -chdir="$root" validate
+            if [[ -d "$root/tests" ]] && find "$root/tests" -name '*.tftest.hcl' -print -quit | grep -q .; then
+              terraform -chdir="$root" test
+            fi
+          done < <(find infra/gcp -name .terraform.lock.hcl -not -path '*/.terraform/*' -print0 | sort -z)
+      - name: Exercise shutdown guard failure continuation offline
+        run: python3 infra/gcp/modules/presentation/tests/shutdown_guard_test.py

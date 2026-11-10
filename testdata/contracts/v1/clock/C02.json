@@ -1,0 +1,1 @@
+{"frameCount": 3, "frameRate": 29.97002997002997, "queries": [0, 0.02, 1], "frames": [0, 1, 2], "end": 0.06673333333333334, "context": {"source": "https://media.example.test/live/fixture/rev/scene.json", "previewUrl": "https://media.example.test/other.webm"}, "timeline": {"previewUrl": "preview.webm", "previewStartSeconds": 0, "sceneStartSeconds": 0}, "mapping": null}

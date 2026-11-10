@@ -1,0 +1,15 @@
+# Fake project, no assumed purchased domain, illustrative USD early-stop guard.
+project_id = "rangle-example"
+project_number = "123456789012"
+region = "asia-northeast1"
+base_domain = null
+budget_currency = "USD"
+budget_stop_amount = 150
+application = null
+# application = {
+#   image_digest = "asia-northeast1-docker.pkg.dev/rangle-example/rangle-stg/server@sha256:0000000000000000000000000000000000000000000000000000000000000000"
+#   catalog_sha256 = "0000000000000000000000000000000000000000000000000000000000000000"
+#   community_enabled = false # Optional; enable only with a compatible server image.
+#   generation_config_sha256 = null # Reviewed private generation/<sha256>.json only.
+#   generation_live_enabled = false # Requires the config above and live_streaming_enabled=true.
+# }

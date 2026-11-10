@@ -1,0 +1,4 @@
+# Live video decoding only; the offline trainer target is unchanged.
+# Same wheel as the separate preprocessing lock; NumPy comes from dependencies.
+opencv-python-headless==4.13.0.92 \
+    --hash=sha256:0525a3d2c0b46c611e2130b5fdebc94cf404845d8fa64d2f3a3b679572a5bd22

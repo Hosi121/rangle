@@ -1,0 +1,113 @@
+name: Deploy stg
+on:
+  push:
+    branches: [stg]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: deploy-rangle-stg
+  cancel-in-progress: false
+env:
+  CI: true
+  IMAGE_REPOSITORY: asia-northeast1-docker.pkg.dev/comin-up/rangle-stg/server
+jobs:
+  guard:
+    if: github.ref == 'refs/heads/stg'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Check authorized window, domain, and WIF configuration
+        env:
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          RANGLE_STG_DOMAIN: ${{ vars.RANGLE_STG_DOMAIN }}
+        run: bash scripts/deploy-stg.sh guard
+  validate:
+    needs: guard
+    uses: ./.github/workflows/validate.yml
+  deploy:
+    needs: [guard, validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    environment: stg
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Recheck before build
+        env:
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          RANGLE_STG_DOMAIN: ${{ vars.RANGLE_STG_DOMAIN }}
+        run: bash scripts/deploy-stg.sh guard
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - id: build-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 3600s
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: asia-northeast1-docker.pkg.dev
+          username: oauth2accesstoken
+          password: ${{ steps.build-auth.outputs.access_token }}
+      - id: image
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:${{ github.sha }}
+          build-args: |
+            RANGLE_API_URL=/api/v1/clips
+            RANGLE_LIVE_MEDIA_ORIGIN=https://media.${{ vars.RANGLE_STG_DOMAIN }}
+          cache-from: type=gha,scope=rangle-docker
+          cache-to: type=gha,scope=rangle-docker,mode=max
+          provenance: false
+      # Refresh the short-lived WIF credential after the potentially long build.
+      - id: deploy-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_lifetime: 3600s
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      - id: manager-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          token_format: id_token
+          id_token_audience: https://rangle-stg-generation-113704194486.asia-northeast1.run.app
+          id_token_include_email: true
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Smoke candidate, promote, and verify
+        env:
+          STG_IMAGE: ${{ env.IMAGE_REPOSITORY }}@${{ steps.image.outputs.digest }}
+          GCP_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.GCP_WORKLOAD_IDENTITY_PROVIDER }}
+          GCP_DEPLOY_SERVICE_ACCOUNT: ${{ vars.GCP_DEPLOY_SERVICE_ACCOUNT }}
+          CLOUDSDK_AUTH_ACCESS_TOKEN: ${{ steps.deploy-auth.outputs.access_token }}
+          GENERATION_MANAGER_ID_TOKEN: ${{ steps.manager-auth.outputs.id_token }}
+          RANGLE_STG_DOMAIN: ${{ vars.RANGLE_STG_DOMAIN }}
+          RELEASE_RECEIPT_PATH: ${{ runner.temp }}/rangle-release-receipt.json
+        run: bash scripts/deploy-stg.sh deploy
+      - name: Save verified release receipt
+        id: receipt-upload
+        continue-on-error: true
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stg-release-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/rangle-release-receipt.json
+          if-no-files-found: error
+          retention-days: 7
+          overwrite: false
+      - name: Report receipt storage failure
+        if: ${{ steps.receipt-upload.outcome == 'failure' }}
+        run: echo 'Release receipt artifact upload failed. Recover the verified JSON from this run summary.' >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,12 @@
+name: CI
+on:
+  pull_request:
+    branches: [stg, main]
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    uses: ./.github/workflows/validate.yml

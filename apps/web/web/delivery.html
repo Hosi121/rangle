@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>rangle — 配信検証</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,sans-serif;background:#101010;color:#f0f2ed}
+    *{box-sizing:border-box}body{margin:0;height:100dvh;display:flex;flex-direction:column}
+    header,footer{padding:12px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+    header a{color:inherit}main{flex:1;position:relative;min-height:0;overflow:hidden}
+    button{font:inherit;padding:8px 16px;border:1px solid #7a716a;border-radius:8px;background:#25201d;color:inherit;cursor:pointer}
+    button:focus-visible,input:focus-visible{outline:2px solid #ff6500;outline-offset:3px}
+    input{flex:1;min-width:120px;accent-color:#ff6500}output{font-variant-numeric:tabular-nums}
+    #attribution{font-size:12px;color:#c7c0ba;padding:0 16px 12px}#attribution a{color:inherit}
+  </style>
+</head>
+<body>
+  <header><a href="./">rangle</a><strong>配信検証</strong><span>比較用LOD</span><span id="status" role="status">準備中</span></header>
+  <main id="viewport" aria-label="ドラッグで視点を回せる3D映像"></main>
+  <footer>
+    <button id="play" disabled>再生</button>
+    <input id="seek" type="range" min="0" max="0" step="1" value="0" aria-label="再生位置" disabled>
+    <output id="time">0.00秒</output><output id="rate"></output>
+  </footer>
+  <div id="attribution"></div>
+  <script type="module" src="./viewer/delivery.js"></script>
+</body>
+</html>

@@ -2,40 +2,57 @@
 
 **replay + angle**。スポーツの決定的瞬間を、自分の視点で見返す。
 
-rangleは、実写から再構成したスポーツのハイライトを縦型フィードで楽しみ、気になった瞬間には時間と視点を動かして見返せるモバイルプラットフォームです。
+実写のハイライトを縦型フィードで見つけ、時間と視点を動かすFlutter Webアプリ。校正済み多視点データをクラウドでGaussian Splattingへ再構成し、端末で復号・描画します。
 
-既存の多視点データセットを使い、クラウドでの動的Gaussian Splattingの再構成、モバイル向けの圧縮・分割配信、端末での復号・GPU描画を一つの流れにつなぐ構成を検討しています。Go、ML処理、モバイルアプリをモノレポで管理します。
+[公開アプリ](https://app.rangleplay.stream/) · [Web UI](https://app.rangleplay.stream/demo/) · [ドキュメント](docs/README.md)
 
-現在は企画・技術選定の段階です。実装と性能検証はこれから進めます。
+## 現在できること
 
-## 資料
+| 機能 | 内容 |
+| --- | --- |
+| [見る](apps/web/README.md) | 縦型フィード、サムネイル付き検索結果・タグ・共有、自由視点・時間モデルの再生 |
+| [生成](docs/generation.md) | 運営・団体担当者向け3DGS/4DGS生成、進捗・ETA、入力割当・公開 |
+| [交流](docs/accounts.md) | いいね・声援・コメント、声援履歴、団体ページ・公開動画一覧・フォロー |
+| [LIVE](docs/cloud-live.md) | 多視点録画を到着順に学習し、Tokyo T4×1から8モデルを実CDN公開 |
 
-- [企画書 草案](docs/proposal.md)
-- [技術選定案](docs/technology-selection.md)
-- [DevFest提出用リポジトリの案内](docs/submission.md)
+LIVEの継続30秒遅延は未達。実カメラ入力、実スマートフォン性能、大規模視聴、実品質ラダーを使うABRの効果は未検証です。[実装と残る課題](docs/backend-status.md)
 
-## リポジトリ
+## はじめる
 
-| 用途 | リポジトリ | リモート名 |
-| --- | --- | --- |
-| 開発の正本 | [Hosi121/rangle](https://github.com/Hosi121/rangle) | `origin` |
-| DevFest Hackathon 2026の最終提出 | [Devfest-Hackathon-2026/df-2026-t002](https://github.com/Devfest-Hackathon-2026/df-2026-t002) | `submission` |
-
-通常の開発とpushは `origin` に対して行います。最終提出時に、必要なコードと資料を提出用リポジトリへ反映します。提出用の運用制約と期限は [提出案内](docs/submission.md) を参照してください。
-
-## 開発用リポジトリの取得
+Go 1.27.3で合成資産のHTTP配信・ABRを試せます。
 
 ```bash
 git clone https://github.com/Hosi121/rangle.git
 cd rangle
 ```
 
-提出用リモートが必要な場合は追加します。
+```bash
+go run ./cmd/abr-sim
+go run ./cmd/rangle-dev
+```
+
+サーバー起動中、別ターミナルで取得します。終了はCtrl+C。
 
 ```bash
-git remote add submission https://github.com/Devfest-Hackathon-2026/df-2026-t002.git
+curl http://127.0.0.1:8080/manifests/demo/synthetic-v1.json
+curl -i -H 'Range: bytes=0-15' http://127.0.0.1:8080/assets/demo/synthetic-v1/low/segment-0.bin
 ```
+
+実映像の再生・性能検証とは別のデモです。画面は[Flutter Web](apps/web/README.md#開発とビルド)、コンテナは[Docker](docs/docker.md)、手元のsceneは[ローカル配信](docs/local-server.md)を参照。
+
+## 資料と開発
+
+| 場所 | 内容 |
+| --- | --- |
+| `cmd/`・`internal/` | GoのAPI・配信・生成制御・ABR |
+| [apps/web/](apps/web/README.md) | Flutter UI・JS viewer |
+| `ml/` | 前処理・学習・packing |
+| [infra/gcp/](infra/gcp/README.md) | Terraform |
+| [共有fixture](testdata/contracts/v1/README.md) | Go/Python/JS/Dartのmedia契約、74件の合成入力 |
+| [docs/](docs/README.md) | 現行の構成・仕様・運用・実測。初期案はarchive |
+
+開発正本は[Hosi121/rangle](https://github.com/Hosi121/rangle)（origin）。作業PR→stg→mainの手順は[開発ルール](CONTRIBUTING.md)、最終提出先と制約は[提出案内](docs/submission.md)を参照。実データ・重み・認証情報はGitへ追加しません。
 
 ## ライセンス
 
-自作コードは [MIT License](LICENSE) です。利用するデータセット、外部コード、モデルには、それぞれの利用条件が適用されます。
+自作コードは[MIT](LICENSE)。外部データ・コード・モデルには各利用条件が適用されます。[内蔵サンプルの出典](apps/web/assets/samples/ATTRIBUTION.md)と各実験資料を参照。
