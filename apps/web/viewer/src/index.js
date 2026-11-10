@@ -37,7 +37,7 @@ window.addEventListener('message', async (event) => {
     await session.load(message.url, { live: message.live === true,
       origins: Array.isArray(message.origins) ? message.origins : [], sha256: message.sha256,
       deferFirstFrame: message.deferFirstFrame === true, previewUrl: message.previewUrl,
-      mapping: message.mapping });
+      mapping: message.mapping, transportIdentity: message.transportIdentity });
   } else if (message.type === 'cancelReplace') {
     session?.cancelReplacement();
   } else if (message.type === 'replace' && Number.isSafeInteger(message.requestId)) {

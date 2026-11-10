@@ -312,7 +312,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                         _query.isEmpty &&
                         _tag.isEmpty &&
                         clips.first.id == _clipId &&
-                        clips.first.sceneUrl != null,
+                        clips.first.freeViewUrl != null,
                   );
                 },
               ),
