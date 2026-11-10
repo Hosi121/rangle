@@ -16,6 +16,7 @@ import (
 
 	"github.com/Hosi121/rangle/internal/catalog"
 	"github.com/Hosi121/rangle/internal/publication"
+	"github.com/Hosi121/rangle/internal/publisher"
 )
 
 // Publication is separate from the transport catalog. These are validated,
@@ -56,14 +57,25 @@ func publicClip(job Job, origin string) catalog.PublicClip {
 }
 
 func (s *Service) SetPublication(ctx context.Context, owner, id string, published bool) (Job, error) {
-	if owner == "" || !requestID.MatchString(id) {
+	return s.SetPublicationFor(ctx, OperatorPrincipal(owner), id, published)
+}
+func (s *Service) SetPublicationFor(ctx context.Context, p Principal, id string, published bool) (Job, error) {
+	permission := publisher.WithdrawClip
+	if published {
+		permission = publisher.PublishClip
+	}
+	if !p.allows(permission) {
+		return Job{}, ErrPublisherForbidden
+	}
+	owner := p.ownerKey()
+	if !requestID.MatchString(id) {
 		return Job{}, ErrNotFound
 	}
 	job, err := s.Store.Get(ctx, id)
 	if err != nil {
 		return Job{}, err
 	}
-	if job.Owner != owner {
+	if !p.owns(job) {
 		return Job{}, ErrNotFound
 	}
 	if job.State != Succeeded || job.Snapshot.ModeName() == "live" || published && s.ReservedClipID != nil && s.ReservedClipID("generated-"+id) {
@@ -86,7 +98,7 @@ func (s *Service) SetPublication(ctx context.Context, owner, id string, publishe
 	}
 	result, err := store.SetPublication(ctx, owner, id, publication, s.now())
 	if err == nil && s.Logger != nil {
-		s.Logger.InfoContext(ctx, "generation publication changed", "job_id", id, "published", result.Published)
+		s.Logger.InfoContext(ctx, "generation publication changed", "job_id", id, "publisher_account_id", job.PublisherAccountID, "actor_kind", p.Kind, "actor_id", p.ID, "published", result.Published)
 	}
 	return result, err
 }

@@ -8,16 +8,19 @@ import (
 	"encoding/hex"
 	"errors"
 	"time"
+
+	"github.com/Hosi121/rangle/internal/publisher"
 )
 
 var (
-	ErrNotFound  = errors.New("generation job not found")
-	ErrBusy      = errors.New("a generation job is already active")
-	ErrBudget    = errors.New("generation attempt budget exhausted")
-	ErrConflict  = errors.New("generation request conflicts with existing job")
-	ErrExpired   = errors.New("generation authorization window ended")
-	ErrInvalid   = errors.New("invalid generation request")
-	ErrForbidden = errors.New("generation requires an administrator")
+	ErrNotFound           = errors.New("generation job not found")
+	ErrBusy               = errors.New("a generation job is already active")
+	ErrBudget             = errors.New("generation attempt budget exhausted")
+	ErrConflict           = errors.New("generation request conflicts with existing job")
+	ErrExpired            = errors.New("generation authorization window ended")
+	ErrInvalid            = errors.New("invalid generation request")
+	ErrForbidden          = errors.New("generation requires an administrator")
+	ErrPublisherForbidden = errors.New("publisher generation access forbidden")
 )
 
 type State string
@@ -35,15 +38,19 @@ const (
 func (s State) Terminal() bool { return s == Succeeded || s == Failed || s == Cancelled }
 
 type Job struct {
-	Published    bool      `firestore:"published" json:"published"`
-	ID           string    `firestore:"id" json:"id"`
-	Owner        string    `firestore:"owner" json:"-"`
-	Preset       string    `firestore:"preset" json:"preset"`
-	Snapshot     Preset    `firestore:"preset_snapshot" json:"-"`
-	State        State     `firestore:"state" json:"state"`
-	ProviderName string    `firestore:"provider_name" json:"-"`
-	CreatedAt    time.Time `firestore:"created_at" json:"created_at"`
-	UpdatedAt    time.Time `firestore:"updated_at" json:"updated_at"`
+	// Owner remains the indexed storage key. Legacy operator IDs are preserved;
+	// publisher jobs use a disjoint publisher:<id> key and explicit owner field.
+	PublisherAccountID publisher.ID `firestore:"publisher_account_id,omitempty" json:"-"`
+	CreatedBy          Actor        `firestore:"created_by,omitempty" json:"-"`
+	Published          bool         `firestore:"published" json:"published"`
+	ID                 string       `firestore:"id" json:"id"`
+	Owner              string       `firestore:"owner" json:"-"`
+	Preset             string       `firestore:"preset" json:"preset"`
+	Snapshot           Preset       `firestore:"preset_snapshot" json:"-"`
+	State              State        `firestore:"state" json:"state"`
+	ProviderName       string       `firestore:"provider_name" json:"-"`
+	CreatedAt          time.Time    `firestore:"created_at" json:"created_at"`
+	UpdatedAt          time.Time    `firestore:"updated_at" json:"updated_at"`
 }
 
 func requestJobID(owner, requestID string) string {
