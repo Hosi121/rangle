@@ -2,6 +2,8 @@
 
 [全体](overview.html)・[ML](ml-pipeline.html)・[配信](delivery.html)・[監視](observability.html)の4図。HTMLが閲覧/PNG出力の正本で、アイコン・フォントを内包する。旧`cloud-architecture.svg/png/py`は2026-11-08の配備図。
 
+2026-11-10の実環境とstg実装を反映。[構成の説明と確認範囲](../cloud-architecture.md#今回の照合範囲)を参照。
+
 ## PNGだけを生成する
 
 repo rootで実行する。確認版はPython3.14.9、Playwright1.64.1、Chromium1248。依存は一時venvに置き、runtime/CIへ追加しない。uvの代わりに同版のvenv/pipも使える。
