@@ -1,52 +1,54 @@
 # APIと版付き資産の配信
 
-GoのフィードAPIから版付きmanifestを取得し、広告された資産をHTTPで配信する契約と起動例をまとめる。生成・画質評価は[ML・データ](README.md#mlデータ)、クラウドへの接続・配備状況は[インフラ・配備](README.md#インフラ配備)、容量の未検証範囲は[バックエンドの現状](backend-status.md)を参照。
+公開フィードから版付きmanifestとHTTP資産を取得する契約。認証は[アカウント](accounts.md)、snapshot切替は[catalog運用](catalog-snapshots.md)、容量・計測は[バックエンドの現状](backend-status.md)を参照。
 
 ## 構成
 
-カタログAPIは起動時に読み込んだcatalogを公開する。利用者ごとの状態を持たず、同じcatalogを複数のAPIプロセスに配布できる。初期版のcatalog更新は再起動で反映し、動的な編集や推薦は後続とする。[アカウント・いいね・コメント](accounts.md) は別APIと保存先を使う。
+APIは起動時のcatalogを終了まで使い、更新は再起動で反映する。利用者別状態を持たず、同じcatalogを複数processへ配れる。動的編集・推薦は未実装。交流は別API・保存先を使う。
 
-公開フィードの `X-Rangle-Catalog-SHA256` は選択した静的catalogの元JSON bytesを識別し、HEAD/304でも確認できる。生成結果の掲載registry、応答ETag、cursorのhashとは役割が異なる。不変snapshotの切替・新旧instance/cacheの混在・旧版への復帰とasset保持は [catalog snapshotの運用契約](catalog-snapshots.md) に従う。
+clipのJSON/ETagは起動時に生成する。一覧は対象ページのJSONを結合してETagを計算し、ページcacheを蓄積しない。保持量はcatalog metadataに比例する。`X-Rangle-Catalog-SHA256` は選択した静的catalogの元JSON bytesを識別し、HEAD/304でも返す。registry・ETag・cursorとの違いは[snapshot契約](catalog-snapshots.md#選択した版を照合する)を参照。
 
-各clipのJSONとETagは起動時に生成し、詳細応答で再利用する。一覧は指定ページのJSONを結合し、その応答内容からETagを計算する。ページごとに蓄積するキャッシュは持たず、保持量はcatalogのメタデータ量に比例する。[実装状況と計測](backend-status.md) を参照。
-
-資産配信は `internal/delivery` のHTTP handlerへ分離する。ローカルではAPIと同じHTTP入口に載せ、本番では版付きmanifestと資産をCDN・object storageへ配置する。APIが返す取得先originを設定で変更できるようにし、APIプロセスがCDNの資産を中継しない。
+資産handlerは `internal/delivery` に分離する。ローカルでは同じHTTP入口、本番ではCDN/object storageから直接配信し、APIは設定したoriginへのURLを返す。
 
 ## 配信handlerの契約
 
-`delivery.NewFileHandler(manifest stream.Manifest, assetRoot string, logger *slog.Logger) (*delivery.FileHandler, error)` を入口とする。rootの下に、manifest内の絶対pathから先頭 `/` を除いた位置で資産を配置する。例えば `/assets/basketball/rev1/full/000.splat` は `assetRoot/assets/basketball/rev1/full/000.splat` を指す。
+入口は `delivery.NewFileHandler(manifest stream.Manifest, assetRoot string, logger *slog.Logger) (*delivery.FileHandler, error)`。manifestの絶対pathから先頭 `/` を除きrootへ配置する（`/assets/basketball/rev1/full/000.splat` → `assetRoot/assets/basketball/rev1/full/000.splat`）。
 
-- 既存の `stream.Manifest` を正本とし、manifestのサイズ・SHA256と実ファイルを起動時に照合する。manifest内で広告した初期化資産・区間だけを公開し、同じディレクトリの別ファイルや一覧は公開しない。
-- ファイルは `os.Root` でroot内に閉じ、ハッシュ照合もHTTP配信も全量をRAMへ読み込まず行う。公開対象の数に比例してfile descriptorを常時保持しない。
-- 版付きmanifestと資産にSHA256由来の強いETag、長期不変キャッシュと `no-transform` を付ける。GET・HEAD・Range・条件付き取得を扱い、エラーは `no-store` とする。
-- 公開中のファイルを変更しない。追加の内容は新しいrevisionで公開する。起動後の置換・サイズ・mtime変更を検知したら、古いETagで応答せず取得を失敗させる。読み取り中の同時上書きもサポートしないため、本番の配信ファイルは読み取り専用にする。
-- `Close` はHTTP要求が終了してから呼ぶ。実行時の資産I/O失敗はこのHTTP境界で `slog` に記録する。
+- `stream.Manifest` を正本にサイズ・SHA256を起動時照合し、広告した初期化資産・区間だけを公開する。ディレクトリ一覧・未宣言ファイルは公開しない。
+- `os.Root` 内に閉じ、hash照合・配信で全量をRAMへ読まない。公開数に比例する常時file descriptorも持たない。
+- manifest/資産はSHA256由来の強いETag、長期不変cache、`no-transform`。GET・HEAD・Range・条件付き取得に対応し、エラーは `no-store`。
+- 公開bytesを変更せず、追加内容は新revisionへ置く。起動後の置換・サイズ・mtime変更では古いETagを返さず失敗する。同時上書きは非対応のため本番は読取専用にする。
+- `Close` はHTTP要求終了後に呼ぶ。実行時I/O失敗はHTTP境界で `slog` に記録する。
 
-実験用sceneのmanifestは描画用メタデータ、`stream.Manifest` は区間・品質・資源予算の配信メタデータであり、別の役割を持つ。両方が存在するだけでFlutterのABR再生まで接続されたとは扱わない。
+描画用sceneと、区間・品質・資源予算を持つ `stream.Manifest` は別物。両者の存在だけでFlutterのABR接続済みとは扱わない。
 
 ## フィードAPI
 
 | 要求 | 応答 |
 | --- | --- |
-| `GET /api/v1/clips?limit=10` | `clips` 配列と、次ページがあれば `next_cursor` |
-| `GET /api/v1/clips?limit=10&cursor=...` | 同じcatalog snapshotの続き |
-| `GET /api/v1/clips?q=slam&tag=basketball` | カタログ全体を検索し、結果をページ送り |
-| `GET /api/v1/clips/{id}` | 1件のメタデータ。存在しなければ404 |
-| `HEAD` | GETと同じヘッダー、bodyなし |
+| `GET /api/v1/clips?limit=10` | `clips` と、続きがあれば `next_cursor` |
+| `GET /api/v1/clips?limit=10&cursor=...` | 同じsnapshotの続き |
+| `GET /api/v1/clips?q=slam&tag=basketball` | catalog全体を検索・ページ送り |
+| `GET /api/v1/clips/{id}` | metadata。存在しなければ404 |
+| `HEAD` | GETと同じheader、bodyなし |
 
-`limit` は既定10、上限50。cursorは不透明な値として扱い、加工しない。catalogや取得先originの更新でcursorが無効になったら400を返すため、先頭から取り直す。無効・重複・未定義のクエリも400にする。初期版は全利用者に同じ公開フィードを返し、`public, max-age=15, stale-while-revalidate=30` と応答内容由来のETagを付ける。エラーは `no-store` とする。
+| 項目 | 契約 |
+| --- | --- |
+| `limit` | 既定10、上限50 |
+| cursor | 不透明。catalog/origin更新で失効すると400。先頭から再取得 |
+| query | 無効・重複・未定義は400 |
+| cache | 全利用者共通、`public, max-age=15, stale-while-revalidate=30`、body由来ETag。エラーは `no-store` |
+| `q` | title/sport/description/tagsの大小文字を区別しない部分一致。空白区切り全語、最大256bytes・8語 |
+| `tag` | `#`なしの完全一致。検索条件もcursorへ結び付ける |
+| catalog `tags` | 任意、最大10個。各32文字以内、文字・数字・結合文字・`_`。未指定なら適合するsportを補う |
 
-`q` はtitle・sport・description・tagsの大文字小文字を区別しない部分一致。空白区切りの全語を含む結果を返す（最大256bytes・8語）。`tag` は `#` を含めない完全一致。検索条件もcursorに結び付ける。catalogの `tags` は省略可・最大10個で、各tagは文字・数字・結合文字・`_`の32文字以内。未指定の場合、sportがtagとして使える形なら応答に補う。
-
-クリップには `id`、`revision`、`title`、`sport`、`description`、`codec`、`manifest_url` を返す。通常動画の `preview_url` と描画用の `scene_url` は任意。`manifest_url` は配信契約のmanifestを指し、動画プレイヤーへ直接渡すURLではない。Flutterは `RANGLE_API_URL=/api/v1/clips` で先頭ページとmedia URLを読み込み、動画・自由視点・時刻シークを行う。[Webの起動手順](../apps/web/README.md#apiから動画自由視点を開く)を参照。ABR制御への接続は次の段階とする。
+clipは `id/revision/title/sport/description/codec/manifest_url`、任意の `preview_url/scene_url` を返す。manifestは動画へ直接渡すURLではない。Flutterは `RANGLE_API_URL=/api/v1/clips` で動画・自由視点・時刻シークに使う（[起動手順](../apps/web/README.md#apiから動画自由視点を開く)）。ABRは未接続。
 
 ## 公開するcatalog
 
-catalogはAPIからそのまま公開しない設定用JSONで、最大16MiB。version 1と `clips` 配列を必須とし、未知フィールド、重複clip ID、不正なmanifestを起動時に拒否する。配列順がフィード順となる。空配列も受け付ける。
+catalogは設定用JSONで、APIへそのまま公開しない。上限16MiB、version 1と `clips` 必須。未知field・重複ID・不正manifestは起動拒否。空配列を許可し、配列順をfeed順にする。1件の上限はtitle256bytes、sport/codec各128bytes、description/media URL各4096bytes。
 
-フィードの応答サイズを抑えるため、1件のtitleは256bytes、sportとcodecは各128bytes、descriptionと各media URLは4096bytesまでとする。
-
-以下はHTTP契約を確認する3byteの合成資産であり、描画可能なGaussianではない。実際の公開では、生成済み資産の実サイズ・SHA256と、測定した資源予算を設定する。
+以下はHTTP検証用の3byte合成資産で、描画可能なGaussianではない。実公開では実サイズ・SHA256・測定した資源予算を使う。
 
 ```json
 {
@@ -80,9 +82,7 @@ catalogはAPIからそのまま公開しない設定用JSONで、最大16MiB。v
 }
 ```
 
-このJSONを `.local/catalog.json` に保存し、次のように起動する。`-ui-root` を追加すると `/` は製品入口、`/demo/` は既存Webビルドになる。Flutter自身の静的ファイルは `/demo/assets/` 等へ移り、フィードAPI・manifest・公開clipの版付き資産URLは変わらない。
-
-カタログの `preview_url` が `/quality-previews/clip.webm` 等のローカル動画を参照し、そのファイルがUI root内の同じ相対pathにある場合は、宣言された動画だけを従来のroot側URLでも配信する。絶対HTTP(S) URLをローカルaliasへ変換せず、JavaScript・フォント等のUI資産は `/demo/` 配下に限定する。公開対象は起動時に固定され、未宣言動画のroot側aliasは作られない。
+`.local/catalog.json` として保存し、起動する。
 
 ```bash
 mkdir -p .local/published/assets/example/v1/low
@@ -96,8 +96,10 @@ curl -i http://127.0.0.1:4174/manifests/example/v1.json
 curl -i -H 'Range: bytes=1-2' http://127.0.0.1:4174/assets/example/v1/low/000.bin
 ```
 
-外部取得先を使うときは `-asset-origin https://media.example.com` を指定し、ローカル配信を不要とするAPIプロセスでは `-asset-root` を省く。この場合、APIは外部manifest/資産へのURLを返すだけで、取得や中継を行わない。originはHTTP(S)のschemeとhostに限定する。preview/sceneの相対pathもこのoriginへ解決し、既に絶対HTTP(S) URLなら保持する。外部URLの存在や権利はcatalogの投入前に公開工程で確認する。
+`-ui-root` を追加すると `/` は製品入口、`/demo/` はWeb UIとなる。Flutter資産は `/demo/` 配下、API・manifest・版付きasset URLは維持する。catalogが宣言するローカルpreview動画だけ、UI root内の同じ相対pathからroot側aliasで配信する。絶対HTTP(S) URLはalias化せず、JS・font・未宣言動画のroot aliasは作らない。公開対象は起動時固定。
 
-Cloud CDN等へ移す際は、同じ版付きpathと公開bytesを配置し、Content-Type・Cache-Control・CORSを配信先に設定する。Rangeと強いETagを使う資産では動的圧縮による変換を避ける。`no-transform` はこの条件を守るために付ける。[Cloud CDNのキャッシュ](https://docs.cloud.google.com/cdn/docs/caching)、[動的圧縮の制約](https://docs.cloud.google.com/cdn/docs/dynamic-compression)
+外部配信は `-asset-origin https://media.example.com` を指定する。scheme/hostだけのHTTP(S) originとし、preview/scene相対pathも解決する。既存の絶対HTTP(S) URLは保持する。`-asset-root` を省けばローカル配信をせず、APIは外部取得・中継もしない。存在と権利は公開工程で確認する。
 
-サーバーの既定はループバック待受けで、PORT環境変数がある場合は `0.0.0.0:PORT` で待ち受ける。明示した `-listen` 引数があればそちらを優先する。サーバー自体はCDNやGoogle Cloud資源を作成しない。Dockerでのビルドと起動は [Dockerの手順](docker.md) を参照。数千〜数万人の同時視聴への耐性は、CDNのwarm/cold状態、originへの集中、APIの水平分散を含めた別の容量検証で判断する。
+CDNへ同じ版付きpath/bytesを置き、Content-Type・Cache-Control・CORSを設定する。Rangeと強いETagを保つため動的圧縮を避ける（`no-transform`）。[Cloud CDN cache](https://docs.cloud.google.com/cdn/docs/caching)、[圧縮の制約](https://docs.cloud.google.com/cdn/docs/dynamic-compression)。
+
+既定待受はloopback、`PORT` 設定時は `0.0.0.0:PORT`、明示 `-listen` が優先。serverはcloud資源を作らない。[Docker](docker.md)での起動、[容量検証の残件](backend-status.md)を参照。

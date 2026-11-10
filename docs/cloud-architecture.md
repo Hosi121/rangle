@@ -1,69 +1,77 @@
 # rangle のクラウド構成
 
-2026-11-08に構築した発表用stgの配信経路と、生成制御を分離した現在のコード上の構成を示す。正本は [Terraform](../infra/gcp/modules/presentation/) と [配備手順](stg-deployment.md)。生成managerの実適用・データ移行・疎通の完了は、配備記録で別に確認する。逐次GPU生成の実測は[クラウドLIVE](cloud-live.md)を参照。
+発表用presentation環境の構成。正本は[presentation module](../infra/gcp/modules/presentation/)と[配備手順](stg-deployment.md)。2026-11-10の[適用記録](security-review.md)を反映している。
 
-![rangle: Cloudflare DNSからGoogle HTTPS LBへ接続し、Cloud RunのUI/APIとCloud CDN・private GCSのmediaへ分岐する構成。下段はWIFによる配備と予算・期限停止。](diagrams/cloud-architecture.svg)
+| 図 | 内容・実装 |
+| --- | --- |
+| [全体](diagrams/overview.html) | Flutter Web、Go、Vertex AI、CDN、CI/CD、横断するログ監視 |
+| [ML処理](diagrams/ml-pipeline.html) | 認証→生成manager→専用台帳→[CustomJob](../internal/generation/vertex.go)→検証・公開 |
+| [配信処理](diagrams/delivery.html) | feed/manifest・LIVE index→不変資産→[Worker復号](../apps/web/viewer/src/temporal-worker.js)→WebGL |
+| [ログ監視](diagrams/observability.html) | 4種の収集元→専用Logging bucket/view、標準メトリクス→Monitoring |
 
-[SVGを開く](diagrams/cloud-architecture.svg) · [発表用PNGを開く](diagrams/cloud-architecture.png)
+HTMLはアイコン・フォント内包でオフライン閲覧できる。データ/制御/CI/観測の線種は各図の凡例を参照。[PNG出力・再生成・出典](diagrams/README.md)
 
 ## 配信経路
 
-- **アプリ**：ブラウザ → `app.rangleplay.stream` → global external HTTPS Application Load Balancer → Tokyo の serverless NEG → Cloud Run `rangle-stg`。Go が `/` の landing、`/demo/` の Flutter Web、`/api/v1/clips` の API を配信する。app backend の CDN は無効。
-- **メディア**：同じ LB の `media.rangleplay.stream` → Cloud CDN → private GCS media。公開許諾済みの不変 bytes を CDN からブラウザへ直接配信し、大容量 media を Go に中継させない。TTL は24時間。media bucket は PAP enforced / `allUsers` なしで、CDN の cache-fill service account に objectViewer を付与する。
-- **カタログ**：Cloud Run の runtime SA が専用 private GCS catalog を read-only FUSE mount し、`/mnt/catalog/snapshots/<sha256>.json` を読む。入力・重み用の inputs と Terraform state は公開 media と別の private bucket に保持する。
-- **DNS**：Cloudflare の app / media A record は Google LB の global IPv4 を返す **DNS only** 設定。ブラウザの HTTP 通信は Google の LB へ直接接続する。[Cloudflare proxy status](https://developers.cloudflare.com/dns/proxy-status/)
+| 経路 | 構成 |
+| --- | --- |
+| アプリ | `app.rangleplay.stream` → HTTPS LB → serverless NEG → Cloud Run `rangle-stg`。`/` landing、`/demo/` Flutter、`/api/` Go。CDN無効 |
+| メディア | `media.rangleplay.stream` → 同じLB → Cloud CDN → private GCS。モデルは不変URL・TTL24時間、LIVE indexはTTL1秒 |
+| カタログ | private GCSの`snapshots/<sha256>.json`をGoへread-only FUSE mount。catalogだけversioning無効 |
+| DNS | Cloudflareのapp/media A recordはGoogle LBへ向けた[DNS only](https://developers.cloudflare.com/dns/proxy-status/) |
 
-公開Cloud Run `rangle-stg` は `asia-northeast1`、1 vCPU / 512 MiB、request billing、min 0 / max 1、concurrency 40。発表用の小さい設定で、10万人同時視聴の容量実証は行っていない。コード上は `internal-and-cloud-load-balancing` ingressとし、外部からの既定 `run.app` / candidate-tag URLの直通を拒否する。CIはappのLB URLと候補headerを使って未昇格revisionを検証する。実環境への切替・再疎通は[配備手順](stg-deployment.md#lb入口制限への切替)に従い、実施前は適用済みと扱わない。
+公開RunはTokyo、1 vCPU/512MiB、request billing、min0/max1、concurrency40。端末が復号・描画し、Goは大容量モデルを中継しない。生成・LIVEは対応する不変configとfeature flagで有効にする。
+
+## ネットワーク境界とアクセス制御
+
+**VPC・subnetは未使用**。CustomJobのNetwork、RunのVPC connector/Direct VPC interfacesも未設定。図のCloud枠はサービスの所属を表す。
+
+| 対象 | 境界 |
+| --- | --- |
+| 公開VIP | `34.96.101.8/32`（2026-11-09確認）。単一の公開IPで、subnet CIDRではない |
+| 公開Run | `internal-and-cloud-load-balancing` ingress。外部入口はLBのみ。invoker IAMチェックは無効、操作認可はGo。既定run.app・候補tagへの外部直通は404 |
+| 生成manager | ingress ALL＋Cloud Run IAM必須。公開LBには載せない。業務APIは署名付きservice identityも検証 |
+| inputs/catalog | PAP enforced＋用途別IAM。匿名公開しない |
+| media | private bucketをCDN cache-fill SAが読む。許諾済み素材のみ公開。Cloud Armorで公開prefixを制限 |
+| Firestore/Vertex/AR | IAMで制御。private subnetによる隔離ではない |
+
+通常・候補backendの両方にCloud Armorを付ける。`X-Rangle-Candidate: ci-candidate`は公開の経路選択子で、認証用の秘密ではない。[入口制限手順](stg-deployment.md#lb入口制限への切替)・[防御設定](security-hardening.md)
 
 ## 生成制御とデータの分離
 
-上のSVGは配信・配備経路を表す。生成制御では、公開アプリと同じimageを別mode・別SAのCloud Run `rangle-stg-generation` として動かす。
+同じimageを公開UI/APIとprivate生成managerの別mode・別SAで動かす。
 
-```mermaid
-flowchart LR
-    Browser[ブラウザ] --> Public[公開 UI / community]
-    Public --> Community[(rangle-stg DB)]
-    Public -->|Google ID token / bounded API| Manager[IAM必須の生成manager]
-    Scheduler[専用同期Scheduler] -->|固定identity / active同期のみ| Manager
-    Manager --> Generation[(rangle-stg-generation DB)]
-    Manager -->|固定preset / admission後| Vertex[Vertex AI worker]
-    Vertex --> Media[private GCS / 公開CDN]
-```
-
-| 実行identity | 許可するデータ・操作 |
+| identity | 許可する操作 |
 | --- | --- |
-| 公開 `rangle-stg-runtime` SA | `rangle-stg` DBのcommunity CRUD、private catalog read、managerのinvoke。生成DB・Vertex CustomJob・trainer actAsは持たない |
-| private `rangle-stg-generation` SA | `rangle-stg-generation` DBの生成台帳CRUD、private catalog/config read、期限付きVertex操作と専用trainer actAs。community DBは読まない |
-| 専用同期SA | managerの同期endpointをinvoke。DB・Vertex権限は持たない |
+| `rangle-stg-runtime` | community DB `rangle-stg`、catalog読取、manager invoke。Vertex・生成DB・trainer actAsは不可 |
+| `rangle-stg-generation` | 生成DB `rangle-stg-generation`、config/catalog読取、期限付きVertex操作・trainer actAs |
+| 専用同期SA | managerのactive同期のみ。DB・Vertex権限なし |
 
-managerのingressは `all` だがCloud Run IAM認証を必須とし、公開UIのLB経路には載せない。呼出しを許可するのは公開runtime、専用同期SA、配備用SA。配備用SAはhealth確認とimage/traffic更新を担い、managerの業務APIは独立した署名・identity検証で拒否する。公開runtimeの署名付きservice tokenはapplication headerでも検証し、Cloud Runがplatform headerを書き換えても認証を省略しない。
+公開側がadmin cookie・role・CSRFを検証し、署名付きservice tokenとownerをmanagerへ渡す。managerは固定preset・同時1件・最大10 attempts・30分・期限を守る。公開runtime侵害時に残る操作範囲は[セキュリティ記録](security-review.md#残る制約)、台帳切替は[移行手順](security-generation-migration.md)を参照。
 
-公開runtimeでadmin cookie・現在のaccount role・CSRFを確認し、managerへowner IDを転送する。managerはownerを転送するruntime自体を信頼するため、公開runtimeのRCEはownerの偽装と残る枠内の正規preset操作まで可能である。manager側の同時1件・最大10 attempts・30分・固定spec・deadlineは迂回できず、台帳のresetや任意Vertex specの送信はできない。公開フィード・detail・engagementの存在確認もmanager経由で行い、private job設定を返さない。[生成API](generation.md)、[生成基盤](generation-infrastructure.md)
+GPUはTokyo Spot T4×1の有限CustomJob。入力は校正・同期済み複数カメラ録画とseedで、単眼upload・RTMP/RTSP受信は含まない。提供校正・seedの事前情報、破棄window、**継続30秒遅延の未達**は[クラウドLIVEの実測](cloud-live.md#2026-11-09の実gpu検証)に記載する。native mobile性能・大規模視聴・実GaussianのABR切替は未検証。
 
-旧DBからの切替は、writersを停止して2つの生成collectionだけを型・ID・使用済みattempt・履歴・掲載状態ごと移し、照合後に再開する。データの正本を空のDBや古いsnapshotへ戻さない。[移行・復帰の契約](security-generation-migration.md)
+## ログ監視の経路と到達点
+
+Run、Vertex worker、LB/CDN、Scheduler/Workflowsの4系統を専用sinkで選び、TokyoのLogging bucket `rangle-stg-logs`へ30日保持する。Cloud Storage bucketとは別資源で、監査ログは対象外。既存`_Default`/`_Required`は変更しない。
+
+MonitoringのログパネルとLogs Explorerは同じ`_AllLogs` viewを読む。公開Runの要求数/秒・revision別p95は標準メトリクスで、ログ由来でもブラウザ描画時間でもない。manager有効時はそのログも収集する。[検索・検証範囲](observability.md)・[出力方針](logging.md)
 
 ## 配備と停止
 
-GitHub Actionsの `stg` workflowはOIDC / Workload Identity Federationを経て専用deployer SAを使用する。長期SA keyを使わずArtifact Registryへimageを格納する。remote生成構成では、既存managerのidentity・config・IAMを検証し、認証付きcandidate healthとrevisionを確認してからmanagerを昇格する。その後、公開アプリのLB経由candidateを検証・昇格する。後続の失敗では両serviceの元の明示traffic配分へ復帰し、DBとIAMは巻き戻さない。[CI/CD](cicd.md)
+TerraformがIAM・mount・args・catalog・scaling、CIがimage/trafficを管理する。GitHub WIFで認証し、managerの認証付きcandidate→公開アプリのLB candidateの順で確認・昇格する。後続失敗時は両serviceのtrafficを戻し、DB/IAMは戻さない。[CI/CD](cicd.md)
 
-| 所有者 | 管理するもの |
-| --- | --- |
-| Terraform | infrastructure、IAM、catalog SHA、mount、runtime args、scaling |
-| CI | container image と revision traffic |
-
-承認済み総予算は **USD 300**。専用の JPY 30,000 budget が Pub/Sub へ通知し、Cloud Scheduler が15分ごとに Workflows を起動する。Workflow は通知の額と期限を確認し、**JPY 15,000 または 2026-11-14 15:00 UTC（11月15日00:00 JST）**で専用 deployer SA を無効化し、owned Cloud Run・LB forwarding rules を削除、専用 global IP を解放する。成功後に private inputs へ receipt を残し、Scheduler を pause する。private data / state / Artifact Registry は保持する。
-
-請求通知の遅延・確認間隔・保存費用があるため、これは総額の厳密な hard cap ではない。既存の Cloud Run 200円 spend cap も維持し、先に作動する可能性がある。停止の詳細と実 IAM の制約は [stg 配備手順](stg-deployment.md#予算期限の停止) を参照。
+予算・期限でScheduler/Workflowsがowned資源を停止する。保持データ、IAMの制約、通知遅延による費用上限の限界は[停止手順](stg-deployment.md#予算期限の停止)に集約する。
 
 ## 検証の到達点
 
-Cloud Run / NEG / LB / Cloud CDN / private GCS は作成済み。app / mediaの独自ドメインでHTTPS接続、UI・API、mediaのRange・CORS・ETag・実ファイルのハッシュ一致と、GitHub WIF経由の配備を確認済み。図は配信・配備の構成を表し、配備状況の更新先は [配備手順](stg-deployment.md#検証と到達点)。
+LB経由のUI/API、媒体のRange/CORS/ETag/hash、匿名origin拒否、WIF配備、manager分離、監査・ログ収集を確認済み。停止guardの通常実行は成功。破壊的な停止分岐・restore・端末性能・大規模視聴は未検証。[配備記録](security-review.md)
 
-guard は期限前の `stopped=false / reason=not_due`、Scheduler による起動、費用0円の検証通知の decode・閾値判定・ack を確認済み。予算・期限到達時に資源を削除する分岐と、その実 IAM は未検証。実際の到達点の更新先は [stg 配備手順](stg-deployment.md#検証と到達点)。
+## 旧配備図（2026-11-08）
 
-## 図の再生成
+初期の配信・配備のみを表し、ML/LIVE・manager・ログ監視を含まない。[SVG](diagrams/cloud-architecture.svg)・[PNG](diagrams/cloud-architecture.png)
 
-SVG は1920×1080、PNG は3840×2160。文字・線・図形・公式アイコンのパスを含む SVG で、スクリーンショットではない。生成元にアイコンを埋め込んでいるためネットワーク接続は不要。
+## 旧配備図の再生成
 
 ```bash
 python3 docs/diagrams/cloud-architecture.py
@@ -71,16 +79,8 @@ python3 docs/diagrams/cloud-architecture.py
 python3 docs/diagrams/cloud-architecture.py --png
 ```
 
-Google の [公式アイコン](https://cloud.google.com/icons) と [製品アイコンガイド（2026年5月版）](https://services.google.com/fh/files/misc/google-cloud-product-icons.pdf) を使用。アイコン・商標は Google LLC に帰属する。
-
-## GCP向けスキルの確認
-
-Google 公式の [google-cloud-solution-architecture](https://github.com/google/skills/tree/e2071e8c958792b9d03d5839fe885b0171ffeaee/skills/cloud/google-cloud-solution-architecture) を調査した。新規構成の要件整理・設計・検証を扱うスキルで、今回は既存構成の図示のためインストールせず、公式の製品資料とアイコンを参照した。
+SVGは1920×1080、PNGは3840×2160。Googleの[公式アイコン](https://cloud.google.com/icons)を使用し、商標・アイコンはGoogle LLCに帰属する。新4図の手順は[図のREADME](diagrams/README.md)を参照。
 
 ## 参照した一次資料
 
-- [Global external ALB と serverless NEG](https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless)
-- [Cloud CDN の backend bucket / private origin](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket#make_your_cloud_storage_bucket_private)
-- [Cloud Run の Cloud Storage mount](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts)
-- [Deployment pipelines の WIF](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)
-- [Cloud Billing の Pub/Sub 通知](https://docs.cloud.google.com/billing/docs/how-to/budgets-programmatic-notifications)
+[LB/serverless NEG](https://docs.cloud.google.com/load-balancing/docs/https/setup-global-ext-https-serverless)・[CDN/private origin](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket#make_your_cloud_storage_bucket_private)・[GCS mount](https://docs.cloud.google.com/run/docs/configuring/services/cloud-storage-volume-mounts)・[WIF](https://docs.cloud.google.com/iam/docs/workload-identity-federation-with-deployment-pipelines)・[Budget通知](https://docs.cloud.google.com/billing/docs/how-to/budgets-programmatic-notifications)

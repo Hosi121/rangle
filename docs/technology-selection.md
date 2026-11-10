@@ -1,200 +1,125 @@
 # rangle 技術選定案
 
-[企画書](proposal.md) を実現するための初期選定。2026年11月7日に確認した公開資料を基に、当時の採用候補と採用条件を記す。Goの配信部品から始めた段階の記録であり、以下の候補すべてを採用したわけではない。現在の学習方式は[4DGS学習](dynamic-gs-training.md)、配信構成は[クラウド構成](cloud-architecture.md)、実装と未検証範囲は[バックエンドの現状](backend-status.md)を参照。
+2026-11-07の初期判断記録。現在の採用構成は[クラウド構成](cloud-architecture.md)、学習は[4DGS](dynamic-gs-training.md)、接続状況は[現状](backend-status.md)を参照。
 
 ## 初期構成の提案
 
-| 領域 | 第一候補 | 選ぶ理由と確認条件 |
-| --- | --- | --- |
-| データ | VRU Basketballの `gz` | 実写スポーツ、多視点、評価分割、関連実装の前処理情報がある |
-| 再構成 | LocalDyGS | VRU用の処理・学習手順を利用できる。まず20フレームの短区間で再現 |
-| ML実装 | Pythonと既存GPU実装 | 公開実装との対応を保ち、再現と品質評価を先に行う |
-| UI | Flutter（Dart） | Webでフィードと再生操作を先に確認する。Gaussian描画方式は別途選ぶ |
-| 描画 | WebはGaussianSplats3D、モバイルは別途選定 | 時刻ごとのGaussianをWebGLで描画し、視点操作と時刻シークを先に確認する |
-| バックエンド | GoとCloud Run | フィード、生成ジョブ受付、公開状態、マニフェストを管理 |
-| GPU実行 | Google CloudのCustomJob | CUDA等の依存を含む学習用コンテナを実行する |
-| ジョブ進行 | Workflowsを候補 | 前処理、学習、評価、パッケージ化、公開の状態を管理する |
-| 資産 | Cloud StorageとCloud CDN | 版を固定した配信用資産を保存し、端末へHTTPで配信する |
-| 配信制御 | Throughputとバッファを使うABR | 品質別・独立区間を選択し、帯域に加えて復号とメモリ予算も守る |
-| メタデータ | Firestoreを候補 | クリップ、生成状態、公開資産の参照などを保存。モデル本体は置かない |
+| 領域 | 候補・採用条件 |
+| --- | --- |
+| データ・再構成 | VRU `gz`＋LocalDyGS。20フレームで前処理・再現性を確認 |
+| ML | Python/CUDA。公開実装と対応づけて品質評価 |
+| UI・描画 | Flutter Web＋GaussianSplats3D。native方式は実機で選定 |
+| 制御・GPU | Go/Cloud Run＋有限のVertex CustomJob。進行管理はWorkflowsを候補 |
+| 保存・配信 | Firestoreに状態、Cloud Storage/CDNに版付き資産 |
+| 品質選択 | Throughput＋bufferのABRに復号・メモリ予算を加える |
 
-モデルと配信形式は別々に選ぶ。研究用チェックポイントを、そのままモバイルで読めるとは仮定しない。初期の最大の採用条件は、LocalDyGSの出力を、時間変化と視点依存性を保ったまま端末向けに変換できることである。
+最大の判断点は、学習出力を時間変化・視点依存性を保って端末向けに変換できるか。研究用checkpointをそのまま再生可能とは仮定しない。
 
 ## データセットの比較
 
-| 候補 | 公開資料から確認できたこと | 今回の判断 |
-| --- | --- | --- |
-| VRU Basketball | 実写のバスケ3シーン、各36視点。`gz` と `dg` は1080p・250フレーム・約10秒。カードにCC BY 4.0の記載 | 第一候補。`gz` のカメラ姿勢・点群への案内が関連実装にある |
-| Panoptic Sports | Dynamic 3D Gaussiansの公式実装から学習データと事前学習モデルへのリンクがある | 小規模な動的描画の比較候補。データ自体の利用条件を別途確認して選ぶ |
-| DNA Rendering | 人物の多視点データ。利用申請と署名済み同意書の提出が必要 | 初期候補の優先度を下げる。アクセス取得を日程の前提にしない |
-| BASKET Multiview | バスケットボール場面の合成データ | 読込・評価用には検討可能。実写のスポーツデモの代替とは扱わない |
+| 候補 | 条件・初期判断 |
+| --- | --- |
+| [VRU Basketball](https://huggingface.co/datasets/BestWJH/VRU_Basketball/blob/main/README.md) | 実写3シーン・36視点。gz/dgは1080p・250フレーム・約10秒。CC BY 4.0。gzを優先 |
+| [Panoptic Sports](https://github.com/JonathonLuiten/Dynamic3DGaussians) | 学習データ・事前学習モデルを公開。データ自体の利用条件を確認して比較 |
+| [DNA Rendering](https://dna-rendering.github.io/inner-download.html) | 申請と署名済み同意書が必要。初期日程の前提にしない |
+| [BASKET Multiview](https://github.com/humansensinglab/basket-multiview) | 合成バスケ。読込・評価用候補で、実写デモの代替にはしない |
 
-出典は [VRUの説明](https://huggingface.co/datasets/BestWJH/VRU_Basketball/blob/main/README.md)、[Dynamic 3D Gaussians公式実装](https://github.com/JonathonLuiten/Dynamic3DGaussians)、[DNA Renderingの取得条件](https://dna-rendering.github.io/inner-download.html)、[BASKET Multiview](https://github.com/humansensinglab/basket-multiview)。
-
-VRUのファイル一覧では、`Basketball_gz.zip` は約779MB、`Basketball_dg.zip` は約727MB、`Basketball_long360.zip` は約8.12GB。最初は `gz` 一つを対象とする。これらは配布アーカイブのサイズであり、展開後容量や学習用GPUメモリを表す値ではない。[配布ファイル一覧](https://huggingface.co/datasets/BestWJH/VRU_Basketball/tree/main)
-
-公式説明に従い、視点0・10・20・30を評価用として保持する。初期の短区間でも学習用と評価用の分離を維持する。カメラ姿勢、時刻、歪み補正、初期点群の対応を実ファイルで確認してから学習に進む。
-
-単眼のスポーツ動画、姿勢座標だけのデータ、合成画像は、この多視点RGBデータと区別する。今回は利用可能な撮影済み視点から再構成する構成を選び、一般の中継動画一本から見えていない側面まで正確に復元することは完成条件に含めない。
+[配布アーカイブ](https://huggingface.co/datasets/BestWJH/VRU_Basketball/tree/main)はgz約779MB、dg約727MB、long360約8.12GB。展開後容量・VRAMとは別の値。VRUの視点0/10/20/30を評価用に保持し、姿勢・時刻・歪み補正・点群の対応を確認する。一般の単眼中継から見えない側面を復元することは初期対象外。
 
 ## 再構成モデルの選定
 
-| 候補 | 特性と使いどころ | 初期判断 |
-| --- | --- | --- |
-| LocalDyGS | 大きな動きのある場面を対象にし、VRU向け設定と前処理案内がある | 第一候補。データと実装を対応させやすい |
-| Wuらの4D Gaussians | 3D Gaussiansと時空間の特徴から時刻ごとの変形を求める | 比較候補。モバイルへ変形処理を持ち込む方法を評価する必要がある |
-| Dynamic 3D Gaussians | 時間を通じて追跡するGaussiansを表現。データと事前学習モデルを公開 | 明示的な時系列属性と差分圧縮を試す比較候補。主データを替える場合は理由を残す |
-| GIFStream | 時間依存の特徴ストリームを用い、圧縮を含めて学習する | 圧縮研究の参照候補。公開デモのGPU性能をスマホの性能と同一視しない |
+| 候補 | 特性と初期判断 |
+| --- | --- |
+| [LocalDyGS](https://github.com/WuJH2001/LocalDyGS) | VRU向け前処理・学習例があり第一候補 |
+| [Wuらの4D Gaussians](https://guanjunwu.github.io/4dgs/) | 時空間特徴から変形。端末へ変形処理を移す方法を比較 |
+| [Dynamic 3D Gaussians](https://dynamic3dgaussians.github.io/) | Gaussianを時間方向に追跡。明示属性・差分の比較候補 |
+| [GIFStream](https://github.com/XDimLab/GIFStream) | 時間依存の特徴streamと圧縮学習の参照候補 |
 
-出典は [LocalDyGS公式実装](https://github.com/WuJH2001/LocalDyGS)、[4D Gaussiansの手法説明](https://guanjunwu.github.io/4dgs/)、[Dynamic 3D Gaussians](https://dynamic3dgaussians.github.io/)、[GIFStream公式実装](https://github.com/XDimLab/GIFStream)。
-
-LocalDyGSのREADMEには、VRUの `gz` 向けに最初のフレームのカメラ姿勢と各フレームの点群が案内され、20フレームずつ学習する例がある。したがって、最初の単位をこの短区間に合わせる。短区間が成功しても、複数区間の接続品質や数秒間の再生性能は別に検証する。[VRUの前処理と学習手順](https://github.com/WuJH2001/LocalDyGS#22-for-other-multi-view-dynamic-scenes-eg-meetroom-vru-dataset)
-
-公式のLocalDyGSにはGaussian Splattingの研究・評価用途のライセンス制限が記載されている。Dynamic 3D Gaussiansも、コード本体と依存する描画コードの条件が異なる。リポジトリのMITライセンスを、これらの外部コードやデータへ適用しない。採用時に外部実装の版と条件を固定し、必要な表記を残す。[LocalDyGSの条件](https://github.com/WuJH2001/LocalDyGS/blob/main/LICENSE)、[Dynamic 3D Gaussiansの条件](https://github.com/JonathonLuiten/Dynamic3DGaussians/blob/main/LICENSE.md)
+LocalDyGSの[VRU手順](https://github.com/WuJH2001/LocalDyGS#22-for-other-multi-view-dynamic-scenes-eg-meetroom-vru-dataset)に合わせ、20フレームから検証する。区間接続と端末性能は別に評価する。[LocalDyGSの研究・評価用途制限](https://github.com/WuJH2001/LocalDyGS/blob/main/LICENSE)・[Dynamic 3D Gaussiansの条件](https://github.com/JonathonLuiten/Dynamic3DGaussians/blob/main/LICENSE.md)と依存描画コードのlicenseを個別に確認し、自作コードのMITを外部素材へ適用しない。
 
 ## モバイル向け表現を先に確かめる
 
-学習側はPython/CUDA、再生側はモバイルGPUになる。描画コードの単純な移植だけでつながるとは見なさない。
+クラウドで明示的なGaussian属性へ変換する方式を、端末でネットワーク全体を動かす方式と比較する。
 
-第一候補は、学習モデルをクラウドで短区間ごとの明示的なGaussian属性へ変換する方法とする。端末に学習時のネットワーク全体を持たせる構成と比較し、復号負荷、容量、品質のバランスを調べる。変換は時刻と視点を動かした比較で評価し、固定カメラの動画を書き出しただけでは自由視点の成立としない。
-
-特に次を確認する。
-
-- 時間とともに変わる位置、回転、スケール、色、不透明度を何で表すか。
-- 視点依存の属性を維持できるか。視点を一つに固定した変換で品質を失わないか。
-- 区間内でGaussianの個数や対応関係を保てるか。変わる場合は追加・削除をどう表すか。
-- 量子化や補間によって、ボール・手足の動きが途切れないか。
-- 区間を切り替えるとき、同じ時刻・視点の見た目が不連続にならないか。
-
-時間差分圧縮は、前後のGaussianの対応が定義できる表現で導入する。各時刻の点を独立に並べて、配列番号が同じという理由で差分を取る方法は採らない。
+- 位置・回転・scale・色・不透明度の時間変化と視点依存性を保つ。
+- 点の追加・削除・対応関係を定義する。配列番号の一致だけで時間差分を取らない。
+- 時刻・視点別に変換誤差、ボール・手足、区間境界の不連続を確認する。
 
 ## 配信用データの構成案
 
 | 要素 | 内容 |
 | --- | --- |
-| マニフェスト | 形式の版、時刻の単位、座標系、区間一覧、品質別資産、依存関係、チェックサム、推奨視点、操作可能範囲 |
-| 区間の開始状態 | その区間から復号を開始するためのGaussian属性と必要な共有情報 |
-| 時系列データ | 区間内の属性更新。差分方式が未成立なら、まず明示的な時刻サンプルから開始 |
-| 品質別資産 | 点数や属性精度を変えた独立に復号可能な版 |
-| プレビュー | 自由視点資産の準備中に表示する通常動画または画像 |
+| manifest | 版、時刻・座標系、区間、品質、依存関係、checksum、推奨視点・操作範囲 |
+| 初期状態 | 区間途中から独立に復号するための属性・共有情報 |
+| 時系列・品質別資産 | 対応が定義できれば差分、未成立なら明示サンプル。品質ごとに独立復号 |
+| preview | 自由視点資産の準備中に表示する動画・画像 |
 
-初期版は区間を個別のHTTPオブジェクトとして配信する。区間長は学習モデルの単位と復号開始の条件を見て決める。独自の転送プロトコルを作る前に、圧縮形式、取得順序、端末内の処理を最適化する。
-
-品質を切り替えるときは、独立に復号できる境界で切り替える。低品質のデータに任意の追加点を足せば高品質になる、という互換性は仮定しない。追加レイヤーによる段階的な高品質化は別の検証対象とする。
-
-現在のクリップを優先して取得し、次のクリップはプレビューと最初の区間を先読みする。スキップ時は取得・復号を中止し、参照されなくなったGPU資産を解放する。連続する短い視聴を想定し、先読みの通信量とメモリにも上限を置く。
-
-ABR、品質ラダー、帯域推定、切り替え、バッファ制御、HTTPキャッシュを重点調査する。[調査資料](streaming-research.md) に一般的な方式と4DGSに適用する際の条件を記す。初期のGo実装は [共通契約](streaming-contract.md) に基づき、ABR制御とHTTP配信を独立した部品として進める。
+HTTPオブジェクトを独立区間で取得・切替する。追加点だけで品質を上げる互換性は仮定しない。現在clipを優先し、次clipのpreview・先頭区間だけを限定先読み、離脱時に取得・復号を取消しGPU資源を解放する。[ABR調査](streaming-research.md)・[共通契約](streaming-contract.md)を参照。
 
 ## 同時視聴規模に必要な最適化
 
-ピーク時の数千〜数万人の同時視聴を設計目標とする。配信資産を共有するCDN・オブジェクトストレージ、水平分散するGo API、有限GPU生成ジョブを分離し、端末で描画する。現在の部分実装は、この規模で負荷検証したものではない。
+数千〜数万人は設計目標で、容量未検証。次を分離して測る。
 
-| 要素 | 容量設計上の役割 |
-| --- | --- |
-| ABRと圧縮 | 実際の帯域・バッファと品質条件に合わせ、視聴者ごとの転送量と再バッファを抑える |
-| 時間・品質の分割、必要なら空間分割 | 見る区間・品質・領域を選び、未使用部分の一括取得を避ける。空間分割は依存関係と視点移動時の品質を確認して採否を決める |
-| immutable revisionとcache key | clip・版・品質・区間（空間分割時は領域）を識別する。同じURLの内容を変更せず、利用者ごとの不要なkey分散でキャッシュ共有を失わない |
-| 取消と限定的な先読み | スキップ後の取得・復号を止め、未視聴分の転送とメモリ占有を制限する |
-| 端末の復号・RAM・GPU予算 | 圧縮サイズだけで品質を選ばず、復号時間、展開後のCPU/GPUメモリ、描画負荷を含めてラダーと取得量を制限する |
+- CDN共有：immutable revision、不要なcache key分散の抑制。
+- 通信：ABR、時間・品質分割、取消、限定先読み。空間分割は視点変更時の品質も評価。
+- 端末：圧縮bytesに加え、復号時間、展開後RAM/VRAM、描画負荷。
+- 制御・生成：水平分散するGo APIと、別に並列数・費用を制限するGPUジョブ。
 
 ## 圧縮と高速化の順序
 
-| 段階 | 内容 | 採用判断 |
-| --- | --- | --- |
-| 基準 | 同じ区間を明示的な属性で出力し、正しい動的再生を確認 | 変換前モデルとの時刻・視点別の品質差を説明できる |
-| 量子化 | 属性ごとの精度と格納方法を変更 | 転送量と端末メモリが減り、品質条件を満たす |
-| 分割配信 | 区間単位の取得と限定的な先読み | 視点操作開始までの時間が短くなり、停止が増えない |
-| 描画最適化 | カリング、並べ替え、GPU転送、メモリ再利用 | 同じ品質・端末でフレーム時間が改善する |
-| 時間圧縮 | 対応がある属性の差分や予測を圧縮 | 容量削減が復号時間やランダムアクセスの悪化に見合う |
-| 学習を含む最適化 | Gaussianの削減、圧縮を考慮した学習、重要領域の保護 | 学習費用を含めて有効性を示せる |
+| 順序 | 採用判断 |
+| --- | --- |
+| 1. 明示属性の基準出力 | 時刻・視点別に変換誤差を説明できる |
+| 2. 属性量子化 | 転送・メモリ削減と画質条件を両立 |
+| 3. 分割取得 | 操作開始を短縮し、停止を増やさない |
+| 4. 描画最適化 | 同品質・同端末でframe-timeを改善 |
+| 5. 時間圧縮 | 容量削減が復号・ランダムアクセス費用に見合う |
+| 6. 圧縮を考慮した学習 | 学習費用を含めて有効性を示す |
 
-これは全方式を実装する約束ではなく、測定結果に基づく採用順序である。まず基準と少数の候補を比較し、支配的なコストがどこにあるかで次の作業を選ぶ。
-
-発展候補として、Gaussian属性を動画コーデックで扱い、端末の動画用デコーダーを使う方式を調べる。Fraunhofer HHIはH.264/AVCやH.265/HEVCを利用した動的Gaussianの圧縮・復号を公開している。今回の表現への適合、復号後のGPUへの受け渡し、量子化・色変換の影響は別途確認が必要であり、初期版の前提にはしない。[HHIの技術デモ](https://fraunhoferhhi.github.io/CodecGSDemo/)
+全方式の実装予定ではなく、測定で次を選ぶ順序。[HHIの動画codec方式](https://fraunhoferhhi.github.io/CodecGSDemo/)は発展候補で、属性精度・GPU転送・対応decoderを別途評価する。
 
 ## モバイルの選定理由
 
-UIにはFlutter（Dart）を採用し、最初の実装対象をWebとする。フィードと通常動画の再生を先に確認し、Gaussian描画は別の実装として接続する。モバイル向けのGPU描画方式は実機計測後に選ぶ。
-
-VulkanはAndroidで提供される低レベルGPU APIである。ADPFは熱状態や性能に合わせて処理量を調整するための情報を提供する。これらを利用し、単発の最高FPSと、連続利用時に持続できる性能を分けて評価する。[Vulkan](https://developer.android.com/games/develop/vulkan/overview)、[ADPF](https://developer.android.com/games/optimize/adpf)
-
-対応端末のブラウザでもWebGPUを利用できるため、ネイティブ化だけを高速化の根拠にはしない。対象実機が決まってから、必要なGPU機能、メモリ量、開発環境を確認する。[Chrome AndroidのWebGPU](https://developer.chrome.com/blog/new-in-webgpu-121)
-
-同時視聴の設計では生成済み資産を再利用し、視聴者ごとに専用サーバーGPUを割り当てない。サーバー描画方式への変更は、操作遅延・視聴者ごとのGPU処理・費用を含む別の容量設計として再評価する。
+Flutter WebでUIを先に作り、Gaussian描画を分離する。[Vulkan](https://developer.android.com/games/develop/vulkan/overview)・[ADPF](https://developer.android.com/games/optimize/adpf)と[ブラウザのWebGPU](https://developer.chrome.com/blog/new-in-webgpu-121)を候補に、対象実機で機能・メモリ・持続性能を比較する。native化だけを高速化の根拠にしない。
 
 ## クラウドとGoの役割
 
-Go APIは、フィード情報、生成リクエスト、ジョブ状態、配信マニフェストへの参照を提供する。大きなシーン資産はストレージとCDNから端末へ渡し、APIで全バイトを中継する構成を初期の前提にしない。
+Go APIがfeed・job ID・公開状態・manifest参照を管理し、[CustomJob](https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job)が入力検証→前処理→学習→評価→packingを行う。[Cloud CDN](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket)からモデルを直接配信し、長時間学習をHTTP内で待たない。
 
-生成ワークフローは、入力検証、前処理、GPU学習、評価、パッケージ化、公開の順にする。長時間の学習をHTTPリクエスト内で待たず、ジョブIDで追跡する。再試行で同じ学習が重複起動しない識別子を設け、評価に通った版だけを公開状態にする。処理順序の管理にはWorkflows、状態の保存にはFirestoreを候補とする。[Workflows](https://docs.cloud.google.com/workflows/docs/overview)、[Firestore](https://docs.cloud.google.com/firestore/native/docs/overview)
-
-CustomJobで学習用コンテナを動かし、Cloud RunでGo APIを運用する構成を提案する。数万同時視聴を目指す本番配信には、Cloud CDN・ロードバランサー・Cloud Storageのバックエンドバケットとorigin保護を織り込む。CDNなしの直接取得はローカル/MVPの成立確認に限る。具体的なquota・リージョン・実行期限・費用は [インフラ構成案](infrastructure-design.md) の実装前判断に残す。[CustomJob](https://docs.cloud.google.com/vertex-ai/docs/training/create-custom-job)、[Cloud CDNの構成](https://docs.cloud.google.com/cdn/docs/setting-up-cdn-with-bucket)
-
-入力、チェックポイント、配信用資産を区別し、公開対象を明示する。管理操作の認証、生成依頼の上限、最小限のサービス権限を設計に含める。入力の版、モデルのcommit、コンテナ、設定、出力の版を対応づけて、再現と費用集計を行う。
-
-Goは並行するネットワーク処理とジョブの管理に利用する。goroutine等はその実装手段だが、これだけで性能向上を主張しない。Google技術の活用は、学習・配信・モバイル描画の具体的な役割と合わせて説明する。[Goの並行処理](https://go.dev/doc/effective_go#concurrency)
+[Workflows](https://docs.cloud.google.com/workflows/docs/overview)・[Firestore](https://docs.cloud.google.com/firestore/native/docs/overview)は当時の進行・状態管理候補。重複起動防止、管理認証、有限予算、最小権限を設計し、入力・commit・image・config・出力の版を対応づける。[goroutine](https://go.dev/doc/effective_go#concurrency)の利用だけで性能向上を主張しない。
 
 ## 比較条件と数値目標案
 
-最初は `gz` の同一区間、同一の評価カメラ・時刻、同じレンダリング解像度で比較する。圧縮前後の画質は同じ端末用レンダラーでも比較し、モデルからの変換誤差と、圧縮による誤差を分ける。
+VRU gzの同一区間・評価視点・時刻・解像度で比較し、モデル変換誤差と圧縮誤差を分離する。以下は初期仮説で、達成値・固定要件ではない。
 
-| 指標 | 初期目標案 | 条件と意味 |
-| --- | --- | --- |
-| 描画 | 720p相当で30fpsを狙う | 視点操作を含む描画。素材の時間サンプル数とは区別し、p50・p95のフレーム時間も報告 |
-| 操作可能になる時間 | 冷たいキャッシュで2秒以内を狙う | 20Mbps・RTT 50msを仮条件。プレビュー開始と自由視点操作開始を別計測 |
-| 初期取得量 | 3MB以下を狙う | 20Mbpsで2秒間の理論転送量は約5MB。取得以外の準備時間を残すための仮予算 |
-| 画質 | 圧縮前とのPSNR差0.5dB以内を比較の出発点にする | 平均値だけで合否を決めず、小さい対象と時間方向の破綻も確認 |
-| メモリ | 実機決定後に予算を定める | 保存サイズと展開後サイズを区別。CPU・GPU・先読み分のピークを記録 |
-| 持続性能 | 固定したシーン列を5分間再生して記録する案 | 発熱、描画時間、メモリ増加を確認。実験の許可と予算確定後に実施 |
+| 指標 | 初期案・条件 |
+| --- | --- |
+| 描画 | 720p相当30fps。frame-timeのp50/p95も記録 |
+| 操作開始 | cold cache、20Mbps・RTT50msで2秒以内。preview開始とは別計測 |
+| 初期取得 | 3MB以下。20Mbps×2秒の理論量約5MBから準備時間を確保 |
+| 画質 | 圧縮前比PSNR差0.5dB以内を出発点に、小物体・時間方向も確認 |
+| メモリ | 実機選定後に予算化。CPU/GPU・作業領域・先読みのpeakを記録 |
+| 持続性 | 同一シーン列5分で発熱・frame-time・メモリ増加を測る案 |
 
-数値は達成済みの性能でも、合意済みの固定要件でもない。初期計測を踏まえ、品質の許容条件と一緒に確定する。目標を満たせない場合は、その結果と必要な変更を示して判断する。
-
-容量は、基準属性、時間更新、共有情報、索引、区間開始用データを含む総量を比較する。全区間取得時の容量と、短時間視聴で実際に転送した量を別々に報告する。学習の高速化は同じGPU・入力・画質条件で判断し、費用も記録する。
+容量には索引・共有情報・区間開始状態も含め、全量と短時間視聴時の実転送を分ける。学習速度は同じGPU・入力・画質で費用も比較する。
 
 ## 同時視聴の容量検証計画
 
-まず実データの品質別ビットレートと端末予算を確定する。仮定した1人当たりの平均取得ビットレートをB bits/s、同時視聴者をN人とすれば、視聴者側の合計帯域はB×Nが概算の出発点になる。origin帯域・RPSはCDN hit率、区間サイズ、先読み、人気の偏りでも変わるため別に測る。
+1人の取得量B bits/s、同時N人なら視聴者側の概算帯域はB×N。originの負荷はhit率・区間サイズ・人気分布に依存する。
 
-| 観測対象 | 確認する指標 |
+| 対象 | 指標 |
 | --- | --- |
-| 視聴 | 視聴開始TTFF（プレビューと自由視点を区別）、再バッファ時間・回数のp95 |
-| 資産 | 品質別の実ビットレート・bytes、初期化・区間のサイズ、取消・未視聴分を含む転送量 |
-| CDNとorigin | リクエスト・bytes双方のhit率、origin帯域とRPS。冷たい/温かいキャッシュと人気集中を分ける |
-| Go API | p95応答時間、エラー率、同時要求数。資産の大容量転送と分けて測る |
-| 端末 | frame-timeの分布、peak RAM/VRAM、復号時間と連続再生時の負荷 |
-| 生成 | GPU生成ジョブの並列上限、待ち時間、実行時間、費用 |
+| 視聴・資産 | preview/自由視点TTFF、再バッファp95、品質別bytes、取消・未視聴分の転送 |
+| CDN/origin | request/bytes hit率、帯域/RPS、cold/warm cache・人気集中 |
+| API・端末 | API p95/エラー、frame-time、peak RAM/VRAM、復号・連続再生負荷 |
+| GPU | 並列上限、待ち時間、実行時間、費用 |
 
-負荷段階は数百→数千→数万同時視聴を例とし、各段階でボトルネックと費用を見直す。実行は別途、予算・region・quota・中止条件を確定してから行う。未確定のビットレートやp95に達成値を置かず、構成の採用と容量の実証を区別する。
+数百→数千→数万の段階負荷を例とし、実行前に予算・region・quota・中止条件を確定する。未測定のSLOを達成値にしない。
 
 ## モノレポの構成案
 
-```text
-apps/android/          モバイルUIとライフサイクル
-services/api/          Go API
-ml/reconstruction/     データアダプターとモデル実行
-ml/optimization/       量子化と圧縮を含む最適化
-engine/                復号とGPU描画
-formats/               マニフェストとバイナリ形式の仕様
-pipelines/             生成ワークフローとパッケージ化
-infra/                 Google Cloud構成
-benchmarks/            比較設定と測定結果
-docs/                  企画と判断理由
-```
-
-これは最終的な配置の提案である。部分実装はルートのGoモジュールと `internal/stream`、`internal/abr`、`internal/delivery`、`cmd/` から開始する。将来のアプリやクラウド構成とは分けて検証し、共通契約として時刻、版、品質間の区間対応、資産の依存関係を先に定める。
-
-生データと大きなモデルはGitへ入れず、取得元、対象ファイル、検証用ハッシュ、利用条件、処理設定を管理する。開発の正本は [Hosi121/rangle](https://github.com/Hosi121/rangle)、最終提出先は [Devfest-Hackathon-2026/df-2026-t002](https://github.com/Devfest-Hackathon-2026/df-2026-t002) とする。GitHub ActionsとGitHub Pagesを利用できない制約は提出用リポジトリに適用される。開発用リポジトリでのCIかGoogle Cloudのビルド基盤を検討し、審査に必要なコードと資料は最終提出先へ反映する。元の提出案内は [別資料](submission.md) に保存する。
+API、ML、端末描画、形式契約、infra、benchmarksを分離する構想。実際の配置は[製品README](../README.md#資料と開発)を参照。生データ・大型モデル・秘密情報をGitへ置かず、出典・hash・条件・設定を管理する。開発と最終提出の違いは[提出案内](submission.md)に集約する。
 
 ## 次の段階の区切り
 
-配信側は、対象端末とGPU予算に依存しないGoのABR制御・HTTP配信部品を先行する。合成データで品質選択と取得を検証し、その結果を実データのパッケージ化へつなぐ。実映像とモバイルの検証は以下の条件に従う。
-
-1. 対象スマートフォン、期限・人数、GPU実行時間・費用の上限、許容する画質差を確定する。
-2. VRU `gz` 一つを取得し、前処理と利用条件を確認する。まず20フレームを対象にする。
-3. クラウドで再構成し、保持した評価視点で品質を確認する。
-4. 一区間を端末用に変換し、動的再生・一時停止・視点操作を実機で成立させる。
-5. 基準に対して、量子化、分割取得、描画最適化の効果を個別に測る。
-6. 成立した構成でフィードと生成処理をつなぎ、数秒のクリップへ広げる。
-
-最初の判断点は4までが成立するかどうか。モデルの出力を端末へ移せない、品質を保てない、必要メモリが実機に収まらない場合は、モデルまたは再生表現を見直す。別のデータや固定視点動画へ置き換えた結果を、同じ自由視点体験の成功として扱わない。
+端末・期限・人数・GPU予算・画質条件を確定し、gzの20フレームで前処理→再構成→held-out評価→端末変換・動的描画をつなぐ。ここまでを最初の判断点とし、成立後に量子化・分割取得・描画を個別比較してクリップを延ばす。素材や固定視点動画への置換を同じ自由視点体験の成功とは扱わない。

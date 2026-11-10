@@ -1,24 +1,23 @@
 # Dockerでのビルドと起動
 
-GoサーバーとFlutter Webの画面を、1つのコンテナイメージにまとめる。
+Go APIとFlutter Webを1つの非rootコンテナにする。repo rootで実行する。
 
 ## ビルド
 
-Docker Desktopを起動し、リポジトリのルートで実行する。
+Dockerを起動してbuildする。Node/Flutterの画面とGo binaryだけを最終imageへコピーする。
 
 ```sh
 docker build -t rangle:local .
 ```
 
-Node・Flutterで画面とJavaScript Viewerをビルドし、Goでサーバーの実行ファイルを作る。
-最終イメージには完成品だけをコピーし、非rootユーザーで実行する。
-
-既定は `RANGLE_DEMO=false`、`RANGLE_API_URL=/api/v1/clips` のAPIビルド。URL引数を空で渡しても同一originのAPIを使い、サンプルへ切り替えない。配備用imageでは以下のbuild引数を明示する。CIもAPI URLを渡す。`/demo/` のbaseは既存HTMLの指定を保つ。依存lockfileをsourceより先にコピーし、npm/Dartの依存層を再利用する。Dart cacheはBuildKitの通常layerへ保持する。GHA cacheはcache mount自体を保存しないためである。[Docker cache](https://docs.docker.com/build/ci/github-actions/cache/)
+既定は`RANGLE_DEMO=false`・`RANGLE_API_URL=/api/v1/clips`。URLが空でも同一originのAPIを使う。配備用は引数を明示する。
 
 ```sh
 docker build --build-arg RANGLE_DEMO=false \
   --build-arg RANGLE_API_URL=/api/v1/clips -t rangle:local .
 ```
+
+依存lockfileを先にコピーしてnpm/Dart層を再利用する。Dart cacheは通常layerに置く（GHAはcache mountを保存しない）。[Docker cache](https://docs.docker.com/build/ci/github-actions/cache/)
 
 ## ローカルで起動する
 
@@ -26,15 +25,9 @@ docker build --build-arg RANGLE_DEMO=false \
 docker run --rm -p 127.0.0.1:8080:8080 -e PORT=8080 rangle:local
 ```
 
-ブラウザで http://localhost:8080 を開く。
-http://localhost:8080/healthz が `ok` を返すことも確認する。
+`http://localhost:8080/`がlanding、`/demo/`がUI、`/healthz`がhealth。公開portはこのPC内だけで、終了はCtrl+C。最小起動にはcatalogがないため、health200でもfeedは読めない。
 
-このポート公開設定では、このPC内から接続する。
-停止するには、実行中のターミナルでCtrl+Cを押す。
-
-landingは `/`、Web UIは `/demo/` で開く。`/demo/` は配信pathであり、デモモードの指定ではない。この最小起動ではcatalogがないためAPIの読込エラーを表示する。healthが200でも公開フィードの接続確認にはならない。
-
-API向けimageの確認には公開許諾済みcatalogと外部asset-originをサーバー引数へ設定する。次は `.local/catalog.json` のpreview・scene・配信manifestと資産が、指定media originへ公開済みであることを前提とする（`media.example.com` は実際の公開先へ置き換える）。catalogの形式と公開手順は [API配信](api-delivery.md) を参照。
+公開済みmediaを使う例（`media.example.com`は置換）：
 
 ```sh
 docker run --rm -p 127.0.0.1:8080:8080 -e PORT=8080 \
@@ -43,15 +36,15 @@ docker run --rm -p 127.0.0.1:8080:8080 -e PORT=8080 \
   -asset-origin https://media.example.com
 ```
 
-別のターミナルでAPIを確認する。
+別ターミナルで確認する。
 
 ```sh
 curl --fail 'http://127.0.0.1:8080/api/v1/clips?limit=1'
 ```
 
-`http://localhost:8080/demo/` でAPIのクリップを開き、通常動画と「自由視点で見る」を確認する。`preview_url` / `scene_url` はAPIのcatalogから読み込む。返された `manifest_url` はHTTPで取得してrevision・資産URLを確認する配信契約で、Flutterの動画へ直接渡すURLではない。APIの停止・不正なWeb URL設定は読込エラー、空catalogは空フィードとなり、研究サンプルへ切り替えない。
+`/demo/`で動画・自由視点を開く。preview/sceneはcatalogのURL、manifestは配信契約用JSON。API障害・不正URLはerror、空catalogは空feedとなり、sampleへfallbackしない。[catalog形式](api-delivery.md)
 
-本番のruntime引数・mountはIaCが管理する。私有scene・重み・実験出力をimageへコピーしない。Web設定はビルド時に固定されるため、`docker run -e RANGLE_API_URL=...` では変更できない。
+私有scene・重み・実験出力はimageへ入れない。Web設定はbuild時に固定され、`docker run -e RANGLE_API_URL=...`では変わらない。
 
 ## 独立したデモビルド
 
@@ -60,34 +53,26 @@ docker build --build-arg RANGLE_DEMO=true -t rangle:demo .
 docker run --rm -p 127.0.0.1:8080:8080 -e PORT=8080 rangle:demo
 ```
 
-`/demo/` で内蔵の研究サンプルを開ける。HTTP(S)の外部動画・sceneを使う場合だけ、build時に `RANGLE_PREVIEW_URL` / `RANGLE_SCENE_URL` を追加する。APIモードではこの2引数は使わない。[Flutterからの起動例](../apps/web/README.md#apiを使わないデモ)も参照。
+`/demo/`で研究sampleを開く。外部HTTP(S)動画/sceneにはbuild引数`RANGLE_PREVIEW_URL`/`RANGLE_SCENE_URL`を使う。API modeでは使わない。[Flutter起動](../apps/web/README.md#apiを使わないデモ)
 
 ## imageと配信設定の対応
 
-配備ごとに次の組を記録する。tagだけでimageを特定しない。
-
-| 項目 | 確認する場所 |
+| 記録するもの | 確認箇所 |
 | --- | --- |
-| Git commit / image digest | CI runのcommit・build出力と配備summaryの `repository@sha256:...` |
-| Web設定 | 同じcommitのDockerfileとworkflowのbuild引数。通常は `RANGLE_DEMO=false` / `RANGLE_API_URL=/api/v1/clips` |
-| Web / API origin | 開いた `/demo/` のoriginと、そのoriginの `/api/v1/clips`。APIを別originへbuildした場合はそのURL |
-| media origin | runtimeの `-asset-origin` と、APIが返す `preview_url` / `scene_url` / `manifest_url` |
-| catalog版 | readonly mountした `snapshots/<sha256>.json` のpath・ファイルSHA256と、APIのclip `id` / `revision` |
+| source/image | commit、CI run、registryの`repository@sha256:...` |
+| Web/API | build引数、`/demo/`のoriginと`/api/v1/clips` |
+| media | runtime `-asset-origin`とAPIの各URL |
+| catalog | mountの`snapshots/<sha256>.json`、file SHA、clip id/revision |
 
-ローカルでは `docker image inspect rangle:local --format '{{.Id}}'` と `sha256sum .local/catalog.json` も記録できる。ローカルimage IDとregistry digestは別の識別子なので、配備にはregistryのdigestを使う。stgのruntime mount・media originは [配備手順](stg-deployment.md)、digest昇格とAPI smokeは [CI/CD](cicd.md) を参照。WebGL・再生・CORSの画面確認は別途必要。
+ローカル確認は`docker image inspect rangle:local --format '{{.Id}}'`と`sha256sum .local/catalog.json`。image IDとregistry digestは別物。runtime/mountは[stg配備](stg-deployment.md)、昇格・smoke・記録は[CI/CD](cicd.md)に従う。
 
 ## Goサーバーの待受け
 
-- PORT環境変数がない場合は、従来どおり127.0.0.1:4174で待ち受ける。
-- PORTがある場合は、0.0.0.0:PORTで待ち受ける。
-- 明示的な-listen引数がある場合は、そちらを優先する。
-
-Cloud Runでは、渡されたPORTを使って接続を受け付ける。
-アクセスの公開範囲や認証は、Cloud Run側でも設定する。
+優先順は`-listen`→`0.0.0.0:$PORT`→既定`127.0.0.1:4174`。Cloud Runの公開範囲・認証は別途設定する。
 
 ## テスト
 
-Go 1.27.3とPython 3を用意し、完全なcheckoutのリポジトリrootで[開発ルール](../CONTRIBUTING.md#goの検証)に従って検証する。共有契約テストは `testdata/contracts/`、`ml/tests/live_contract_oracle.py`、`scripts/` のpublisherも参照するため、これらのファイルを含むcheckoutが必要になる。
+Go1.27.3/Python3を用意し、共有fixture・ML oracle・publisherを含む完全なcheckoutで実行する。
 
 ```sh
 go test -race ./...
@@ -96,5 +81,4 @@ go vet ./...
 
 ## 手順の範囲
 
-Dockerイメージの作成と、ローカルでの起動に対応する。
-Artifact Registryへの送信とCloud Runへの昇格条件は [CI/CD](cicd.md) を参照する。コンテナのbuildはクラウド資源作成やメディアの公開を行わない。
+build・ローカル起動まで。cloud資源作成・media公開は行わない。AR送信・Cloud Run昇格は[CI/CD](cicd.md)、画面・WebGL・CORSは別途確認する。

@@ -1,46 +1,22 @@
 # 生成台帳を専用 Firestore database へ移す
 
-`scripts/migrate-generation-ledger.py` は `comin-up` の `rangle-stg` から
-`rangle-stg-generation` へ、`generation_jobs` と `generation_control` だけをコピーする。
-project、account、source、target はコード内の固定値と CLI の `choices` で制限する。
-別 project を指す gcloud の既定設定は使わない。account は
-`takuyakataiwa@gmail.com` に固定する。
+`scripts/migrate-generation-ledger.py` は `comin-up` / `takuyakataiwa@gmail.com` 固定で、`rangle-stg` → `rangle-stg-generation` の `generation_jobs` / `generation_control` だけをコピーする。project/account/DBはコードとCLI choicesで制限し、gcloud既定値は使わない。
 
-generation job は最大 10 件、ID は小文字 32 桁 hex のみ。control は最大 2 件で
-`admission` と `public_feed` だけを許可する。accounts、sessions、clips、下位
-collection、任意の document path は読み書きしない。database 作成、IAM 変更、
-job の起動・取消、Pub/Sub 操作は行わない。
+対象は最大10 job（小文字32桁hex ID）、controlは `admission` / `public_feed` の最大2件。accounts/sessions/clips・下位collection・任意pathは読まず、DB作成/IAM/job起動取消/PubSub操作もしない。実施結果は[2026-11-10切替記録](security-review.md#データを保持した切替)。
 
 ## 事前条件
 
-操作担当者が source と target への生成受付、状態同期、公開状態の変更を停止する。
-source の job はすべて `succeeded`、`failed`、`cancelled` のいずれかでなければならない。
-admission がある場合は native Firestore 値が `active: {stringValue: ""}` であり、
-`used: {integerValue: "0".."10"}` であることを要求する。job があるのに admission
-がない場合も拒否する。全 collection が空の場合は有効で、台帳を作ったり予算を
-リセットしたりしない。
-
-既存 document の native `fields` は変換せずコピーする。整数の文字列表現、timestamp、
-map、array、bytes、reference、public_feed の aggregate と attempt counter を保つ。
-referenceValue の参照先も書き換えない。document ID は同じにし、Firestore が管理する
-createTime / updateTime は target で新しい値になる。
-
-バックアップの配置先は、操作担当者が事前に作った所有者本人だけがアクセスできる
-directory とする（例: mode0700）。作業リポジトリへ snapshot を保存・commit しない。
-`--backup` は絶対 path が必須で、utility は親 directory を作らない。
+- 両DBの生成受付・状態同期・掲載変更を止める。全jobが `succeeded` / `failed` / `cancelled`、admissionがあればnative値の `active: {stringValue: ""}`、`used: {integerValue: "0".."10"}` を要求する。jobあり・admissionなしは拒否する。全件空でも台帳/予算を新規作成・resetしない。
+- native `fields`・IDを変換せず、整数文字列/timestamp/map/array/bytes/reference・aggregate/attemptを保つ。referenceValueも書き換えない。targetのcreateTime/updateTimeだけは新しくなる。
+- backupは事前作成した所有者専用directory（例mode0700）の絶対pathへ保存する。親directoryは作らず、repositoryへ保存/commitしない。
 
 ## 操作
 
-1. `--prepare-backup` で source だけを読み、exclusive creation・mode0600 で snapshot
-   を作る。同じ path の既存ファイルや symlink は上書きしない。target が未作成でも実行できる。
-2. 操作担当者が target database と必要な権限を IaC で用意する。snapshot は private GCS
-   に退避し、hash と保存先を非公開の運用記録へ残す。公開 runtime を切り替える前に
-   durable backup を確認する。
-3. 通常の dry-run でコピー計画を確認する。cloud write とローカル file 作成はない。
-4. `--apply` に snapshot の SHA256 を渡す。同じ source と backup であることを確認し、
-   不足 document だけを一度の atomic commit で作る。
-5. `migration_verified` を確認し、操作担当者が runtime の切替と既存 HTTP smoke を行う。
-   旧 database の削除や旧 collection の削除はこの utility の範囲に含めない。
+1. `--prepare-backup` でsourceだけを読み、exclusive creation・mode0600でsnapshotを作る。既存file/symlinkは上書きせず、target未作成でも実行できる。
+2. IaCでtargetと権限を用意する。snapshotをprivate GCSへ退避し、hash/保存先を非公開記録へ残す。runtime切替前にdurable backupを確認する。
+3. dry-runで計画を確認する（cloud write・file作成なし）。
+4. `--apply` にbackup SHA256を渡し、source一致を確認して不足文書だけを1 atomic commitで作る。
+5. `migration_verified` 後にruntime切替・既存HTTP smokeを行う。旧DB/collectionは削除しない。
 
 ```bash
 python3 scripts/migrate-generation-ledger.py \
@@ -60,48 +36,26 @@ python3 scripts/migrate-generation-ledger.py \
   --apply --backup-sha256="$PREPARED_BACKUP_SHA256"
 ```
 
-出力は status、件数、SHA256 のみ。job や control の内容は表示しない。
-`--prepare-backup` が出す `backup_sha256` は、改行を含む実ファイル全体の SHA256。
-`source_sha256` は source の document 名・native fields・createTime・updateTime、
-`content_sha256` は database 名と server metadata を除いた相対 ID と native fields の hash。
-終了 code 0 はその mode の処理成功、1 は拒否または検証失敗、2 は CLI 引数エラーである。
+| 出力 | 意味 |
+| --- | --- |
+| `backup_sha256` | 改行を含むbackup実ファイル全体 |
+| `source_sha256` | source文書名・native fields・createTime/updateTime |
+| `content_sha256` | DB名/server metadataを除く相対ID・native fields |
+| exit 0 / 1 / 2 | mode成功 / 拒否・検証失敗 / CLI引数エラー |
 
-既存 target document が一致すれば skip し、内容が違う場合や source にない target
-document がある場合は拒否する。新規 document の write は全件
-`currentDocument.exists=false` を付けるため、競合時も上書きしない。commit の自動 retry
-はない。不明な通信失敗後は writers を停止したまま、同じ backup と digest で再実行すると、
-すでに一致した document を skip できる。
-[Firestore atomic commit](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/commit) と
-[write precondition](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/Write)
+出力はstatus/件数/SHAだけで、job/control本文は表示しない。targetの一致文書はskipし、不一致・sourceにない文書は拒否する。新規writeは全件 `currentDocument.exists=false` とし、上書き・自動retryはしない。不明な通信失敗後はwritersを止めたまま同じbackup/digestで再実行し、一致文書をskipできる。[atomic commit](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/commit)、[precondition](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/Write)
 
-source を commit 直前と直後に再取得し、backup 準備時から fields と metadata が変わって
-いないことを確認する。target も再取得し、native fields の厳密な一致を確認する。
-database をまたぐ transaction ではないため、source / target の writers を停止する事前条件を
-代替しない。commit 後の drift・検証失敗では target の削除や巻き戻しをせず、
-`do_not_switch_runtime` を含む status で停止する。
+commit前後にsource fields/metadataの無変化とtarget fieldsの厳密一致を確認する。DB間transactionではないためwriters停止は必須。commit後のdrift/失敗はtargetを消さず `do_not_switch_runtime` で停止する。
 
 ## 切替後の正本と復帰
 
-切替後の生成データの正本は `rangle-stg-generation` であり、communityは引き続き
-`rangle-stg` を使う。CIはmanagerと公開アプリのrevision/trafficだけを元の配分へ戻し、
-database・IAM・台帳のused/active・履歴・掲載状態を巻き戻さない。正常なremote版への
-復帰も同じ生成DBを使う。古いbackupで上書きしたり、空のDBへ向けてattemptを再発行したりしない。
+生成の正本は `rangle-stg-generation`、communityは `rangle-stg`。CIの復帰はmanager/公開appのrevision・trafficだけで、DB/IAM/used/active/履歴/掲載は戻さない。古いbackupや空DBでattemptを再発行しない。
 
-初回切替中の失敗で公開trafficが旧monolith revisionへ戻った場合も、旧生成権限を
-復活させて受付を再開しない。targetに新しい書き込みがあればsourceは既に古いため、
-両writersと同期を停止し、差分を確認してから互換remote revisionで再検証する。
-utilityは逆方向コピー、targetの削除、backupの自動restoreを行わない。移行の照合に
-失敗した場合は、公開runtimeを切り替えず、private backupと両DBを保持して原因を調べる。
+初回失敗で旧monolithへtrafficが戻っても旧生成権限を復活させない。targetへ新規writeがあればsourceは古いため、両writersと同期を止めて差分を確認し、互換remote版で再検証する。utilityは逆コピー・target削除・自動restoreをしない。移行失敗時は切替せず、backupと両DBを保持する。
 
-REST は固定の `https://firestore.googleapis.com` のみで、redirect を拒否する。
-認証 token は明示した account / project の `gcloud auth print-access-token` から
-process 内へ捕捉し、file、子 process の argv、出力へ渡さない。API response や SDK の
-stderr もエラーに転載しない。REST は最大 20 回・全体 180 秒・1 回 20 秒、response と
-backup は 16 MiB、commit request は 10 MiB の上限で拒否する。collection の
-pagination が必要な場合も、そのまま続行しない。
-[Firestore の bounded collection list](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/list)
+RESTは `https://firestore.googleapis.com` 固定、redirect拒否。tokenは明示account/projectの `gcloud auth print-access-token` からprocess内だけで捕捉し、file/argv/出力へ渡さない。API本文・SDK stderrも転載しない。上限はREST20回・全体180秒・1回20秒、response/backup16MiB、commit10MiB。paginationが必要なら拒否する。[bounded list](https://docs.cloud.google.com/firestore/docs/reference/rest/v1/projects.databases.documents/list)
 
-検証は実データや cloud apply を使わず、fake REST transport で行う。
+実データ/cloud writeを使わないfake REST検証：
 
 ```bash
 python3 scripts/migrate-generation-ledger.test.py

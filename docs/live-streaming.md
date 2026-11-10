@@ -1,34 +1,34 @@
 # 自由視点ライブの配信
 
-校正・同期済みの複数カメラ動画を実時間で入力し、到着済みの画像から4DGSを逐次更新する。短い時間窓ごとにモデルを公開し、Flutterはカメラ操作を保ったまま更新する。まず約30秒の遅延を目安に、実測から画質と更新頻度を判断する。30秒以内の保証や、映像全区間を欠けずに配る実装ではない。
+校正・同期済み複数カメラの到着画像から4DGSを逐次更新し、短いwindowごとに公開する。Flutterは視点を保って更新する。約30秒を目安に実測で画質/頻度を判断し、30秒以内・全区間欠損なしを保証しない。
 
 ## 入力から視聴まで
 
-1. ローカルworkerが34本の録画を元のPTSで流す。同期した到着画像だけを有界ringへ渡し、処理待ちは最新window一つにする。遅れたwindowは数を記録して飛ばす。
-2. 同じGaussianパラメータ・optimizerを次のwindowへ引き継ぐ。校正・正規化・cameraはsession中固定。`model.rgs`、ローカル評価、`scene.json`を新規作成し、最後にlocal indexをatomic replacementする。
-3. publisherがindex・参照・SHA・RGS1・sceneの時刻とcameraを検査する。モデルとsceneをGCSへcreate-onlyで保存し、実CDNのbytesを照合する。
-4. immutableな検証済みindexをprivate bucketへ保存する。公開session pointerとprivate discovery indexを、それぞれGCS generationを指定して更新する。競合時は停止し、他producerの更新を上書きしない。
-5. Goはsession一覧を提供する。公開環境のFlutterはsession更新をCDNから取得し、同じiframe内で新しいモデルへ切り替える。旧モデルは新しいモデルの準備完了まで操作できる。
+1. workerは34本の録画を元PTSで流し、同期した到着画像だけをbounded ringへ渡す。待機は最新window1つで、遅れは数えてskipする。
+2. Gaussian/optimizerを引き継ぎ、session中の校正・正規化・cameraを固定する。model・local評価・sceneを新規作成後、local indexをatomic replacementする。
+3. publisherが参照/SHA/RGS1/時刻/cameraを検証し、model/sceneをGCSへcreate-only保存して実CDN bytesを照合する。
+4. 不変検証済みindexをprivate bucketへ保存し、公開session pointer/private discoveryを各GCS generation指定で更新する。競合は停止し他producerを上書きしない。
+5. Goが一覧を返し、公開FlutterはCDNからsession更新を取得する。同じiframeへ切り替え、新model準備まで旧modelを操作できる。
 
-生画像・NPZ・学習状態・ローカルmetricsは公開しない。公開indexにはsource、区間、サイズ・SHA、capture/availabilityの時刻と集計品質だけを含める。workerの入力・設定・検証手順は[ライブ学習](live-training.md)を参照。
+生画像・NPZ・学習状態・local metricsは非公開。公開indexはsource・区間・サイズ/SHA・capture/availability時刻・集計品質だけ。[入力/学習/検証](live-training.md)
 
 ## HTTPと保存先
 
-| 経路 | 内容・キャッシュ |
+| 経路 | 契約 |
 | --- | --- |
-| `GET /api/v1/live` | session一覧。Goはprivate `live/index.json`を読み、1秒の共有cacheで同時readをまとめる |
-| `GET /api/v1/live/{id}` | session詳細。ローカルの更新取得にも使う |
-| `https://media.…/live-index/{id}.json` | 同じsession JSON。専用CDN policyで1秒cache。公開環境の定期取得先 |
-| `https://media.…/live/{id}/{sequence}-{modelSHA16}/scene.json` | immutableなscene。モデルは同じdirectoryの`model.rgs` |
-| `/live-assets/{id}/{revision}/…` | 明示したローカルrootからの開発用配信。scene/modelだけを許可し、Rangeにも対応 |
+| `GET /api/v1/live` | private `live/index.json` の一覧。Goの1秒共有cacheで同時readをまとめる |
+| `GET /api/v1/live/{id}` | session詳細、localの更新取得先 |
+| `https://media.…/live-index/{id}.json` | 同じJSON、専用CDN1秒cache。公開構成のpoll先 |
+| `https://media.…/live/{id}/{sequence}-{modelSHA16}/scene.json` | 不変scene。同directoryにmodel.rgs |
+| `/live-assets/{id}/{revision}/…` | 指定local rootのscene/modelだけ。Range対応 |
 
-一覧・API詳細はGET/HEAD・ETag/304に対応し、read/検証失敗は503・no-store。8sessions・各32segments・index512KiB・各model32MiBに制限する。未設定時の一覧は空配列。viewing用の追加認証は設けず、producerの資格情報をブラウザへ渡さない。
+一覧/API詳細はGET/HEAD・ETag/304、失敗は503/no-store。上限8sessions・各32segments・index512KiB・model32MiB。未設定一覧は空。視聴用認証を追加せずproducer資格情報をbrowserへ渡さない。
 
-既存mediaの24時間cacheは維持する。`/live-index/*`だけを別backend bucketの1秒policyへルーティングする。同じGCS bucketとcache-fill identityを使い、新しいbucket・GPU・公開origin権限は追加しない。短いindexのCDN化はAPIの定期取得を減らす設計であり、10万人の容量や費用を実証したものではない。
+既存mediaは24時間cacheを維持し、`/live-index/*` だけ別backend bucketの1秒policyへ送る。同じGCS bucket/cache-fill identityを使い、新bucket・GPU・公開origin権限は作らない。API poll削減の設計であり、10万人の容量/費用の実証ではない。
 
 ## 起動と公開
 
-ローカルでは既存serverに次を追加する。`live-assets-root`はworker出力の`live-assets`directoryを選ぶ。
+既存serverへ追加する。rootはworkerの `live-assets` directory。
 
 ```sh
 rangle-server ... -live-index /path/to/output/index.json \
@@ -36,7 +36,7 @@ rangle-server ... -live-index /path/to/output/index.json \
 go build -o /path/to/private/rangle-live-check ./cmd/rangle-live-check
 ```
 
-publisherは既定でlocal検証だけを行い、認証やcloud APIを呼ばない。`--execute`で保存し、`--follow`でlocal index更新を追う。`--max-seconds`で今回の実行を区切る。初回indexをworkerが作ってから起動する。
+publisherは既定local検証のみで認証/cloudを呼ばない。workerの初回index後に起動し、`--execute` で保存、`--follow` で追従、`--max-seconds` で区切る。
 
 ```sh
 python3 scripts/publish-live.py \
@@ -51,18 +51,16 @@ python3 scripts/publish-live.py \
   --execute --follow --max-seconds 600
 ```
 
-sourceはoperatorが承認済みのものへ固定する。再実行時も同じURLのbytesを変更せず、他sessionを維持する。終了したsessionの再開には新しいIDを使う。media公開後・discovery更新前に中断した場合も、公開session pointerの既存proofを使って再開できる。index競合は自動で上書きせず、最新状態を確認して同じ入力で再実行する。古いsession/モデルを削除する運用は別途必要。
+sourceは承認済みURLへ固定する。同じURLのbytesを変えず他sessionを維持し、終了sessionの再開は新IDを使う。media後/discovery前の中断も公開pointerのproofで再開可能。競合時は最新状態を確認し同じ入力で再実行する。古いsession/model削除は別運用。
 
-本番は対応imageを先に配備してから、Terraformの`live_streaming_enabled=true`で有効にする。固定private objectは`gs://…-catalog/live/index.json`。GCS FUSEのmetadata cacheを避けるため、live indexは既存read-only identityで直接HTTP取得する。Flutterの`RANGLE_LIVE_MEDIA_ORIGIN`は承認したmedia originに固定し、空ならsame-origin APIを使う。既存の停止期限・GPU試行数・費用上限は変更しない。
+本番は対応image配備後 `live_streaming_enabled=true`。固定private objectは `gs://…-catalog/live/index.json` で、FUSE metadata cacheを避け既存read-only identityによるHTTP取得を使う。Flutterの `RANGLE_LIVE_MEDIA_ORIGIN` は承認originへ固定し、空ならsame-origin API。既存期限・試行数・費用上限は維持する。
 
 ## 測定の範囲
 
-`captured_at`はsessionの実時間開始と入力PTSから求める。`available_at`はローカルでは出力完了、cloudではmedia検証後の時刻。初期化・学習・評価・梱包・公開を分けて記録する。実画面に描かれるまでの遅延には、さらにpoll/cache・転送・復号・GPU準備が加わる。HTTPで配信可能になった時間を実画面の表示時間とは呼ばない。
+`captured_at` はsession実時間開始+PTS、`available_at` はlocal出力完了/cloud media検証後。初期化・学習・評価・梱包・公開を分ける。実描画はさらにpoll/cache・転送・復号・GPU準備を要し、HTTP availabilityとは区別する。
 
-与えられた初期点群・校正は事前情報で、画像のオンライン更新が成立しても、幾何の完全な因果性は主張しない。短い学習では画質が下がる可能性があり、同じ解像度・評価カメラのPSNR/SSIMと実画像で記録する。既存VODの12,000step設定をライブ用設定へ置き換えない。
+初期点群/校正は事前情報で、完全な幾何因果性を主張しない。同じ解像度/評価カメラのPSNR/SSIMと画像で品質を記録し、VOD12,000stepをlive設定へ置き換えない。一般単眼・RTMP/RTSP接続管理・常駐cloud GPU・欠損なし25fps・実端末表示/画質・大規模負荷は対象外。
 
-一般の単眼動画、RTMP/RTSPの接続管理、常駐cloud GPU、連続25fpsの欠損なし再構成、実端末の表示遅延・画質、大規模負荷は今回の成立確認に含めない。テスト入力は明示した録画ストリームである。
+10秒の録画入力で4modelがCDNへ届き、最大capture→公開29.810秒、observer取得30.236秒、EOF前更新を確認した。短区間の断続更新で、画面表示/長時間保証ではない。[条件と品質](live-training.md#verified-cloud-delivery-2026-11-09)、[最後のmodel](https://app.rangleplay.stream/demo/?live=basketball-live-20261109)。
 
-実際の10秒入力では4モデルがCDNへ届き、最大capture→公開29.810秒、HTTP observer取得30.236秒だった。入力EOF前の更新も確認した。短い区間の断続更新であり、画面描画までの遅延や長時間の保証ではない。条件と品質は[ライブ学習の実配信結果](live-training.md#verified-cloud-delivery-2026-11-09)を参照。テスト終了後も[最後のモデル](https://app.rangleplay.stream/demo/?live=basketball-live-20261109)を開ける。
-
-オンライン学習の参考には[3DGStreamの論文](https://arxiv.org/abs/2403.01444)と[Instant Gaussian Streamの公式実装](https://github.com/yjb6/IGS)がある。本実装は既存RGS1とgsplatを使う小さなbaselineで、これらの再現や論文の性能達成を主張しない。
+参考：[3DGStream](https://arxiv.org/abs/2403.01444)、[Instant Gaussian Stream](https://github.com/yjb6/IGS)。既存RGS1/gsplatのbaselineで、これらの再現・論文性能達成は主張しない。

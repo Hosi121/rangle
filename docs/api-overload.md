@@ -1,21 +1,16 @@
 # API過負荷時の動作
 
-API入口へ共有8枠の同時実行gateを置き、依存先へ進むhandler数を有界にする。8枠が埋まっている要求は待たせず、handler・認証store・生成admissionへ渡す前に503を返す。待ち行列、追加goroutine、IP別map、新しい設定flagは持たない。
-
-8は、発表用の1 CPU / 512 MiBプロセスに置く保守的な初期上限である。実測した最適値・処理能力ではなく、Cloud Run concurrency 40や10万視聴者に適合すると判断した値でもない。[Issue #24](https://github.com/Hosi121/rangle/issues/24)の部分対応として扱う。
+API入口の共有gateは同時8要求・queue 0。満杯ならbody解析・handler・認証store・生成admissionの前に503を返す。追加goroutine・IP別map・設定flagは持たない。8枠は発表用1 CPU / 512 MiBの保守的な初期値で、実測容量・Cloud Run concurrency 40・10万人への適合値ではない。[Issue #24](https://github.com/Hosi121/rangle/issues/24)の部分対応。
 
 ## 対象と応答
 
 | 経路 | gate |
 | --- | --- |
-| `/api/` 配下のauth・community・generation・catalog | 同じ8枠を共有 |
-| generated feed/detailの依存先参照 | 上記API枠の内側 |
-| `/internal/generation/sync` | 同じ8枠を共有。OIDC検証前に判定 |
+| `/api/` のauth/community/generation/catalog | 同じ8枠。generated feed/detailの依存処理も内側 |
+| `/internal/generation/sync` | 同じ8枠。OIDC検証前 |
 | `/healthz`、`/health`、UI、preview、manifest、asset | 対象外 |
 
-API prefixでrouterより先に判定するため、未登録のAPIや無効なmethodも飽和中は503になり得る。空きがある要求は既存handlerへそのまま渡す。既存の認証、CSRF、4096B等のbody制限、429のrate/hash制限、応答bytes、ETag・conditional GET・Range・cache方針は各handlerが維持する。
-
-超過時の応答は次の通り。HEADは同じstatus/headerを返し、bodyを出さない。
+routerより先に判定するため、未登録API・不正methodも飽和中は503になり得る。通過後の認証・CSRF・4096B等のbody制限・429のrate/hash制限・bytes/ETag/Range/cache契約は既存handlerが維持する。HEADは同じstatus/headerでbodyなし。
 
 ```http
 HTTP/1.1 503 Service Unavailable
@@ -27,33 +22,41 @@ X-Content-Type-Options: nosniff
 {"error":"api_overloaded"}
 ```
 
-この503は依存処理を開始しておらず、生成attemptを予約せず、bodyも解析しない。`Retry-After: 1` は再試行までの下限の目安であり、1秒後の空きを保証しない。呼出し側は回数を有界にし、待ち時間へjitterを加える。状態変更要求を無制限に再送せず、生成createの再試行では同じ `request_id` を保つ。gate自身は再送も予約も行わない。既存clientやschedulerのretry実装をこの変更で追加・変更したものではない。
+503では依存処理も生成attempt予約も始めない。`Retry-After: 1` は目安の下限で、1秒後の空きを保証しない。呼出し側は回数を有界にしjitterを加える。状態変更を無制限に再送せず、生成createは同じ `request_id` を使う。gateは予約・再送をせず、既存client/schedulerのretryも変更しない。
 
 ## 公開交流APIの読み取り頻度
 
-同時実行8枠とは別に、community handlerの `GET` / `HEAD /api/v1/clips/{clip}/engagement`・`comments`・`cheers` は、全clip・全利用者で1個のtoken bucketを共有する。初期burstは20要求、補充は100msごとに1要求相当（毎秒10要求）で、存在しないclipも枠を消費する。Cookieの有無・有効性、query、送信元IP、`X-Forwarded-For` によって枠を分けず、clip存在確認・session照会・Firestore処理より先に判定する。`X-Forwarded-For` は解析・信頼しない。超過時は待ち行列やsleepを使わず、`429`、`Retry-After: 1`、`Cache-Control: no-store` とJSON `{"error":"rate_limited"}` を返す。HEADは同じstatus/headerでbodyなしとする。1秒後の空きは保証しない。通過した要求のデータ・鮮度・認証・書き込み契約は変えず、キャッシュは追加しない。auth・書き込み・healthはこの頻度制限の対象外で、既存の制限を維持する。cheersはcommunity handler内の登録に適用し、現在のapplicationへ新たに経路を公開する変更は含まない。
+community handlerの `GET` / `HEAD /api/v1/clips/{clip}/{engagement,comments,cheers}` は、同時実行gateとは別に全clip/利用者共通のtoken bucketを使う。
 
-毎秒10要求・burst 20は、現在のmax 1発表用構成に置く有限の初期値であり、実測した処理能力や10万人向けの容量ではない。初期画面の複数読み取りを許しつつ連続する依存処理を抑えるため、今回は固定値として新しい設定flagを設けない。1要求には複数document・aggregationの課金があり、この要求数を課金read数や金額の上限とは見なさない。制限はhandlerを持つinstanceごとで、再起動時にburstが戻り、複数instance・複数revisionは独立した枠を持つ。攻撃者が枠を使い切れば正規の閲覧者も429になる。per-client制限、WAF、入口でのDoS対策、media egress・Cloud Run要求自体の課金、他のAPI経路は守らず、完全なDoS防止やhard cost capではない。
+| 項目 | 契約 |
+| --- | --- |
+| 枠 | 初期burst 20、100msごとに1要求補充（10要求/秒） |
+| 判定 | clip存在確認・session照会・Firestoreより先。存在しないclipも消費 |
+| 分割 | cookie/query/IPで分けない。`X-Forwarded-For`は解析・信頼しない |
+| 超過 | 待機・sleepなし。429、`Retry-After: 1`、`Cache-Control: no-store`、`{"error":"rate_limited"}`。HEADはbodyなし |
+| 対象外 | auth・書込・health。既存制限を維持 |
+
+通過後のデータ・鮮度・認証・書込は変えず、cacheを追加しない。cheersはhandler内の登録に適用し、新規経路公開は含まない。10要求/秒・burst20はmax 1の発表構成用の固定初期値で、測定容量ではない。
+
+枠はinstanceごとで再起動によりburstが戻り、別revision/instanceとは共有しない。枠の独占で正規利用者も429になる。1要求の複数document/aggregation課金、Cloud Run要求・media egress、他API、入口DoSを制限せず、課金read数・金額のhard capではない。per-client制限・WAFの代わりにもならない。
 
 ## キャンセル・timeout・ログ
 
-枠はhandlerが終了するとき、deferで返す。clientのキャンセルを既存のrequest contextで依存先へ伝え、contextを尊重するhandlerが戻れば枠も解放される。キャンセルを無視して処理を続けるhandlerには、終了まで枠を持たせる。contextがキャンセルされた瞬間に枠だけを先に返すと、実行中の依存処理数を上限以上へ増やせるためである。panicで戻る場合も枠を返す。既にキャンセル済みの要求はhandlerへ入れない。
+handler終了時にdeferで返却し、panicでも解放する。既にcancel済みなら入れない。処理中のcancelはrequest contextで伝え、handlerが戻るまで枠を保持する。先に枠だけ返して依存処理数を増やさない。
 
-gateはhandlerを別goroutineへ移さず、新しいtimeoutを設定しない。既存のcommunity 5秒、generated feed参照5秒、generation各処理5〜25秒、sync 10秒のcontextと、HTTP header読取5秒・shutdown drain 5秒を維持する。これは全handlerの終了やslow clientの排除を保証する仕組みではない。
+gateは別goroutine・timeoutを追加しない。既存contextはcommunity/generated feed各5秒、generation5〜25秒、sync10秒。HTTP header読取・shutdown drainは各5秒。全handlerの終了やslow client排除は保証しない。
 
-起動時のslogへ `api_max_active_requests: 8`、`api_queue_capacity: 0` を出す。飽和のWARNはapplicationごとに初回の1件だけとし、要求ごとのWARN/ERROR増幅を避ける。要求path・cookie・bodyやIP別状態はログ用に保持しない。単一のatomic flagで初回を選ぶため、他の拒否要求がそのログ出力の完了待ちへ並ぶこともない。
+起動slogは `api_max_active_requests: 8`、`api_queue_capacity: 0`。飽和WARNはapplication初回1件だけをatomic flagで選び、他の拒否要求をログ待ちさせない。path・cookie・body・IP別状態は保持しない。
 
 ## 守る範囲と未達
 
-[発表用Cloud Run設定](../infra/gcp/modules/presentation/resources.tf)はmin 0 / max 1、concurrency 40、1 CPU / 512 MiB、request timeout 30秒のまま。総$300・11月14日までの既存guard、生成の同時GPU job 1・attempt上限10を変更しない。APIの8枠はHTTP handlerの枠であり、GPU admissionは従来のdurableな1枠で管理する。
+[Cloud Run](../infra/gcp/modules/presentation/resources.tf)はmin0/max1・concurrency40・1 CPU/512 MiB・timeout30秒を維持。総$300・11月14日までのguard、生成GPU同時1件・attempt10も維持する。HTTP8枠とdurable GPU1枠は別管理。health/static用のCloud Run concurrency/TCP枠を予約せず、CDN/GCS直接配信にも関与しない。複数processでは分散quotaにならない。
 
-health/staticをgate対象外とすることは、Cloud Run側のconcurrencyやTCP接続枠を予約することではない。CDN/GCSへの直接配信にはこのgateは関与しない。プロセスを増やした場合は各プロセスが独立したgateを持ち、分散quotaとしては働かない。
-
-局所Concurrent HTTPテストで、上限中の503/HEAD/header、依存処理への未到達、cancel後の枠解放、cancelを無視する処理の上限維持、panic時の解放を確認する。実applicationでもhealth/UI/manifest/Rangeを利用でき、空き復帰後にfeed bytes・ETag/304・CSRF・body制限が保たれることを確認する。
+局所HTTPテストは503/HEAD/header、依存未到達、cancel/panic解放、cancelを無視する処理の上限を確認する。実applicationではhealth/UI/manifest/Range、復帰後のfeed bytes・ETag/304・CSRF・body制限を確認する。
 
 ```sh
 go test -race ./...
 go vet ./...
 ```
 
-大規模負荷、単instance容量、水平分散、cold start、region quotaの実割当・他サービス消費、SLO、費用からの容量設定受入は未検証のまま。これらはIssue #24と依存する#20/#23の残件であり、この安全弁だけで完了とはしない。今回の変更は実cloud設定、増設、quota、課金、merge、deployを実行しない。
+大規模負荷・単instance容量・水平分散・cold start・region quotaの実割当/他サービス消費・SLO・費用に基づく容量受入は未検証（#24と依存#20/#23）。cloud設定・増設・quota・課金・merge/deployはこの変更に含まない。
