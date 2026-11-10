@@ -24,6 +24,7 @@ type MemoryStore struct {
 	comments      map[string]map[string]Comment
 	cheers        map[string]map[string]CheerBatch
 	history       map[string]map[string]CheeredClip
+	follows       map[string]map[publisher.ID]bool
 }
 
 func NewMemoryStore() *MemoryStore {

@@ -187,7 +187,7 @@ func (s clipSelection) at(index int) jsonDocument {
 func (h *handler) page(query url.Values, snapshot string, count int) (limit, start int, err error) {
 	limit = 10
 	for key, values := range query {
-		if (key != "limit" && key != "cursor" && key != "q" && key != "tag") || len(values) != 1 || values[0] == "" {
+		if (key != "limit" && key != "cursor" && key != "q" && key != "tag" && key != "publisher") || len(values) != 1 || values[0] == "" {
 			return 0, 0, fmt.Errorf("invalid pagination query")
 		}
 	}

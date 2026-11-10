@@ -82,6 +82,11 @@ func NewHandler(cfg Config) *Handler {
 		mux.HandleFunc("PUT "+prefix+"{account}/staff/{staff}/password", func(w http.ResponseWriter, r *http.Request) { h.resetStaffPassword(w, r, operator) })
 	}
 	mux.HandleFunc("GET /api/v1/me/cheered-clips", h.cheerHistory)
+	mux.HandleFunc("GET /api/v1/publishers/{account}", h.limitPublicRead(h.publicPublisher))
+	mux.HandleFunc("GET /api/v1/publishers/{account}/subscription", h.limitPublicRead(h.publisherSubscription))
+	mux.HandleFunc("PUT /api/v1/publishers/{account}/subscription", h.publisherSubscription)
+	mux.HandleFunc("DELETE /api/v1/publishers/{account}/subscription", h.publisherSubscription)
+	mux.HandleFunc("GET /api/v1/me/subscriptions", h.limitPublicRead(h.publisherSubscriptions))
 	mux.HandleFunc("POST /api/v1/auth/register", h.register)
 	mux.HandleFunc("POST /api/v1/auth/login", h.login)
 	mux.HandleFunc("POST /api/v1/auth/logout", h.logout)

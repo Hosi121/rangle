@@ -22,6 +22,17 @@ CSRF・本文上限・同時hash数・ログイン頻度制限を適用する。
 
 運営は既存の管理画面から「団体管理」を開き、団体登録・担当者管理・パスワード再設定・入力割当を行う。画面の役割表示は操作の案内に使い、認可は毎回APIが検査する。GoのAPI/race・Firestore emulatorとFlutterのAPI/widgetテストで確認し、実ブラウザ操作は利用者が確認する。
 
+## 公開プロフィール・フォロー
+
+| API | 操作 |
+| --- | --- |
+| `GET /api/v1/publishers/{account}` | 認証不要。利用中の団体のID・名前・種別 |
+| `GET /api/v1/clips?publisher={account}` | 団体IDの完全一致で公開カタログを絞る。既存のページ送り・検索を併用できる |
+| `GET/PUT/DELETE /api/v1/publishers/{account}/subscription` | 一般ユーザー本人の無料フォロー状態・登録・解除。本文不要 |
+| `GET /api/v1/me/subscriptions?cursor=...` | 本人のフォロー中団体。団体ID順に20件ずつ取得 |
+
+フォローは `accounts/{user}/publisher_subscriptions/{account}` に保存する。担当者の所属や投稿権限を与えず、課金・通知は行わない。PUT・DELETEは冪等。登録transactionで現在の団体を再検査し、停止・削除中・削除済みの団体はプロフィールとフォロー一覧に表示しない。削除後も本人による解除は可能。cursorは本人に結び付け、一覧は最大21件とプロフィールのbatch読取で処理する。
+
 ## 担当者の管理
 
 | API | 団体担当者の経路 |
