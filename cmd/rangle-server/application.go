@@ -187,7 +187,7 @@ func newApplication(cfg config, logger *slog.Logger) (app *application, err erro
 			return generationService.CompletedClipExists(ctx, id)
 		},
 	})
-	for _, pattern := range []string{"/api/v1/auth/", "/api/v1/me/cheered-clips", "/api/v1/clips/{clip}/engagement", "/api/v1/clips/{clip}/cheers", "/api/v1/clips/{clip}/likes", "/api/v1/clips/{clip}/comments", "/api/v1/clips/{clip}/comments/{comment}"} {
+	for _, pattern := range []string{"/api/v1/auth/", "/api/v1/publisher-auth/", "/api/v1/operations/publishers", "/api/v1/me/cheered-clips", "/api/v1/clips/{clip}/engagement", "/api/v1/clips/{clip}/cheers", "/api/v1/clips/{clip}/likes", "/api/v1/clips/{clip}/comments", "/api/v1/clips/{clip}/comments/{comment}"} {
 		mux.Handle(pattern, interactions)
 	}
 	privateScenes, err = privatepreview.New(privatepreview.Config{Directory: cfg.PrivateSceneRoot, Logger: logger,

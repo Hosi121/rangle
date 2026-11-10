@@ -35,7 +35,7 @@ resource "google_compute_security_policy" "app" {
     action      = "throttle"
     description = "Limit password verification and account creation per peer IP."
     match {
-      expr { expression = "request.method == 'POST' && request.path.urlDecode().matches('^/api/v1/auth/(?:login|register)$')" }
+      expr { expression = "request.method == 'POST' && request.path.urlDecode().matches('^/api/v1/(?:auth/(?:login|register)|publisher-auth/login)$')" }
     }
     rate_limit_options {
       conform_action = "allow"

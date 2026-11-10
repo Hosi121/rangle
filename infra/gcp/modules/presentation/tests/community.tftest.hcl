@@ -16,7 +16,7 @@ variables {
 run "existing_application_keeps_community_disabled" {
   command = plan
   assert {
-    condition     = length(google_project_service.community) == 0 && length(google_firestore_database.community) == 0 && length(google_firestore_field.sessions_expiry) == 0 && length(google_project_iam_member.community_runtime) == 0 && output.deployment.community_storage == null
+    condition     = length(google_project_service.community) == 0 && length(google_firestore_database.community) == 0 && length(google_firestore_field.sessions_expiry) == 0 && length(google_firestore_field.staff_sessions_expiry) == 0 && length(google_project_iam_member.community_runtime) == 0 && output.deployment.community_storage == null
     error_message = "Existing application inputs must create no community resources or data grants."
   }
   assert {
@@ -48,6 +48,10 @@ run "enabled_community_uses_only_named_tokyo_database" {
   assert {
     condition     = google_firestore_field.sessions_expiry[0].database == "rangle-stg" && google_firestore_field.sessions_expiry[0].collection == "sessions" && google_firestore_field.sessions_expiry[0].field == "expires_at" && length(google_firestore_field.sessions_expiry[0].ttl_config) == 1 && length(coalesce(google_firestore_field.sessions_expiry[0].index_config[0].indexes, [])) == 0
     error_message = "Enable TTL on sessions.expires_at without a single-field timestamp index."
+  }
+  assert {
+    condition     = google_firestore_field.staff_sessions_expiry[0].database == "rangle-stg" && google_firestore_field.staff_sessions_expiry[0].collection == "staff_sessions" && google_firestore_field.staff_sessions_expiry[0].field == "expires_at" && length(google_firestore_field.staff_sessions_expiry[0].ttl_config) == 1 && length(coalesce(google_firestore_field.staff_sessions_expiry[0].index_config[0].indexes, [])) == 0
+    error_message = "Staff sessions must have separate TTL cleanup without a timestamp index."
   }
   assert {
     condition     = contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-firestore-project") && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "rangle-example") && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "-firestore-database") && contains(google_cloud_run_v2_service.app[0].template[0].containers[0].args, "rangle-stg")

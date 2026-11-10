@@ -105,3 +105,13 @@ func (a Account) Allows(actor StaffPrincipal, staff StaffAccount, permission Per
 		return false
 	}
 }
+
+func (id ID) Valid() bool      { return accountID.MatchString(string(id)) }
+func (id StaffID) Valid() bool { return accountID.MatchString(string(id)) }
+
+func (s StaffAccount) Validate() error {
+	if !s.ID.Valid() || !s.PublisherAccountID.Valid() || !staffUsername.MatchString(s.Username) || (s.Role != Administrator && s.Role != Editor) {
+		return fmt.Errorf("invalid staff account")
+	}
+	return nil
+}

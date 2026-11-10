@@ -66,6 +66,10 @@ func NewHandler(cfg Config) *Handler {
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/auth/me", h.me)
+	mux.HandleFunc("POST /api/v1/operations/publishers", h.provisionPublisher)
+	mux.HandleFunc("GET /api/v1/publisher-auth/me", h.staffMe)
+	mux.HandleFunc("POST /api/v1/publisher-auth/login", h.staffLogin)
+	mux.HandleFunc("POST /api/v1/publisher-auth/logout", h.staffLogout)
 	mux.HandleFunc("GET /api/v1/me/cheered-clips", h.cheerHistory)
 	mux.HandleFunc("POST /api/v1/auth/register", h.register)
 	mux.HandleFunc("POST /api/v1/auth/login", h.login)
@@ -91,7 +95,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
 	defer cancel()
 	r = r.WithContext(ctx)
-	if h.cfg.Store == nil && r.URL.Path != "/api/v1/auth/me" {
+	if h.cfg.Store == nil && r.URL.Path != "/api/v1/auth/me" && r.URL.Path != "/api/v1/publisher-auth/me" {
 		h.fail(w, r, 503, "service_unavailable")
 		return
 	}
