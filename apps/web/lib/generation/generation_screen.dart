@@ -6,6 +6,7 @@ import '../community/account_controller.dart';
 import '../community/account_dialog.dart';
 import '../community/community_api.dart';
 import '../live/live_api.dart';
+import '../publishers/publisher_controller.dart';
 import '../live/live_screen.dart';
 import '../viewer/viewer_adapter.dart';
 import '../widgets/viewer_modal.dart';
@@ -24,9 +25,16 @@ class GenerationScreen extends StatefulWidget {
     this.liveViewer = false,
     this.initialLiveId,
     this.managementHome = false,
+    this.publisher,
+    this.onBack,
+    this.onManagePublishers,
+    this.headerActions = const [],
     super.key,
-  });
+  }) : assert(account == null || publisher == null);
   final AccountController? account;
+  final PublisherController? publisher;
+  final VoidCallback? onBack, onManagePublishers;
+  final List<Widget> headerActions;
   final GenerationApi? api;
   final LiveApi? live;
   final ViewerFactory? liveFactory;
@@ -55,15 +63,29 @@ class _GenerationScreenState extends State<GenerationScreen>
   final _jobErrors = <String, String>{};
   bool _loading = true, _submitting = false, _accepted = false;
   bool _foreground = true, _covered = false;
-  bool _lastAdmin = false;
+  bool _lastAccess = false;
   late bool _showLive;
   String? _liveId;
   int _epoch = 0;
   Timer? _poll;
 
   bool get _visible => _foreground && !_covered;
-  bool get _signedIn => widget.account?.user != null;
-  bool get _canGenerate => widget.account?.user?.isAdmin == true;
+  bool get _signedIn => widget.publisher != null
+      ? widget.publisher!.identity != null
+      : widget.account?.user != null;
+  bool get _canGenerate => widget.publisher != null
+      ? widget.publisher!.identity != null
+      : widget.account?.user?.isAdmin == true;
+  String? get _currentOwner {
+    if (widget.publisher != null) {
+      final identity = widget.publisher!.identity;
+      return identity == null
+          ? null
+          : 'publisher:${identity.account.id}:${identity.staff.id}';
+    }
+    return widget.account?.user?.id;
+  }
+
   bool get _active => _jobs.any((job) => job.active);
   bool get _busy => _submitting || _busyJob != null;
 
@@ -76,11 +98,21 @@ class _GenerationScreenState extends State<GenerationScreen>
         widget.api ??
         GenerationApi(
           endpoint:
-              widget.account?.api.endpoint ?? Uri.base.resolve('/api/v1/'),
+              widget.publisher?.api.endpoint ??
+              widget.account?.api.endpoint ??
+              Uri.base.resolve('/api/v1/'),
+          publisherAccountId: widget.publisher?.identity?.account.id,
         );
-    _owner = widget.account?.user?.id;
-    _lastAdmin = _canGenerate;
+    _owner = _currentOwner;
+    if (widget.publisher != null &&
+        _api.publisherAccountId != widget.publisher!.identity?.account.id) {
+      throw StateError(
+        'Generation client must use the signed-in publisher scope.',
+      );
+    }
+    _lastAccess = _canGenerate;
     widget.account?.addListener(_accountChanged);
+    widget.publisher?.addListener(_accountChanged);
     WidgetsBinding.instance.addObserver(this);
     final lifecycle = WidgetsBinding.instance.lifecycleState;
     _foreground =
@@ -92,10 +124,10 @@ class _GenerationScreenState extends State<GenerationScreen>
 
   void _accountChanged() {
     if (!mounted) return;
-    final owner = widget.account?.user?.id;
-    if (owner != _owner || _canGenerate != _lastAdmin) {
+    final owner = _currentOwner;
+    if (owner != _owner || _canGenerate != _lastAccess) {
       _owner = owner;
-      _lastAdmin = _canGenerate;
+      _lastAccess = _canGenerate;
       _pause();
       setState(() {
         _jobs = [];
@@ -141,11 +173,12 @@ class _GenerationScreenState extends State<GenerationScreen>
         final catalog = await _api.presets();
         if (!mounted || epoch != _epoch) return;
         _catalog = catalog;
-        if (!catalog.available || catalog.presets.isEmpty) {
+        if (!catalog.available ||
+            (catalog.presets.isEmpty && widget.publisher == null)) {
           throw const GenerationFailure('generation_unavailable');
         }
         if (!catalog.presets.any((preset) => preset.id == _preset)) {
-          _preset = catalog.presets.first.id;
+          _preset = catalog.presets.firstOrNull?.id;
         }
       }
       if (_signedIn) {
@@ -165,7 +198,13 @@ class _GenerationScreenState extends State<GenerationScreen>
 
   String _message(Object error) {
     if (error is GenerationFailure) {
-      if (error.code == 'not_authenticated') widget.account?.expired();
+      if (error.code == 'not_authenticated') {
+        if (widget.publisher != null) {
+          widget.publisher!.expired();
+        } else {
+          widget.account?.expired();
+        }
+      }
       return error.message;
     }
     return const GenerationFailure('network_error').message;
@@ -352,6 +391,7 @@ class _GenerationScreenState extends State<GenerationScreen>
     _pause();
     if (widget.api == null) _api.close();
     widget.account?.removeListener(_accountChanged);
+    widget.publisher?.removeListener(_accountChanged);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -431,8 +471,20 @@ class _GenerationScreenState extends State<GenerationScreen>
 
   Widget _generationForm(BuildContext context) => Scaffold(
     appBar: RangleHeader(
-      title: widget.managementHome ? '管理' : 'GS生成',
+      title: widget.publisher != null
+          ? '団体管理'
+          : widget.managementHome
+          ? '管理'
+          : 'GS生成',
+      onBack: widget.onBack,
       actions: [
+        ...widget.headerActions,
+        if (widget.managementHome && widget.onManagePublishers != null)
+          IconButton(
+            tooltip: '団体管理',
+            onPressed: widget.onManagePublishers,
+            icon: const Icon(Icons.business_outlined),
+          ),
         if (widget.managementHome)
           IconButton(
             tooltip: 'アカウント',
@@ -468,11 +520,17 @@ class _GenerationScreenState extends State<GenerationScreen>
                   padding: const EdgeInsets.all(20),
                   children: [
                     Text(
-                      'スポーツの一瞬と動きを3Dに',
+                      widget.publisher?.identity?.account.name ??
+                          'スポーツの一瞬と動きを3Dに',
                       style: Theme.of(context).textTheme.titleLarge,
                     ),
                     const SizedBox(height: 8),
-                    const Text('確認済みの複数視点データから、自由視点で見返せるシーンを生成します。'),
+                    if (widget.publisher?.identity case final identity?)
+                      Text(
+                        '${identity.staff.username} · ${identity.staff.roleLabel}',
+                      )
+                    else
+                      const Text('確認済みの複数視点データから、自由視点で見返せるシーンを生成します。'),
                     const SizedBox(height: 24),
                     if (_loading) const Text('生成の受付状況を確認しています'),
                     if (_error != null) ...[
@@ -485,6 +543,9 @@ class _GenerationScreenState extends State<GenerationScreen>
                         ),
                       ),
                     ],
+                    if (_catalog?.available == true &&
+                        _catalog!.presets.isEmpty)
+                      const Text('利用できるデータがありません。'),
                     if (_catalog?.available == true &&
                         _catalog!.presets.isNotEmpty) ...[
                       DropdownButtonFormField<String>(
@@ -567,7 +628,7 @@ class _GenerationScreenState extends State<GenerationScreen>
                     if (_signedIn) ...[
                       const SizedBox(height: 28),
                       Text(
-                        '自分の生成',
+                        widget.publisher == null ? '自分の生成' : '団体の生成',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 8),

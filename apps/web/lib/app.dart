@@ -13,6 +13,9 @@ import 'community/account_dialog.dart';
 import 'generation/generation_api.dart';
 import 'generation/generation_screen.dart';
 import 'generation/open_result.dart';
+import 'publishers/publisher_api.dart';
+import 'publishers/publisher_home.dart';
+import 'publishers/operations_publishers_screen.dart';
 import 'sharing/share_clip.dart';
 import 'live/live_api.dart';
 import 'widgets/search_dialog.dart';
@@ -33,6 +36,8 @@ class ClipFeedScreen extends StatefulWidget {
     this.community,
     this.generation,
     this.initialGeneration = false,
+    this.initialPublisher = false,
+    this.publisher,
     this.initialClipId,
     this.live,
     this.liveFactory,
@@ -46,6 +51,8 @@ class ClipFeedScreen extends StatefulWidget {
   final CommunityApi? community;
   final GenerationApi? generation;
   final bool initialGeneration;
+  final bool initialPublisher;
+  final PublisherApi? publisher;
   final String? initialClipId;
   final LiveApi? live;
   final ViewerFactory? liveFactory;
@@ -76,7 +83,9 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
       _accountReady = _account!.initialize();
       unawaited(_accountReady!);
     }
-    if (widget.initialLiveId != null || widget.initialGeneration) {
+    if (widget.initialLiveId != null ||
+        widget.initialGeneration ||
+        widget.initialPublisher) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(_openRequestedPage());
       });
@@ -89,7 +98,12 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
 
   Future<void> _openRequestedPage() async {
     await _accountReady;
-    if (!mounted || _account?.user?.isAdmin == true) return;
+    if (!mounted) return;
+    if (widget.initialPublisher) {
+      await _openGeneration(publisher: true);
+      return;
+    }
+    if (_account?.user?.isAdmin == true) return;
     if (widget.initialLiveId != null) {
       await _openLive(widget.initialLiveId);
     } else {
@@ -103,24 +117,44 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   Future<void> _openGeneration({
     bool liveViewer = false,
     String? liveId,
+    bool publisher = false,
+    bool operations = false,
   }) async {
     if (_generationOpen) return;
     var publicationChanged = false;
     setState(() => _generationOpen = true);
     final result = await Navigator.of(context).push<Uri>(
       MaterialPageRoute(
-        builder: (context) => GenerationScreen(
-          account: _account,
-          api: widget.generation,
-          live: widget.live,
-          liveFactory: widget.liveFactory,
-          liveViewer: liveViewer,
-          initialLiveId: liveId,
-          onPublicationChanged: () => publicationChanged = true,
-          onOpenResult: (uri) {
-            if (!openGeneratedViewer(uri)) Navigator.pop(context, uri);
-          },
-        ),
+        builder: (context) => operations && _account != null
+            ? OperationsPublishersScreen(account: _account!)
+            : publisher
+            ? PublisherHome(
+                live: widget.live,
+                liveFactory: widget.liveFactory,
+                api:
+                    widget.publisher ??
+                    PublisherApi(
+                      endpoint:
+                          widget.community?.endpoint ??
+                          Uri.base.resolve('/api/v1/'),
+                    ),
+                onPublicationChanged: () => publicationChanged = true,
+                onOpenResult: (uri) {
+                  if (!openGeneratedViewer(uri)) Navigator.pop(context, uri);
+                },
+              )
+            : GenerationScreen(
+                account: _account,
+                api: widget.generation,
+                live: widget.live,
+                liveFactory: widget.liveFactory,
+                liveViewer: liveViewer,
+                initialLiveId: liveId,
+                onPublicationChanged: () => publicationChanged = true,
+                onOpenResult: (uri) {
+                  if (!openGeneratedViewer(uri)) Navigator.pop(context, uri);
+                },
+              ),
       ),
     );
     if (!mounted) return;
@@ -247,13 +281,14 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
   @override
   Widget build(BuildContext context) => _generationOpen
       ? const SizedBox.expand()
-      : _account?.user?.isAdmin == true
+      : _account?.user?.isAdmin == true && widget.initialClipId == null
       ? GenerationScreen(
           account: _account,
           api: widget.generation,
           live: widget.live,
           liveFactory: widget.liveFactory,
           managementHome: true,
+          onManagePublishers: () => _openGeneration(operations: true),
           onPublicationChanged: () {
             if (widget.repository is RefreshableClipRepository) {
               (widget.repository as RefreshableClipRepository)
@@ -342,6 +377,7 @@ class _ClipFeedScreenState extends State<ClipFeedScreen> {
                     sceneFactory: widget.sceneFactory,
                     account: _account,
                     shareAction: widget.shareAction,
+                    onOpenPublisher: () => _openGeneration(publisher: true),
                     onSearch: () =>
                         _search(clips.expand((clip) => clip.tags).toSet()),
                     onTag: _filterTag,
@@ -384,6 +420,7 @@ class _HighlightFeed extends StatefulWidget {
     required this.onQuery,
     required this.onOpenClip,
     required this.onClearSearch,
+    required this.onOpenPublisher,
     required this.filterLabel,
     this.initialFreeView = false,
     super.key,
@@ -394,7 +431,7 @@ class _HighlightFeed extends StatefulWidget {
   final ViewerFactory sceneFactory;
   final AccountController? account;
   final ClipShareAction shareAction;
-  final VoidCallback onSearch, onClearSearch, onLive;
+  final VoidCallback onSearch, onClearSearch, onLive, onOpenPublisher;
   final ValueChanged<String> onTag, onQuery, onOpenClip;
   final String filterLabel;
   final bool initialFreeView;
@@ -638,6 +675,7 @@ class _HighlightFeedState extends State<_HighlightFeed> {
                                     context,
                                     widget.account,
                                     onOpenClip: widget.onOpenClip,
+                                    onOpenPublisher: widget.onOpenPublisher,
                                   ),
                                   icon: Icon(
                                     widget.account!.user == null
