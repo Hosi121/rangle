@@ -13,6 +13,7 @@ import '../widgets/viewer_modal.dart';
 import '../widgets/rangle_header.dart';
 import '../widgets/preview_viewer.dart';
 import 'generation_api.dart';
+import 'generation_progress.dart';
 
 class GenerationScreen extends StatefulWidget {
   const GenerationScreen({
@@ -655,6 +656,10 @@ class _GenerationScreenState extends State<GenerationScreen>
                                 Semantics(
                                   liveRegion: true,
                                   child: Text(job.stateLabel),
+                                ),
+                                GenerationProgressIndicator(
+                                  job: job,
+                                  unavailable: _error != null,
                                 ),
                                 if (job.active && job.state != 'cancelling')
                                   Align(

@@ -179,6 +179,7 @@ func (h *Handler) presets(w http.ResponseWriter, r *http.Request) {
 }
 
 type jobView struct {
+	Progress  *Progress `json:"progress,omitempty"`
 	Published bool      `json:"published"`
 	ID        string    `json:"id"`
 	Preset    string    `json:"preset"`
@@ -190,6 +191,7 @@ type jobView struct {
 
 func viewJob(j Job) jobView {
 	return jobView{
+		Progress:  j.Progress,
 		Published: j.Published, ID: j.ID, Preset: j.Preset, Mode: j.Snapshot.ModeName(), State: j.State,
 		CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
 	}

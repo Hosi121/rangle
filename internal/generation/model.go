@@ -38,6 +38,7 @@ const (
 func (s State) Terminal() bool { return s == Succeeded || s == Failed || s == Cancelled }
 
 type Job struct {
+	Progress *Progress `firestore:"-" json:"-"`
 	// Owner remains the indexed storage key. Legacy operator IDs are preserved;
 	// publisher jobs use a disjoint publisher:<id> key and explicit owner field.
 	PublisherAccountID publisher.ID `firestore:"publisher_account_id,omitempty" json:"-"`

@@ -17,6 +17,10 @@ APIのprefixは運営用 `/api/v1/generation`、団体用 `/api/v1/publishers/{a
 
 履歴は保存済み状態を返す。個別GET・作成時の照合、有効時は2分ごとのSchedulerでactive1件を同期する。同期はattemptを増やさない。[掲載・同期の契約](generated-publication.md)
 
+団体・運営画面では進捗バーと**学習終了までの目安**を表示する。実際の完了step数/総step数を使い、経過時間から残りを推定する。準備待ち・観測なし・仕上げ中は不定のバー、失敗・中止は停止し、ジョブ成功後だけ生成完了とする。ログが60秒以上古い場合や予測時刻を過ぎた場合はETAを表示しない。評価・保存の時間はETAに含めず、正確な全工程の完了時刻とは扱わない。
+
+private managerだけが既存rangleログbucketの専用worker viewを読み、所有ジョブのprovider IDと時刻範囲を照合する。最大2行・3秒・10秒キャッシュで同時ポーリングを共有し、本文・URI・loss等の生ログは返さない。閲覧権限は[log view単位](https://docs.cloud.google.com/logging/docs/logs-views)・発表期限付きとし、公開runtimeやtrainerへログ参照権限を追加しない。観測失敗でもジョブ状態・中止・結果は利用でき、worker imageや学習条件は変えない。
+
 入力URI/SHA256・方式・品質profile・image digest・GPU・期限はサーバーpresetへ固定し、公開要求からpath/command/profileを受け取らない。modeは `static` / `dynamic` / `live`、既存省略時はstatic。作成時snapshotを保存し、後の設定変更でjobの方式を変えない。`live` は録画入力ZIPと専用worker/publisherを使い、VOD掲載はできない。[クラウドLIVE](cloud-live.md)を参照。
 
 公開Go APIは認証必須のgeneration managerへ転送し、managerが専用台帳・実行枠・固定spec・予算/期限を守る。公開runtimeに生成台帳直接アクセス・Vertex操作・trainer actAsを与えない。現在の運営/担当者認証とCSRFは公開runtime側の責任で、侵害されたruntimeから正規preset操作を行う脅威は残る。構成・IAM・署名検証・local modeは[生成インフラ](generation-infrastructure.md)を参照。
