@@ -8,7 +8,7 @@
 | --- | --- |
 | `base_domain=null`（既定） | private GCS/CDN backend、cache-fill IAM、global IPv4 `rangle-stg-edge` まで。app/certificate/proxy/forwarding rule/URL mapは未作成。IP予約費用は残り得る |
 | domain設定後 | 外部HTTPS LBでapp/media hostを分離。appはCDNなしのNEG→Run、mediaはCDN bucket。API/UI/catalog/inputをmediaへ置かない |
-| 公開Run `rangle-stg` | Go＋Flutter Web、1vCPU/512MiB、request billing、service/revisionともmin0/max2、concurrency8、timeout30秒（暫定IaC）。`/`・`/demo/*`・APIをpath変換せず渡す。asset originは `https://media.<base_domain>` |
+| 公開Run `rangle-stg` | Go＋Flutter Web、1vCPU/512MiB、request billing、service/revisionともmin0/max2、concurrency8、timeout30秒（暫定・反映済み）。`/`・`/demo/*`・APIをpath変換せず渡す。asset originは `https://media.<base_domain>` |
 | 公開ingress | `internal-and-cloud-load-balancing`。既定 `run.app` / tag URLへの外部直通は拒否。URIはGoogle-managed caller互換のため保持。アプリ認証/CSRF/所有者認可は必要 |
 | private生成manager | IAM必須 `rangle-stg-generation`。公開appはremote APIだけを呼び、生成DB/Vertex/actAsを持たない。[生成契約](generation-infrastructure.md) |
 
@@ -16,7 +16,7 @@
 
 ## 公開appの暫定autoscale（#24）
 
-IaCでは公開`rangle-stg`のservice上限を1→2、各revisionのconcurrencyを40→8とします。min0・1vCPU/512MiB・request billing・timeout30秒は維持します。常時起動を追加せず、需要に応じて2instanceまで増やす初期設定です。性能測定に基づく最適値・実quota割当・10万CCUの容量受入ではありません。2026-11-10の変更前readではservice max1・revision min0/max5・concurrency40を確認しており、実反映はplan確認・apply・候補smoke後に別途記録します。
+公開`rangle-stg`のservice上限を1→2、各revisionのconcurrencyを40→8とします。min0・1vCPU/512MiB・request billing・timeout30秒は維持します。常時起動を追加せず、需要に応じて2instanceまで増やす初期設定です。性能測定に基づく最適値・10万CCUの容量受入ではありません。2026-11-10の変更前readではservice max1・revision min0/max5・concurrency40を確認しました。
 
 Goの[API gate](api-overload.md)はinstanceごとに同時8件・queue0です。concurrency40のままではgateが先に拒否し、Cloud Runの同時要求指標へ余力があるように見える場合があります。concurrencyを8へ揃え、Cloud Run側の負荷分散・scale判断へ渡す方針です。UI/health等も同じplatform枠を使うため、API専用8枠やhealthの予約を保証しません。cold start・上限到達時のplatform待機/429と、アプリ内gateの即時503は分けて観測します。[concurrency](https://docs.cloud.google.com/run/docs/about-concurrency)・[autoscaling](https://docs.cloud.google.com/run/docs/about-instance-autoscaling)
 
@@ -25,6 +25,22 @@ service maxはtrafficを持つrevision全体に適用され、revision上限と�
 公開交流readのrate limiterはinstanceごと10要求/秒・burst20なので、通常配信2台なら合算20要求/秒・burst40相当になり得ます。これは課金read数の上限ではありません。private生成managerのmax1、durable GPU同時1件/attempt10、USD300・期限guard・JPY spend capは変更しません。実quota、cold start、5xx/429、依存先負荷、SLO/費用を確認し、未達ならmax1/concurrency40へ戻すか計測から見直します。[過負荷の制約](api-overload.md)
 
 runtime変更は正常revisionへtrafficを固定してから適用し、候補のLB smoke・image/catalog/設定の照合後に昇格します。image/trafficはCI所有のままです。autoscale以外のprivate manager/GPU/DNS/IAM/media/DB差分がplanに出たら混ぜずに確認します。
+
+### 2026-11-10の反映記録
+
+先行する[配備run 42741140880](https://github.com/Hosi121/rangle/actions/runs/42741140880)の成功を待ち、最新の`rangle-stg-00083-s8d=100%`を再読取しました。保存planは公開appのscaling/templateだけを更新し、image・args・trafficと他のmanaged resourceは差分なし。service max2は適用時点で通常配信へ効きます。
+
+新revision `rangle-stg-00084-jlr` を0%の候補tag経由で検証後、02:21 UTCに100%へ昇格しました。候補/公開のLB health・landing・demo bootstrap・clip/live API、応答revisionとcatalog SHAを照合し成功。候補tagを削除し、private managerのspec/traffic不変も再確認しました。
+
+| 不変の配信identity | 値 |
+| --- | --- |
+| image | `asia-northeast1-docker.pkg.dev/comin-up/rangle-stg/server@sha256:d65e0b49738aa406a6d83f611e9efcd05a3697c2132460e325ca84e47a5c34c6` |
+| catalog SHA256 | `0230fabe7588b5984db8efd051dcb68f6b9b511ff540339c0e0ad934b1f3f339` |
+| 通常traffic | `rangle-stg-00084-jlr=100%`、旧正常revisionは`rangle-stg-00083-s8d` |
+
+実quotaはService Usage APIのTokyo effectiveLimitを読取済み。他service使用分・必要容量との差、cold start/2台へのscale応答、SLO・実費の比較は未検証で、#24を継続します。mock31run・guard25件・security regex2件が成功。runtime rollout receiptをローカルに保存し、CIのimage release receiptとは区別しました。
+
+rollbackはまず旧正常revisionへtrafficを戻します。**traffic復帰だけではservice max2は戻りません**。max1/concurrency40へ設定も戻す場合は、旧revisionへの配信を維持し、別のIaC planでservice上限とtemplateを明示的に復帰します。
 
 ## private GCS と公開工程
 
