@@ -29,6 +29,35 @@ class _Source implements ThumbnailSource {
 
 void main() {
   testWidgets(
+    'idle decoding is released even without pointer exit while its JPEG remains visible',
+    (tester) async {
+      final sources = <_Source>[];
+      final preview = ThumbnailPreview(() {
+        final source = _Source();
+        sources.add(source);
+        return source;
+      });
+      preview.preview(const Duration(seconds: 1));
+      await tester.pump(const Duration(milliseconds: 80));
+      await tester.pump(const Duration(milliseconds: 999));
+      expect(sources.single.disposeCount, 0);
+      expect(preview.image, [10]);
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(sources.single.disposeCount, 1);
+      expect(preview.image, [10]);
+      preview.preview(const Duration(seconds: 1));
+      expect(sources.length, 1);
+      expect(preview.image, [10]);
+      preview.preview(const Duration(seconds: 2));
+      await tester.pump(const Duration(milliseconds: 80));
+      expect(sources.length, 2);
+      expect(preview.image, [20]);
+      preview.dispose();
+      expect(sources.map((source) => source.disposeCount), [1, 1]);
+    },
+  );
+
+  testWidgets(
     'hide releases media while cached images remain reusable without a source',
     (tester) async {
       final sources = <_Source>[];

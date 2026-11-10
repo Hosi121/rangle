@@ -13,6 +13,7 @@ class ThumbnailPreview extends ChangeNotifier {
   final _cache = <int, Uint8List?>{};
   ThumbnailSource? _source;
   Timer? _throttle;
+  Timer? _idleRelease;
   int? _requested;
   int? _pending;
   bool _busy = false;
@@ -25,12 +26,15 @@ class ThumbnailPreview extends ChangeNotifier {
     if (_disposed) return;
     final key = position.inMilliseconds;
     if (_requested == key) return;
+    _idleRelease?.cancel();
+    _idleRelease = null;
     _requested = key;
     image = null;
     if (_cache.containsKey(key)) {
       _pending = null;
       image = _cache.remove(key);
       _cache[key] = image;
+      _scheduleIdleRelease();
     } else {
       _pending = key;
       if (_readyToDecode) {
@@ -42,13 +46,27 @@ class ThumbnailPreview extends ChangeNotifier {
     notifyListeners();
   }
 
-  void hide() {
-    // Keep the small JPEG cache, but stop the dedicated media fetch/decoder.
-    // A later uncached hover starts a fresh source without waiting on old work.
+  void _releaseSource() {
+    _idleRelease?.cancel();
+    _idleRelease = null;
     _generation++;
     _source?.dispose();
     _source = null;
     _busy = false;
+  }
+
+  void _scheduleIdleRelease() {
+    _idleRelease?.cancel();
+    if (_disposed || _source == null || _busy || _pending != null) return;
+    // Crossing an iframe can swallow Flutter's pointer-exit notification.
+    // Bound decoder retention independently, without hiding the cached image.
+    _idleRelease = Timer(const Duration(seconds: 1), _releaseSource);
+  }
+
+  void hide() {
+    // Keep the small JPEG cache, but stop the dedicated media fetch/decoder.
+    // A later uncached hover starts a fresh source without waiting on old work.
+    _releaseSource();
     _requested = null;
     _pending = null;
     _throttle?.cancel();
@@ -68,7 +86,7 @@ class ThumbnailPreview extends ChangeNotifier {
   }
 
   Future<void> _drain() async {
-    if (_busy || _disposed) return;
+    if (_busy || _disposed || _pending == null) return;
     _busy = true;
     final generation = _generation;
     try {
@@ -94,7 +112,10 @@ class ThumbnailPreview extends ChangeNotifier {
         }
       }
     } finally {
-      if (generation == _generation) _busy = false;
+      if (generation == _generation) {
+        _busy = false;
+        _scheduleIdleRelease();
+      }
     }
   }
 
