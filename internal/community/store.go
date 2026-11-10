@@ -14,6 +14,8 @@ var (
 	ErrForbidden = errors.New("forbidden")
 )
 
+// User is a personal viewing identity. Admin is a platform operator privilege,
+// not a publisher account or organization membership.
 type User struct {
 	ID    string `json:"id" firestore:"id"`
 	Name  string `json:"name" firestore:"name"`

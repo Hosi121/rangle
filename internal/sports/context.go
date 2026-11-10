@@ -10,17 +10,13 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Hosi121/rangle/internal/publisher"
 )
 
 type Entity struct {
 	ID   string `json:"id" firestore:"id"`
 	Name string `json:"name" firestore:"name"`
-}
-
-type Organization struct {
-	ID   string `json:"id" firestore:"id"`
-	Name string `json:"name" firestore:"name"`
-	Kind string `json:"kind" firestore:"kind"` // company or organization
 }
 
 type Venue struct {
@@ -43,9 +39,9 @@ type Event struct {
 // Teams describe the event; athletes do not assume a permanent affiliation.
 // Unknown provenance must remain absent instead of becoming invented metadata.
 type Context struct {
-	Publisher *Organization `json:"publisher,omitempty" firestore:"publisher,omitempty"`
-	Event     *Event        `json:"event,omitempty" firestore:"event,omitempty"`
-	Athletes  []Entity      `json:"athletes,omitempty" firestore:"athletes,omitempty"`
+	Publisher *publisher.Account `json:"publisher,omitempty" firestore:"publisher,omitempty"`
+	Event     *Event             `json:"event,omitempty" firestore:"event,omitempty"`
+	Athletes  []Entity           `json:"athletes,omitempty" firestore:"athletes,omitempty"`
 }
 
 var identifier = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
@@ -78,8 +74,8 @@ func (c *Context) Validate() error {
 		return fmt.Errorf("empty sports context")
 	}
 	if p := c.Publisher; p != nil {
-		if !entity(Entity{p.ID, p.Name}) || (p.Kind != "company" && p.Kind != "organization") {
-			return fmt.Errorf("invalid publisher organization")
+		if err := p.Validate(); err != nil {
+			return err
 		}
 	}
 	if e := c.Event; e != nil {
@@ -126,7 +122,7 @@ func ValidateCollection(contexts []*Context) error {
 			continue
 		}
 		if p := c.Publisher; p != nil {
-			if err := add("publisher", p.ID, p); err != nil {
+			if err := add("publisher", string(p.ID), p); err != nil {
 				return err
 			}
 		}

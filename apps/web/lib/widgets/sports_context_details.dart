@@ -29,7 +29,7 @@ class SportsContextDetails extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (this.context.publisher case final publisher?)
-          row('投稿者', publisher.entity.name),
+          row('投稿者', publisher.name),
         if (event != null) ...[
           row(switch (event.kind) {
             'match' => '試合',

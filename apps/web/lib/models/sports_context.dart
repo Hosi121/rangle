@@ -1,3 +1,5 @@
+import 'publisher_account.dart';
+
 /// Reviewed publication metadata; it never grants publishing privileges.
 class SportsEntity {
   const SportsEntity(this.id, this.name);
@@ -13,19 +15,6 @@ class SportsEntity {
       throw const FormatException('Invalid sporting entity.');
     }
     return SportsEntity(id, name);
-  }
-}
-
-class Publisher {
-  const Publisher(this.entity, this.kind);
-  final SportsEntity entity;
-  final String kind;
-  factory Publisher.fromJson(Map<String, dynamic> data) {
-    final kind = data['kind'];
-    if (kind != 'company' && kind != 'organization') {
-      throw const FormatException('Invalid publisher kind.');
-    }
-    return Publisher(SportsEntity.fromJson(data), kind as String);
   }
 }
 
@@ -84,7 +73,7 @@ class SportsEvent {
 
 class SportsContext {
   const SportsContext({this.publisher, this.event, this.athletes = const []});
-  final Publisher? publisher;
+  final PublisherAccount? publisher;
   final SportsEvent? event;
   final List<SportsEntity> athletes;
   factory SportsContext.fromJson(Map<String, dynamic> data) {
@@ -95,7 +84,9 @@ class SportsContext {
       throw const FormatException('Empty sporting context.');
     }
     return SportsContext(
-      publisher: publisher == null ? null : Publisher.fromJson(publisher),
+      publisher: publisher == null
+          ? null
+          : PublisherAccount.fromJson(publisher),
       event: event == null ? null : SportsEvent.fromJson(event),
       athletes: athletes,
     );

@@ -5,6 +5,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/Hosi121/rangle/internal/publisher"
 )
 
 func fixture(t *testing.T) *Context {
@@ -54,7 +56,7 @@ func TestInvalidContextDoesNotInventDefaults(t *testing.T) {
 			}
 		})
 	}
-	if (&Context{Publisher: &Organization{ID: "org", Name: "団体", Kind: "organization"}}).Validate() != nil {
+	if (&Context{Publisher: &publisher.Account{ID: "org", Name: "団体", Kind: "organization"}}).Validate() != nil {
 		t.Fatal("partial known metadata rejected")
 	}
 }

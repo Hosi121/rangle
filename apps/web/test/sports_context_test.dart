@@ -38,7 +38,7 @@ void main() {
       client: client,
     ).load();
     final context = clips.single.context!;
-    expect(context.publisher!.entity.id, 'example-sports');
+    expect(context.publisher!.id, 'example-sports');
     expect(context.event!.venue!.name, '例示体育館');
     expect(context.athletes.single.id, 'sample-player');
     expect(context.event!.startsAt!.toUtc(), DateTime.utc(2026, 11, 14, 6));

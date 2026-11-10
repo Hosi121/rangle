@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Hosi121/rangle/internal/publisher"
 	"github.com/Hosi121/rangle/internal/sports"
 )
 
@@ -71,7 +72,7 @@ func TestVertexResourceNamesStayInTheConfiguredProjectAndRegion(t *testing.T) {
 
 func TestPublicationKeepsReviewedSportsContext(t *testing.T) {
 	cfg := testConfig()
-	cfg.Presets[0].Context = &sports.Context{Publisher: &sports.Organization{ID: "example", Name: "Example Sports", Kind: "company"}, Event: &sports.Event{ID: "sample", Name: "Training", Kind: "training"}}
+	cfg.Presets[0].Context = &sports.Context{Publisher: &publisher.Account{ID: "example", Name: "Example Sports", Kind: "company"}, Event: &sports.Event{ID: "sample", Name: "Training", Kind: "training"}}
 	if err := cfg.Validate(); err != nil {
 		t.Fatal(err)
 	}
