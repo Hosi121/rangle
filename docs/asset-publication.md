@@ -82,7 +82,7 @@ Withdrawal omits the clip from a verified/promoted catalog; known media URLs and
 
 Rollback uses archived exact previous bytes/hash with a fresh availability check or recorded pinned-previous trust decision. Retain prior assets for the agreed period. The verifier rejects revisions changed against its previous input; historical global key uniqueness and create-only enforcement remain the uploader's responsibility.
 
-This gate addresses part of [#22](https://github.com/Hosi121/rangle/issues/22)/[#25](https://github.com/Hosi121/rangle/issues/25). Production image scans, unrelated bucket enumeration, all `/demo` dependencies, and enforced adoption across release paths remain outside it. Offline success alone does not close those issues.
+The asset → manifest → catalog workflow is tracked by completed [#25](https://github.com/Hosi121/rangle/issues/25). Remaining provenance and allowlist coverage across all assets and release paths is tracked by [#22](https://github.com/Hosi121/rangle/issues/22). Production image scans, unrelated bucket enumeration, all `/demo` dependencies, and enforced adoption across release paths remain outside this gate. Offline success alone does not establish that broader coverage.
 
 ## Finite GCS provider adapter
 
