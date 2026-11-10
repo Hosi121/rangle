@@ -43,8 +43,8 @@ run "configured_app_keeps_its_runtime_and_rollout_contract" {
     }
   }
   assert {
-    condition     = google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1 && google_cloud_run_v2_service.app[0].template[0].containers[0].resources[0].limits == tomap({ cpu = "1", memory = "512Mi" }) && google_cloud_run_v2_service.app[0].ingress == "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" && google_compute_backend_service.app[0].log_config[0].sample_rate == 0.1
-    error_message = "Logging must not increase app capacity, open direct ingress or change existing sampling."
+    condition     = google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 2 && google_cloud_run_v2_service.app[0].template[0].containers[0].resources[0].limits == tomap({ cpu = "1", memory = "512Mi" }) && google_cloud_run_v2_service.app[0].ingress == "INGRESS_TRAFFIC_INTERNAL_LOAD_BALANCER" && google_compute_backend_service.app[0].log_config[0].sample_rate == 0.1
+    error_message = "Logging must preserve the provisional app capacity, LB-only ingress and existing sampling."
   }
   assert {
     condition     = strcontains(google_logging_project_sink.app_logs.filter, "resource.labels.service_name=\"rangle-stg\"") && !strcontains(google_logging_project_sink.app_logs.filter, "\"rangle-stg-generation\"") && one([for widget in jsondecode(google_monitoring_dashboard.app_logs.dashboard_json).gridLayout.widgets : widget.logsPanel.filter if widget.title == "Cloud Run UI/API"]) == "resource.type=\"cloud_run_revision\" AND resource.labels.project_id=\"rangle-example\" AND resource.labels.location=\"asia-northeast1\" AND resource.labels.service_name=\"rangle-stg\""

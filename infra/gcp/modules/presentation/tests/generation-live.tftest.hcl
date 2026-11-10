@@ -53,8 +53,8 @@ run "enabled_live_identity_has_only_scoped_deadline_grants" {
     error_message = "GCS replacement permission must be confined to mutable session indexes and the single private live index."
   }
   assert {
-    condition     = google_storage_bucket_iam_member.trainer_output[0].role == "roles/storage.objectCreator" && google_storage_bucket_iam_member.trainer_output[0].condition[0].expression == "resource.name.startsWith('projects/_/buckets/rangle-stg-123456789012-media/objects/generated/') && request.time < timestamp('2026-11-14T15:00:00Z')" && google_project_iam_custom_role.generation_guard[0].permissions == toset(["aiplatform.customJobs.list", "aiplatform.customJobs.cancel"]) && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 1
-    error_message = "Live identity provisioning must not broaden offline training, cancellation permissions or application capacity."
+    condition     = google_storage_bucket_iam_member.trainer_output[0].role == "roles/storage.objectCreator" && google_storage_bucket_iam_member.trainer_output[0].condition[0].expression == "resource.name.startsWith('projects/_/buckets/rangle-stg-123456789012-media/objects/generated/') && request.time < timestamp('2026-11-14T15:00:00Z')" && google_project_iam_custom_role.generation_guard[0].permissions == toset(["aiplatform.customJobs.list", "aiplatform.customJobs.cancel"]) && google_cloud_run_v2_service.app[0].scaling[0].max_instance_count == 2
+    error_message = "Live identity provisioning must preserve offline training, cancellation permissions and the provisional bounded app capacity."
   }
   assert {
     condition     = output.deployment.generation.live.input_prefix == "gs://rangle-stg-123456789012-inputs/datasets/live/" && output.deployment.generation.live.output_prefix == "gs://rangle-stg-123456789012-media/live/" && output.deployment.generation.live.catalog_index == "gs://rangle-stg-123456789012-catalog/live/index.json"

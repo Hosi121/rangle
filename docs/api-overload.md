@@ -1,6 +1,6 @@
 # API過負荷時の動作
 
-API入口の共有gateは同時8要求・queue 0。満杯ならbody解析・handler・認証store・生成admissionの前に503を返す。追加goroutine・IP別map・設定flagは持たない。8枠は発表用1 CPU / 512 MiBの保守的な初期値で、実測容量・Cloud Run concurrency 40・10万人への適合値ではない。[Issue #24](https://github.com/Hosi121/rangle/issues/24)の部分対応。
+API入口の共有gateは同時8要求・queue 0。満杯ならbody解析・handler・認証store・生成admissionの前に503を返す。追加goroutine・IP別map・設定flagは持たない。8枠は発表用1 CPU / 512 MiBの保守的な初期値で、実測容量・10万人への適合値ではない。公開Runの暫定concurrency8と同じ値だが、platform枠はUI/healthも共有する。[Issue #24](https://github.com/Hosi121/rangle/issues/24)の部分対応。
 
 ## 対象と応答
 
@@ -36,7 +36,7 @@ community handlerの `GET` / `HEAD /api/v1/clips/{clip}/{engagement,comments,che
 | 超過 | 待機・sleepなし。429、`Retry-After: 1`、`Cache-Control: no-store`、`{"error":"rate_limited"}`。HEADはbodyなし |
 | 対象外 | auth・書込・health。既存制限を維持 |
 
-通過後のデータ・鮮度・認証・書込は変えず、cacheを追加しない。cheersはhandler内の登録に適用し、新規経路公開は含まない。10要求/秒・burst20はmax 1の発表構成用の固定初期値で、測定容量ではない。
+通過後のデータ・鮮度・認証・書込は変えず、cacheを追加しない。cheersはhandler内の登録に適用し、新規経路公開は含まない。10要求/秒・burst20はinstanceごとの固定初期値で、測定容量ではない。公開Runの暫定max2では通常配信全体で20要求/秒・burst40相当になり得る。
 
 枠はinstanceごとで再起動によりburstが戻り、別revision/instanceとは共有しない。枠の独占で正規利用者も429になる。1要求の複数document/aggregation課金、Cloud Run要求・media egress、他API、入口DoSを制限せず、課金read数・金額のhard capではない。per-client制限・WAFの代わりにもならない。
 
@@ -50,7 +50,7 @@ gateは別goroutine・timeoutを追加しない。既存contextはcommunity/gene
 
 ## 守る範囲と未達
 
-[Cloud Run](../infra/gcp/modules/presentation/resources.tf)はmin0/max1・concurrency40・1 CPU/512 MiB・timeout30秒を維持。総$300・11月14日までのguard、生成GPU同時1件・attempt10も維持する。HTTP8枠とdurable GPU1枠は別管理。health/static用のCloud Run concurrency/TCP枠を予約せず、CDN/GCS直接配信にも関与しない。複数processでは分散quotaにならない。
+[Cloud Run](../infra/gcp/modules/presentation/resources.tf)の暫定IaCは公開appのservice/revisionともmin0/max2・concurrency8・1 CPU/512 MiB・timeout30秒。変更前の実設定はservice max1・revision max5・concurrency40で、適用/検証は[配備手順](stg-deployment.md#公開appの暫定autoscale24)で扱う。総USD300・2026-11-14T15:00:00Zまでのguard・JPY spend cap、private生成managerのmax1、生成GPU同時1件・attempt10は維持する。HTTP8枠とdurable GPU1枠は別管理。health/static用のCloud Run concurrency/TCP枠を予約せず、CDN/GCS直接配信にも関与しない。複数processでは分散quotaにならない。
 
 局所HTTPテストは503/HEAD/header、依存未到達、cancel/panic解放、cancelを無視する処理の上限を確認する。実applicationではhealth/UI/manifest/Range、復帰後のfeed bytes・ETag/304・CSRF・body制限を確認する。
 
@@ -59,4 +59,4 @@ go test -race ./...
 go vet ./...
 ```
 
-大規模負荷・単instance容量・水平分散・cold start・region quotaの実割当/他サービス消費・SLO・費用に基づく容量受入は未検証（#24と依存#20/#23）。cloud設定・増設・quota・課金・merge/deployはこの変更に含まない。
+大規模負荷・単instance容量・水平分散・cold start・region quotaの実割当/他サービス消費・SLO・費用に基づく容量受入は未検証（#24と依存#20/#23）。autoscaleの設定変更は容量受入の達成を意味しない。platformの上限到達時の待機/429とアプリgateの即時503を区別し、#24は継続する。
