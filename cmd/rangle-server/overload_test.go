@@ -92,7 +92,7 @@ func TestApplicationOverloadSharesAPICapacityAndPreservesHealthAndMedia(t *testi
 	}
 	for _, target := range []string{
 		"/api/v1/auth/me", "/api/v1/clips", "/api/v1/clips/demo",
-		"/api/v1/clips/demo/engagement", "/api/v1/clips/demo/comments",
+		"/api/v1/clips/demo/engagement", "/api/v1/clips/demo/cheers", "/api/v1/clips/demo/comments",
 		"/api/v1/generation/presets", "/api/v1/generation/jobs", generation.SyncPath,
 	} {
 		response, body := fetch(t, server.URL+target, nil)
