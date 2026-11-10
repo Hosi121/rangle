@@ -51,7 +51,7 @@ CPUでraw gzip/shuffle/word-XOR/zstd/Brotliの10候補を比較。word-XORは増
 
 Windows Edge / NVIDIA、同カメラ・960×803・DPR1・基準高さ803、2モデル×frame 0/10/19の6組でRGBA全画素・PNG SHAが一致。各session取得1回、再生/loop/orbit/seekの追加取得0、JS/console/HTTP/GLエラー0、離脱後Worker0。
 
-別contextのmain threadで旧gzipのみの復号関数を暖機1回＋5回測定：候補中央値80.5ms/観測p95 89.5ms、基準76.2ms/78.6ms。全6回で復号SHA一致。p95は5標本最大値で母集団保証ではない。HTTP/parse/GPU/初期表示や本番Workerは含まない。これは後続の2-pass境界検証の測定ではなく、その負荷は[gzip契約の局所比較](rgs-gzip-contract.md#同じ実資産での局所比較)を参照する。このEdgeはnative gzip対応、brotli非対応。0.8秒約11.2MBは依然大きく、長尺容量やスマートフォン持続性能は未検証。
+別contextのmain threadで旧gzipのみの復号関数を暖機1回＋5回測定：候補中央値80.5ms/観測p95 89.5ms、基準76.2ms/78.6ms。全6回で復号SHA一致。p95は5標本最大値で母集団保証ではない。HTTP/parse/GPU/初期表示や本番Workerは含まない。これは後続の2-pass境界検証の測定ではなく、その負荷は[gzip契約の検証と負荷](rgs-gzip-contract.md#検証と負荷)を参照する。このEdgeはnative gzip対応、brotli非対応。0.8秒約11.2MBは依然大きく、長尺容量やスマートフォン持続性能は未検証。
 
 ## 量子化・間引きの比較のみ行った範囲
 
