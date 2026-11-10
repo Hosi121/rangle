@@ -18,7 +18,8 @@ resource "google_compute_backend_bucket" "media" {
     cache_key_policy {
       # Only these parameters fragment the key. The publisher must not use
       # query strings for authorization, revisions, or content selection.
-      # Cloud CDN handles the origin's Vary: Origin; Origin is forbidden here.
+      # Public media uses one wildcard CORS policy for every Origin. Origin
+      # cannot be configured as a backend-bucket cache-key request header.
       query_string_whitelist = ["generation"]
     }
   }
@@ -96,6 +97,20 @@ resource "google_compute_url_map" "https" {
   path_matcher {
     name            = "media"
     default_service = google_compute_backend_bucket.media.id
+    # CDN-generated 304 responses also need CORS headers. Replace the origin's
+    # values so cached and uncached responses expose one consistent public policy.
+    header_action {
+      response_headers_to_add {
+        header_name  = "Access-Control-Allow-Origin"
+        header_value = "*"
+        replace      = true
+      }
+      response_headers_to_add {
+        header_name  = "Access-Control-Expose-Headers"
+        header_value = "Accept-Ranges, Cache-Control, Content-Length, Content-Range, Content-Type, ETag, Last-Modified"
+        replace      = true
+      }
+    }
     dynamic "path_rule" {
       for_each = var.live_streaming_enabled ? [1] : []
       content {

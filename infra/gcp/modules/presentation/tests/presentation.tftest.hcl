@@ -23,6 +23,12 @@ run "domain_pending_private_foundation" {
     error_message = "Anonymous public media must retain CDN/CORS without payload transformation or stale missing-object cache."
   }
   assert {
+    condition = google_storage_bucket.private["media"].cors[0].method == tolist(["GET", "HEAD"]) && alltrue([
+      for header in ["If-None-Match", "Range", "ETag", "Content-Range", "Content-Length"] : contains(google_storage_bucket.private["media"].cors[0].response_header, header)
+    ]) && length(google_storage_bucket.private["catalog"].cors) == 0 && length(google_storage_bucket.private["inputs"].cors) == 0
+    error_message = "Only public media may allow browser conditional/range requests; private inputs and catalogs must not inherit CORS."
+  }
+  assert {
     condition     = google_pubsub_topic_iam_member.billing_publisher.member == "serviceAccount:billing-budget-alert@system.gserviceaccount.com" && length(google_artifact_registry_repository_iam_member.image_writer.condition) == 0 && length(google_artifact_registry_repository.images) == 0
     error_message = "Keep the live-verified Billing publisher and existing scoped Artifact Registry policy."
   }
@@ -44,6 +50,13 @@ run "configured_domain_media_and_budget" {
   assert {
     condition     = !google_compute_url_map.https[0].default_url_redirect[0].https_redirect && google_compute_url_map.http_redirect[0].default_url_redirect[0].https_redirect && google_compute_ssl_policy.edge[0].min_tls_version == "TLS_1_2"
     error_message = "HTTPS must retain its scheme; only HTTP redirects to HTTPS with TLS 1.2 minimum."
+  }
+  assert {
+    condition = { for header in one([for matcher in google_compute_url_map.https[0].path_matcher : matcher if matcher.name == "media"]).header_action[0].response_headers_to_add : header.header_name => { value = header.header_value, replace = header.replace } } == {
+      Access-Control-Allow-Origin   = { value = "*", replace = true }
+      Access-Control-Expose-Headers = { value = "Accept-Ranges, Cache-Control, Content-Length, Content-Range, Content-Type, ETag, Last-Modified", replace = true }
+    }
+    error_message = "CDN-generated responses need one public CORS policy with the headers used by browser and Worker readers."
   }
   assert {
     condition     = google_billing_budget.presentation[0].budget_filter[0].projects == toset(["projects/123456789012"]) && google_billing_budget.presentation[0].amount[0].specified_amount[0].currency_code == "JPY"
@@ -78,6 +91,10 @@ run "configured_domain_bounded_app" {
   assert {
     condition     = one([for matcher in google_compute_url_map.https[0].path_matcher : matcher if matcher.name == "app"]).route_rules[0].match_rules[0].header_matches[0].header_name == "X-Rangle-Candidate" && one([for matcher in google_compute_url_map.https[0].path_matcher : matcher if matcher.name == "app"]).route_rules[0].match_rules[0].header_matches[0].exact_match == "ci-candidate"
     error_message = "Candidate probes must use the app host and the explicit routing selector."
+  }
+  assert {
+    condition     = length(one([for matcher in google_compute_url_map.https[0].path_matcher : matcher if matcher.name == "app"]).header_action) == 0
+    error_message = "The public media CORS override must not affect app, authenticated API, or candidate responses."
   }
   assert {
     condition     = strcontains(google_service_account_iam_member.github_deployer.condition[0].expression, "2026-11-14T15:00:00Z") && strcontains(google_iam_workload_identity_pool_provider.github.attribute_condition, "assertion.repository_id == '1448803636'") && strcontains(google_project_iam_member.stop_forwarding_rules.condition[0].expression, "global/forwardingRules/rangle-stg-https")

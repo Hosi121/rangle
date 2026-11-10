@@ -60,6 +60,10 @@ run "live_uses_existing_private_index_without_changing_capacity" {
     error_message = "The mutable index path must select the one-second backend; immutable live payloads retain the day-long media default."
   }
   assert {
+    condition     = one([for header in one([for matcher in google_compute_url_map.https[0].path_matcher : matcher if matcher.name == "media"]).header_action[0].response_headers_to_add : header.header_value == "*" && header.replace if header.header_name == "Access-Control-Allow-Origin"])
+    error_message = "The shared media matcher must also add CORS to conditional live-index and immutable live responses."
+  }
+  assert {
     condition = { for test in google_compute_url_map.https[0].test : test.path => test.service if test.host == "media.presentation.example.com" && length(test.headers) == 0 } == {
       "/live-index/example.json"                         = google_compute_backend_bucket.live_index[0].id
       "/live/example/000001-aaaaaaaaaaaaaaaa/scene.json" = google_compute_backend_bucket.media.id
