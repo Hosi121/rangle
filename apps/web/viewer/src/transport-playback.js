@@ -167,7 +167,7 @@ export class TransportPlayback {
       if (typeof playing === 'boolean') this.clock.playing = playing;
       this.position = frame / this.frameRate; this.lastFrame = frame;
       if (!automatic || changing) {
-        this.notify({ type: 'playback', positionSeconds: this.position, playing: this.clock.playing, playIntent: this.clock.playing });
+        this.notifyPlayback();
         this.ready(frame, presentationId);
       }
     } catch (error) {
@@ -176,13 +176,23 @@ export class TransportPlayback {
       if (epoch === this.epoch) { this.switching = false; if (holdClock) this.clock.suspend(this.paused); this.prefetch(); }
     }
   }
+  notifyPlayback() {
+    const positionSeconds = this.position, playing = this.clock.playing, playIntent = this.clock.playing;
+    const previous = this.lastPlayback;
+    if (previous && previous.positionSeconds === positionSeconds &&
+        previous.playing === playing && previous.playIntent === playIntent) return;
+    // Exact bridge-state equality only: do not round positions, throttle time,
+    // or suppress loading/ready acknowledgements for explicit presentations.
+    this.lastPlayback = { positionSeconds, playing, playIntent };
+    this.notify({ type: 'playback', ...this.lastPlayback });
+  }
   schedule() {
     if (this.disposed) return;
     this.raf = this.requestFrame(() => {
       if (!this.paused && !this.switching) {
         const position = this.clock.value(), frame = Math.floor(position * this.frameRate + 1e-7);
         if (frame !== this.lastFrame) void this.show(frame, undefined, undefined, true);
-        this.notify({ type: 'playback', positionSeconds: this.position, playing: this.clock.playing, playIntent: this.clock.playing });
+        this.notifyPlayback();
         if (this.clock.playing) this.prefetch();
       }
       this.schedule();

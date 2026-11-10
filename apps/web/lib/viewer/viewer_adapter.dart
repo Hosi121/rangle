@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
@@ -23,6 +25,8 @@ class ViewerValue {
     this.prepared = false,
     this.timeline,
     this.playIntent,
+    this.aspectRatio = 1,
+    this.rotationCorrection = 0,
   });
 
   final ViewerStatus status;
@@ -36,10 +40,64 @@ class ViewerValue {
   final bool prepared;
   final ViewerTimeline? timeline;
   final bool? playIntent;
+  final double aspectRatio;
+  final int rotationCorrection;
+
+  /// State used by the surface and buttons. The playhead has its own listener.
+  Object get presentation => (
+    status,
+    duration,
+    playing,
+    canPlay,
+    muted,
+    buffering,
+    source,
+    prepared,
+    timeline,
+    playIntent,
+    aspectRatio,
+    rotationCorrection,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is ViewerValue &&
+      status == other.status &&
+      position == other.position &&
+      duration == other.duration &&
+      playing == other.playing &&
+      canPlay == other.canPlay &&
+      muted == other.muted &&
+      buffering == other.buffering &&
+      source == other.source &&
+      prepared == other.prepared &&
+      timeline == other.timeline &&
+      playIntent == other.playIntent &&
+      aspectRatio == other.aspectRatio &&
+      rotationCorrection == other.rotationCorrection;
+
+  @override
+  int get hashCode => Object.hash(
+    status,
+    position,
+    duration,
+    playing,
+    canPlay,
+    muted,
+    buffering,
+    source,
+    prepared,
+    timeline,
+    playIntent,
+    aspectRatio,
+    rotationCorrection,
+  );
 }
 
 /// Shared lifecycle and time controls for ordinary video and free-view scenes.
-abstract class ViewerAdapter extends ChangeNotifier {
+abstract class ViewerAdapter extends ChangeNotifier
+    implements ValueListenable<ViewerValue> {
+  @override
   ViewerValue get value;
   Future<void> initialize();
   Future<void> togglePlayback();
@@ -97,6 +155,7 @@ class VideoPreviewAdapter extends ViewerAdapter {
   bool _initializing = true;
   bool _playIntent = false;
 
+  @override
   @override
   ViewerValue get value => _value;
 
@@ -193,7 +252,7 @@ class VideoPreviewAdapter extends ViewerAdapter {
       return;
     }
     if (media.position > Duration.zero) _autoplayPending = false;
-    _value = ViewerValue(
+    final next = ViewerValue(
       status: media.isInitialized && !_initializing && _restoration == null
           ? ViewerStatus.ready
           : ViewerStatus.loading,
@@ -203,7 +262,11 @@ class VideoPreviewAdapter extends ViewerAdapter {
       muted: media.volume == 0,
       buffering: media.isBuffering,
       playIntent: _playIntent,
+      aspectRatio: media.aspectRatio,
+      rotationCorrection: media.rotationCorrection,
     );
+    if (next == _value) return;
+    _value = next;
     notifyListeners();
   }
 

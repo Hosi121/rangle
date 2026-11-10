@@ -337,7 +337,7 @@ class _FreeViewAdapter extends ViewerAdapter {
           _requestedFrame = (position.inMicroseconds * _frameRate / 1000000)
               .round()
               .clamp(0, _frameCount - 1);
-          _value = ViewerValue(
+          final next = ViewerValue(
             status: _value.status,
             position: position,
             duration: _value.duration,
@@ -349,7 +349,10 @@ class _FreeViewAdapter extends ViewerAdapter {
             prepared: _prepared,
             timeline: _timeline,
           );
-          notifyListeners();
+          if (next != _value) {
+            _value = next;
+            notifyListeners();
+          }
         case 'error':
           _fail();
       }

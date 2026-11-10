@@ -16,6 +16,7 @@ import '../models/clip.dart';
 import '../sharing/share_clip.dart';
 import '../viewer/playback_controller.dart';
 import '../viewer/viewer_adapter.dart';
+import '../viewer/viewer_selection.dart';
 import 'cheer_seek_bar.dart';
 import 'feed_sheet.dart';
 import 'sports_context_details.dart';
@@ -52,6 +53,14 @@ class ClipCard extends StatefulWidget {
 
 class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
   final _video = PlaybackController(), _scene = PlaybackController();
+  late final _videoPresentation = ViewerSelection(
+    _video,
+    (v) => v.presentation,
+  );
+  late final _scenePresentation = ViewerSelection(
+    _scene,
+    (v) => v.presentation,
+  );
   late final AnimationController _charge = AnimationController(
     vsync: this,
     duration: const Duration(milliseconds: 1200),
@@ -546,6 +555,8 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
     _reveal.dispose();
     _fire.dispose();
     _scene.removeListener(_checkAlignment);
+    _videoPresentation.dispose();
+    _scenePresentation.dispose();
     _video.dispose();
     _scene.dispose();
     super.dispose();
@@ -560,8 +571,8 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
           _charge,
           _reveal,
           _fire,
-          _video,
-          _scene,
+          _videoPresentation,
+          _scenePresentation,
           _cheers,
         ]),
         builder: (context, _) {
@@ -708,23 +719,31 @@ class _ClipCardState extends State<ClipCard> with TickerProviderStateMixin {
                       ),
                     ),
                   ),
-                if (!_entering && current.duration > Duration.zero)
+                if (!_entering)
                   Positioned(
                     left: 16,
                     right: 16,
                     bottom: 52,
-                    child: CheerSeekBar(
-                      bins: _cheers.bins,
-                      position: current.position,
-                      duration: current.duration,
-                      intercepting: _freeView,
-                      thumbnailSource: clip.previewUrl,
-                      onTogglePlayback: ready && current.canPlay
-                          ? () => unawaited(_current.toggle())
-                          : null,
-                      onSeek: ready && !_entering
-                          ? (p) => unawaited(_current.seek(p))
-                          : null,
+                    child: ValueListenableBuilder<ViewerValue>(
+                      valueListenable: _current,
+                      builder: (context, value, _) =>
+                          value.duration > Duration.zero
+                          ? CheerSeekBar(
+                              bins: _cheers.bins,
+                              position: value.position,
+                              duration: value.duration,
+                              intercepting: _freeView,
+                              thumbnailSource: clip.previewUrl,
+                              onTogglePlayback:
+                                  value.status == ViewerStatus.ready &&
+                                      value.canPlay
+                                  ? () => unawaited(_current.toggle())
+                                  : null,
+                              onSeek: value.status == ViewerStatus.ready
+                                  ? (p) => unawaited(_current.seek(p))
+                                  : null,
+                            )
+                          : const SizedBox.shrink(),
                     ),
                   ),
                 if (!_entering)

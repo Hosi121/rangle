@@ -86,6 +86,76 @@ class ControlledVideoController extends VideoPlayerController {
 
 void main() {
   testWidgets(
+    'native geometry changes refresh the retained surface without a playback change',
+    (tester) async {
+      final controller = ControlledVideoController();
+      final adapter = VideoPreviewAdapter.withController(controller);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: PreviewViewer(
+            source: Uri.parse('https://example.invalid/preview.mp4'),
+            factory: (_) => adapter,
+            showControls: false,
+          ),
+        ),
+      );
+      controller.becomeReady();
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<AspectRatio>(find.byType(AspectRatio)).aspectRatio,
+        1,
+      );
+      controller.value = controller.value.copyWith(size: const Size(1600, 900));
+      await tester.pump();
+      expect(
+        tester.widget<AspectRatio>(find.byType(AspectRatio)).aspectRatio,
+        16 / 9,
+      );
+      expect(adapter.value.aspectRatio, 16 / 9);
+      var updates = 0;
+      adapter.addListener(() => updates++);
+      controller.value = controller.value.copyWith(rotationCorrection: 90);
+      await tester.pump();
+      expect(updates, 1);
+      expect(adapter.value.rotationCorrection, 90);
+      await tester.pumpWidget(const SizedBox());
+      controller.released.complete();
+      await tester.pump();
+    },
+  );
+  testWidgets(
+    'native events with unchanged viewer state do not notify, while time and control changes do',
+    (tester) async {
+      final controller = ControlledVideoController();
+      final adapter = VideoPreviewAdapter.withController(controller);
+      final initialized = adapter.initialize();
+      controller.becomeReady();
+      await tester.pump();
+      await initialized;
+      var updates = 0;
+      adapter.addListener(() => updates++);
+      for (var i = 0; i < 60; i++) {
+        controller.value = controller.value.copyWith(
+          isLooping: !controller.value.isLooping,
+        );
+      }
+      expect(updates, 0);
+      controller.value = controller.value.copyWith(
+        position: const Duration(milliseconds: 560),
+      );
+      expect(updates, 1);
+      controller.value = controller.value.copyWith(isBuffering: true);
+      expect(updates, 2);
+      controller.value = controller.value.copyWith(isPlaying: false);
+      expect(updates, 3);
+      controller.value = controller.value.copyWith(volume: 1);
+      expect(updates, 4);
+      adapter.dispose();
+      controller.released.complete();
+      await tester.pump();
+    },
+  );
+  testWidgets(
     'handoff captures native currentTime rather than the older periodic controller position',
     (tester) async {
       final controller = ControlledVideoController();
