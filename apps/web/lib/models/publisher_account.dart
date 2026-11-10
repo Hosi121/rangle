@@ -1,5 +1,5 @@
 /// Public identity of a company or organization. This is separate from the
-/// signed-in AccountUser and contains no credentials or membership privileges.
+/// signed-in AccountUser and contains no credentials or staff privileges.
 class PublisherAccount {
   const PublisherAccount({
     required this.id,
